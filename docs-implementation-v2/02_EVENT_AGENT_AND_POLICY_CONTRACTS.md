@@ -51,8 +51,10 @@ Agent 是同一 backend 裡具明確 contract 的工作單元，不代表獨立 
 
 - 輸入：Policy Gateway 核准的 action。
 - P0 工具：`dashboard_alert`。
-- P1 工具：`system_tts`。
+- 完整架構工具：`system_tts`、`telegram_notify`。
 - 禁止：未經核准擴大 action 或收件人。
+
+L3 只代表通知照護者，不代表自動緊急服務。Telegram Bot 是 L3 的實作 channel；L4 不存在於本版可執行 action enum。
 
 ## 3. Deterministic Policy Gateway
 
@@ -83,4 +85,3 @@ analysis:
 4. Transaction commit 後才發 WebSocket。
 5. Agent 分析可重試；使用 `event_id + agent_name + input_hash + version` 去重。
 6. Intervention 使用 `event_id + policy_version + action_type` 去重。
-

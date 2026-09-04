@@ -4,7 +4,7 @@
 
 ```text
 ┌──────────────────────── Header / system status ────────────────────────┐
-│ Video + replay controls        │ Current event / local VLM observation │
+│ Live/replay video + controls   │ Current event / local VLM observation │
 ├────────────────────────────────┼───────────────────────────────────────┤
 │ Health cards                   │ Hydration today                       │
 │ HR / SpO2 / steps / activity   │ count / estimated ml / target         │
@@ -15,12 +15,14 @@
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
+首次啟動或設定未完成時先進入 /setup；完成後才進入 Dashboard。後續可由 Settings 再次測試 integrations、下載／切換模型與修改時間窗。
+
 ## 2. 功能與邊界
 
 ### Video Panel
 
-- 顯示選定 replay 影片與目前時間。
-- 操作 load、play、pause、reset。
+- 顯示 Frigate live camera；可切換 replay 測試模式。
+- Replay 模式提供 load、play、pause、reset。
 - 疊加目前 observation label、confidence 及事件狀態。
 - 不在瀏覽器執行 canonical inference；顯示資料以 backend 結果為準。
 
@@ -43,6 +45,32 @@
 - 點擊事件可查看 evidence offsets、local result、cloud analysis 與狀態轉換。
 - 不顯示 API key、完整 prompt 或可能含敏感資料的 raw response。
 
+### Runtime 與 Agent Trace
+
+- 顯示 camera、Frigate、Apple detector、mic、VAD、Whisper、Qwen-VL、MiniMax、scheduler 與 DB 狀態。
+- 顯示 logical agent 的輸入摘要、tool call、耗時、結果與 Policy Gateway 決定。
+- Transcript 只顯示仍在 retention window 的內容；到期後同步移除。
+
+### Observer 後台
+
+- 顯示 7／30 日飲水、跌倒、健康與 coverage 趨勢。
+- 顯示 finding、支持資料、分析窗口、信心與狀態。
+- 支援手動重跑指定日期及 acknowledge／dismiss finding。
+
+### Telegram 通知狀態
+
+- 顯示 queued、sending、sent、acknowledged、false_alarm、failed。
+- 顯示 provider message ID、嘗試次數、最後錯誤與 acknowledgement 時間。
+- 前端不能修改 Telegram chat ID allowlist 或讀取 Bot token。
+
+### Setup 與 Settings
+
+- 顯示 prerequisites、磁碟、記憶體及各 integration health。
+- 選擇並下載 Qwen／Whisper model，顯示 bytes、速度、ETA、驗證與 activation 狀態。
+- 設定 Frigate、camera、MiniMax、Telegram 與風險時間窗。
+- Secret 欄位只能覆寫或清除；載入頁面時不得回填原值。
+- Model ID 與來源只能從 backend catalog 選擇，不提供任意 URL／path 輸入框。
+
 ## 3. Client State
 
 - Server state 以 REST cache + WebSocket invalidation 維護。
@@ -56,4 +84,3 @@
 - Alert 可由 Demo 操作者 acknowledge，但不可刪除原事件。
 - Backend degraded 時保留歷史查詢與 replay 控制，並清楚顯示失效元件。
 - 提供全螢幕模式，最低支援 1366×768 投影畫面。
-

@@ -6,6 +6,7 @@
 
 - FastAPI app、設定、SQLite migrations／repositories。
 - REST、WebSocket、replay source、Fake Health。
+- Frigate adapter、live source、VAD／Whisper pipeline、transcript retention。
 - Event state machine 與參數化 aggregation tools。
 - 不修改 frontend component 實作與 model adapter internals。
 
@@ -33,7 +34,7 @@
 - Qwen3-VL 8B 4-bit／4B 4-bit 使用同一小段影片 benchmark；8B 是主模型，4B 只作資源不足時的明示降級。
 - 決定 P0 local model，不再無限比較模型。
 
-### Gate 1：垂直 stub 閉環
+### Gate 1：垂直 stub 閉環（舞台版可先交付）
 
 ```text
 Replay → stub observation → event → SQLite → WebSocket → Dashboard
@@ -48,11 +49,19 @@ Gate 1 未完成前，不加入更多事件或視覺美化。
 - MiniMax 接健康／風險分析。
 - 保留 stub mode，舞台前可快速隔離問題。
 
+### Gate 2b：完整 live pipeline
+
+- 手機 RTSP → Frigate → backend event／media。
+- Mic → VAD → Whisper → transcript buffer。
+- Event Understanding → Health Context → Risk → Policy → Intervention。
+- Memory／State／Health／Speak／Notify／Frontend tools contract tests。
+
 ### Gate 3：穩定化
 
 - 重播正例／負例 dataset。
 - 測 timeout、invalid JSON、重送、WebSocket 重連、reset。
 - 固定 Demo 影片、模型 cache、啟動命令與簡報流程。
+- 以測試時鐘執行 daily aggregation 與 Long-term Observer。
 
 ## 3. 驗證矩陣
 
@@ -64,6 +73,10 @@ Gate 1 未完成前，不加入更多事件或視覺美化。
 | Realtime | commit 後廣播、重連 resync、run_id 隔離 |
 | Model contract | valid、invalid、timeout、low confidence、missing frame |
 | Replay E2E | 每支測試影片得到預期狀態序列，無重複 hydration count |
+| Live media | RTSP 斷線重連、Frigate event mapping、snapshot／clip 可取 |
+| Audio | VAD segmentation、Whisper transcript、TTL cleanup、資源競爭 |
+| Agent tools | schema、權限、idempotency、Policy Gateway 不可繞過 |
+| Observer | daily summary、時間窗邊界、無新資料時不重複呼叫 MiniMax |
 | Frontend | 1366×768、loading／empty／degraded／error 狀態、reset |
 | Secret | frontend build、Git diff、logs、SQLite 均無 API key |
 
@@ -82,7 +95,7 @@ Gate 1 未完成前，不加入更多事件或視覺美化。
 ## 5. 切線規則
 
 - 8B benchmark 在 M4 16GB 不穩或延遲超出 Demo 預算：明示切換 4B，並保留 benchmark 紀錄；不得在 UI 假稱仍使用 8B。
-- Frigate 未接好：使用 ReplaySource，不影響主 Demo。
+- Frigate 未接好：舞台可使用 ReplaySource，但完整書審驗收仍視為未完成。
 - 喝水量視覺估算不穩：保留 confirmed count，容量採設定值。
 - MiniMax video input 不穩：只送文字摘要／必要影格。
 - UI 時間不足：保留 video、health、hydration、analysis、timeline 五個核心區塊。

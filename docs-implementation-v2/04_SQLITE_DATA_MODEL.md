@@ -128,6 +128,96 @@ CREATE TABLE app_logs (
   message TEXT NOT NULL,
   context_json TEXT NOT NULL DEFAULT '{}'
 );
+
+CREATE TABLE transcripts (
+  id TEXT PRIMARY KEY,
+  subject_id TEXT NOT NULL,
+  event_id TEXT REFERENCES events(id),
+  started_at TEXT NOT NULL,
+  ended_at TEXT NOT NULL,
+  text TEXT,
+  language TEXT,
+  confidence REAL,
+  retention_until TEXT,
+  model_call_id TEXT REFERENCES model_calls(id),
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE memories (
+  id TEXT PRIMARY KEY,
+  subject_id TEXT NOT NULL,
+  memory_type TEXT NOT NULL,
+  content_json TEXT NOT NULL,
+  source_event_id TEXT REFERENCES events(id),
+  status TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE runtime_state (
+  key TEXT PRIMARY KEY,
+  value_json TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE tool_calls (
+  id TEXT PRIMARY KEY,
+  agent_name TEXT NOT NULL,
+  tool_name TEXT NOT NULL,
+  event_id TEXT REFERENCES events(id),
+  analysis_id TEXT REFERENCES analyses(id),
+  arguments_json TEXT NOT NULL,
+  result_json TEXT,
+  status TEXT NOT NULL,
+  latency_ms INTEGER,
+  idempotency_key TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE daily_summaries (
+  subject_id TEXT NOT NULL,
+  summary_date TEXT NOT NULL,
+  event_counts_json TEXT NOT NULL,
+  hydration_json TEXT NOT NULL,
+  health_json TEXT NOT NULL,
+  coverage_json TEXT NOT NULL,
+  config_version TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY(subject_id, summary_date, config_version)
+);
+
+CREATE TABLE observer_findings (
+  id TEXT PRIMARY KEY,
+  subject_id TEXT NOT NULL,
+  window_start TEXT NOT NULL,
+  window_end TEXT NOT NULL,
+  finding_type TEXT NOT NULL,
+  statement TEXT NOT NULL,
+  evidence_json TEXT NOT NULL,
+  confidence REAL NOT NULL,
+  status TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE notification_deliveries (
+  id TEXT PRIMARY KEY,
+  action_id TEXT NOT NULL REFERENCES actions(id),
+  channel TEXT NOT NULL CHECK(channel = 'telegram'),
+  recipient_ref TEXT NOT NULL,
+  provider_message_id TEXT,
+  status TEXT NOT NULL,
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  sent_at TEXT,
+  acknowledged_at TEXT,
+  acknowledged_by TEXT,
+  acknowledgement_type TEXT,
+  last_error_code TEXT,
+  idempotency_key TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 ```
 
 ## 3. 索引
@@ -143,6 +233,14 @@ CREATE INDEX idx_health_subject_metric_time
 CREATE INDEX idx_analyses_subject_window
   ON analyses(subject_id, window_end);
 CREATE INDEX idx_logs_time ON app_logs(ts);
+CREATE INDEX idx_transcripts_subject_time
+  ON transcripts(subject_id, started_at);
+CREATE INDEX idx_tool_calls_event_time
+  ON tool_calls(event_id, created_at);
+CREATE INDEX idx_findings_subject_window
+  ON observer_findings(subject_id, window_end);
+CREATE INDEX idx_notification_status_time
+  ON notification_deliveries(status, created_at);
 ```
 
 ## 4. AI 可用的唯讀查詢工具
@@ -156,4 +254,3 @@ MiniMax 不取得 SQL 字串工具，只能呼叫參數化函式：
 - `get_health_series_summary(subject_id, metrics, start, end)`
 
 `get_hydration_summary` 至少回傳 confirmed session count、estimated total ml、daily target、完成比例、最後飲水時間及資料 coverage。這使 AI 讀固定大小摘要，避免 token 隨事件數線性增加。
-
