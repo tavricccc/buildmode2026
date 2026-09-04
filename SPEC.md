@@ -6,7 +6,9 @@
 **版本** v0.1 · 2026-09-04
 ~~**唯一可用外部 API** MiniMax（無其他 LLM / VLM / ASR / TTS 供應商，設計上不得假設有 fallback）~~
 
-**模型執行策略（本次產品方向）**：本機 vLLM 是主要推論入口；模型透過統一的 `ModelRuntime` 使用。MiniMax 若保留，僅作為特定 VLM 任務的可選 provider，不是唯一高階大腦，也不直接取得通知、政策或任意 SQL 權限。
+~~**模型執行策略（舊產品方向）**：本機 vLLM 是主要推論入口；模型透過統一的 `ModelRuntime` 使用。MiniMax 若保留，僅作為特定 VLM 任務的可選 provider，不是唯一高階大腦，也不直接取得通知、政策或任意 SQL 權限。~~
+
+**v3 可執行模型邊界**：Mac mini M4 16GB 以 `mlx-vlm` 執行 `Qwen3-VL-8B-Instruct` 4-bit，4B 僅作實測後的明示 fallback；MiniMax-M3 只處理健康／風險摘要。所有模型都透過 adapter 與版本化 schema 接入，不能直接修改 policy 或發送通知。
 
 **最新版本優先規則**：目前可執行實作以 [docs-implementation-v3/README.md](docs-implementation-v3/README.md) 為準；其主模型是 Mac mini M4 上的 Qwen3-VL-8B 4-bit，MiniMax-M3 負責健康／風險摘要，Replay 與 RTSP 共用 source contract。~~本段原本的 vLLM 主要 provider 設定~~保留作替代 runtime 設計，不覆蓋 v3 的已定案邊界。
 
@@ -16,10 +18,16 @@
 
 ### 我們做什麼
 
-從長輩日常必然發生的行為（開冰箱、進出門、服藥）累積連續觀測，產出兩種輸出：
+~~從長輩日常必然發生的行為（開冰箱、進出門、服藥）累積連續觀測，產出兩種輸出：~~
 
-1. **急性事件的即時反應**（跌倒、長時間無活動）
-2. **週／月尺度的失能評估證據**，對接既有量表項目，交給照管專員
+~~1. **急性事件的即時反應**（跌倒、長時間無活動）~~
+~~2. **週／月尺度的失能評估證據**，對接既有量表項目，交給照管專員~~
+
+v3 首版改以單一場域的有限感知來源建立可驗證閉環：
+
+1. **全時但有界的視覺觀測**：RTSP／Replay → bounded frame buffer → 固定節拍 QwenVL。
+2. **結構化事件**：以 state machine 確認跌倒與喝水，保存證據、信心與模型版本。
+3. **照護摘要**：SQLite → Dashboard／WebSocket → MiniMax 健康／風險摘要 → Policy／Telegram L3。
 
 ### 我們不做什麼
 
@@ -30,7 +38,9 @@
 
 ### 成功判準
 
-Demo 能展示一份**自動填好的複評摘要**：每個欄位有趨勢曲線、有可回溯到日期的原始事件、有信心度。
+~~Demo 能展示一份**自動填好的複評摘要**：每個欄位有趨勢曲線、有可回溯到日期的原始事件、有信心度。~~
+
+v3 Demo 能在 Live RTSP 或 Replay 下完成兩次可重現的跌倒／喝水事件閉環；每筆事件可回查 observation、證據時間窗、SQLite 記錄、模型版本、Dashboard 更新與 MiniMax degraded 狀態。
 
 ### 0.1 新產品方向對齊
 

@@ -17,13 +17,15 @@
 
 ## 3. Phase 1：黑客松可演示閉環
 
-範圍：單一住民、單一場域、少數事件類型（例如 impact、floor posture、scream/yell、夜間離床）。
+範圍：單一住民、單一場域；以手機 RTSP／Replay、固定節拍 QwenVL 與兩種首波事件（跌倒、喝水）完成可重現閉環。
+
+~~舊版範圍：少數事件類型（例如 impact、floor posture、scream/yell、夜間離床）。~~
 
 ~~本次 Demo 的主故事改為：冰箱 session 資料不足 → World State Agent 產生 unknown → Resident Interaction Agent 詢問 → 建立食材記憶與提醒 → Caregiver Agent 顯示一週摘要。~~
 
 依最新 v3，Hackathon 可執行 Demo 主故事是：Replay／RTSP → bounded frame buffer → 固定節拍 QwenVL → 跌倒／喝水 state machine → SQLite → WebSocket Dashboard → MiniMax 健康／風險摘要 → Dashboard alert。原本的冰箱詢問流程保留作後續產品化 scenario，不冒充目前已完成的 v3 功能。
 
-實作順序：
+~~舊版實作順序：
 
 1. Frigate event ingest 與本地證據索引。
 2. Event Gateway、SQLite／簡易 Ledger、去重與 replay。
@@ -32,6 +34,16 @@
 5. Risk Agent 只輸出 risk/uncertainty，不直接介入。
 6. Policy Gateway + L0/L1/L2 check-in 模擬。
 7. Demo UI 顯示證據、Observation、風險理由、route 與 intervention 狀態。
+~~
+
+依 v3 的實作順序：
+
+1. `RtspSource`／`ReplaySource`、bounded frame buffer 與固定節拍 Continuous Vision Loop。
+2. `Qwen3-VL-8B` adapter、`VisionObservation` schema 與 fall／hydration state machine。
+3. SQLite repository、dedup、evidence metadata 與 WebSocket broadcaster。
+4. Dashboard 顯示 source、loop、事件、健康、logs 與 model trace。
+5. Agent Orchestrator 執行 Event Understanding → Health Context → Risk → Policy → Intervention。
+6. MiniMax health/risk summary、Long-term Observer 與 Telegram L3 acknowledgement。
 
 8. Demo UI 額外顯示「系統知道什麼／不知道什麼」、詢問原因、長輩確認來源、提醒狀態與照護者隱私過濾摘要。
 
@@ -70,16 +82,19 @@ L4 僅在 sandbox、模擬通道或具體場域流程下評估：
 | 優先 | 工作 | 原因 |
 |---|---|---|
 | P0 | schema、Ledger、dedup、policy gate、replay | 沒有可重現與可審計基礎就無法安全擴展 |
-| P0 | World State → Resident Interaction → Memory 垂直切片 | 直接呈現新產品核心 |
-| P1 | Frigate adapter、三支模態 adapter、Bundle、Risk | 建立核心事件價值 |
+| P0 | RTSP／Replay → bounded buffer → QwenVL → SQLite 垂直切片 | 先建立 v3 可重現的感知與事件閉環 |
+| P0 | fall／hydration state machine、Dashboard、degraded path | 直接呈現 v3 Demo 核心價值 |
+| P1 | ~~Frigate adapter、三支模態 adapter、Bundle、Risk~~ | ~~建立核心事件價值~~ |
 | P1 | L0–L2 UI 與人工回饋 | 先驗證使用者體驗與誤報成本 |
-| P2 | Health context、baseline、Observer | 產生個人化與長期價值 |
-| P2 | L3 通知與治理 | 需要可靠的 delivery 與權限管理 |
+| P1 | Health context、MiniMax、Long-term Observer | 產生健康摘要與長期趨勢 |
+| P1 | L3 Telegram 通知與 acknowledgement | 完成照護者接手流程 |
 | P3 | L4 sandbox 評估 | 必須等政策、授權與安全驗證成熟 |
 
 ## 8. 未決定事項
 
-- Frigate 事件 schema 與目前原型欄位的 mapping。
+~~- Frigate 事件 schema 與目前原型欄位的 mapping。~~
+- QwenVL 在 M4 16GB 上的 8B latency、memory 與 loop interval benchmark。
+- RTSP 斷線重連、frame stale、dropped-window 與模型 timeout 的恢復行為。
 - 實際攝影機／麥克風／穿戴式型號、時鐘同步與斷線行為。
 - 本地 ASR、VLM、Audio classifier 的硬體需求與可接受延遲。
 - HealthKit／FHIR 的實際授權方、同步頻率與資料保存期限。
