@@ -1,12 +1,12 @@
 # AI 長照 Agent OS
 
-本 repository 是「AI 長照 Agent OS」的架構設計與黑客松原型。最新 v3 方案直接以固定節拍 QwenVL loop 持續分析 RTSP／Replay 影像，不再由 Frigate 事件作前置篩選；舊版架構仍保留供比較。
+本 repository 是「AI 長照 Agent OS」的架構設計與黑客松原型。最新 v4 方案以固定節拍 Vision Loop 持續分析 RTSP／Replay 影像；本地或雲端模型都經統一 OpenAI-compatible API 呼叫，不再由 Frigate 事件作前置篩選；舊版架構仍保留供比較。
 
-~~上一版以有限感知來源 → Context/World State → Resident Interaction → Caregiver 三個產品 Agent 為主路徑。~~ 這個產品分層保留作設計參考；目前可執行 v3 的實作邊界以 `docs-implementation-v3/` 為準，並由 Event Understanding、Health Context、Risk、Intervention 等 logical agents 落地。
+~~上一版以有限感知來源 → Context/World State → Resident Interaction → Caregiver 三個產品 Agent 為主路徑。~~ 這個產品分層保留作設計參考；目前可執行 v4 的實作邊界以 `docs-implementation-v4/` 為準，並由 Event Understanding、Health Context、Risk、Intervention 等 logical agents 落地。
 
 ## 文件入口
 
-最新完整實作文件位於 [docs-implementation-v3/README.md](docs-implementation-v3/README.md)，舞台簡化版位於 [demo-v2/README.md](demo-v2/README.md)。v2 文件保留於 `docs-implementation-v2/`，不覆寫。
+最新完整實作文件位於 [docs-implementation-v4/README.md](docs-implementation-v4/README.md)，舞台簡化版位於 [demo-v2/README.md](demo-v2/README.md)。v2 文件保留於 `docs-implementation-v2/`，不覆寫。
 
 完整 Markdown 開發文件請從 [docs/README.md](docs/README.md) 開始，建議依序閱讀：
 
@@ -22,7 +22,7 @@
 10. [部署與安全](docs/09_DEPLOYMENT_AND_SECURITY.md)
 11. [MVP 與 Roadmap](docs/10_MVP_AND_ROADMAP.md)
 
-最新完整實作文件：[docs-implementation-v3/README.md](docs-implementation-v3/README.md)；舞台簡化版：[demo-v2/README.md](demo-v2/README.md)。舊版目標架構與 Mermaid 仍保留於 `docs/12_TARGET_ARCHITECTURE.md` 與 `docs/diagrams/`，供比較與後續產品化使用。
+最新完整實作文件：[docs-implementation-v4/README.md](docs-implementation-v4/README.md)；舞台簡化版：[demo-v2/README.md](demo-v2/README.md)。舊版目標架構與 Mermaid 仍保留於 `docs/12_TARGET_ARCHITECTURE.md` 與 `docs/diagrams/`，供比較與後續產品化使用。
 
 現有的互動式原型位於 [care_agent_demo_frigate_vad_m3_sqlite.html](care_agent_demo_frigate_vad_m3_sqlite.html)；其中 Frigate／MiniMax 舊節點仍保留並以刪除線標示。
 
