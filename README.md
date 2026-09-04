@@ -1,8 +1,10 @@
 # AI 長照 Agent OS
 
-本 repository 是「AI 長照 Agent OS」的架構設計與黑客松原型。系統以 Frigate NVR 作為低成本、低延遲的初始事件感知與 trigger，再以多模態理解、個人化照護脈絡、風險治理與長期觀察形成可審計的照護閉環。
+本 repository 是「AI 長照 Agent OS」的架構設計與黑客松原型。最新 v3 方案直接以固定節拍 QwenVL loop 持續分析 RTSP／Replay 影像，不再由 Frigate 事件作前置篩選；舊版架構仍保留供比較。
 
 ## 文件入口
+
+最新完整實作文件位於 [docs-implementation-v3/README.md](docs-implementation-v3/README.md)，舞台簡化版位於 [demo-v2/README.md](demo-v2/README.md)。v2 文件保留於 `docs-implementation-v2/`，不覆寫。
 
 完整 Markdown 開發文件請從 [docs/README.md](docs/README.md) 開始，建議依序閱讀：
 
