@@ -2,9 +2,11 @@
 
 ## 1. 架構分層
 
+本文件的分層保留既有安全與治理骨架；新的產品邊界以 [12 · 目標架構與 Agent 邊界](12_TARGET_ARCHITECTURE.md) 為準。Frigate、ASR、VLM 與健康資料都是可替換的輸入 adapter，不等於系統持續掌握整個屋內狀態。
+
 | 層 | 元件 | 職責 | 主要輸出 |
 |---|---|---|---|
-| 感知 | Camera、Mic、Wearable、Frigate NVR | 捕捉資料、偵測物件／音效、建立事件時間窗 | Sensor Event、Evidence Reference |
+| 感知 | Camera、Mic、Wearable、Frigate NVR | 捕捉有限資料、偵測物件／音效、建立事件時間窗 | Sensor Event、Evidence Reference |
 | 事件 | Event Gateway、Event Bus、Deduplicator | 去重、關聯、排序、重試與保存事件狀態 | Event Candidate |
 | 理解 | Local ASR、Video VLM、Audio Classifier、Fusion | 對事件窗口產生轉錄與模態觀察 | Observation、Transcript |
 | Agent | Watchlist、Event Understanding、Risk、Intervention、Observer、Consolidation | 將證據轉成可治理的推論與行動 | Interpretation、Risk、Intervention、Hypothesis |
@@ -12,6 +14,10 @@
 | 治理 | Policy Gateway、Consent、Audit、Notification | 授權、冷卻、人工確認、升級與稽核 | Policy decision、Audit record |
 
 完整元件關係可先閱讀 [00_EXECUTIVE_OVERVIEW.md](00_EXECUTIVE_OVERVIEW.md) 的核心架構段落。
+
+### 新的控制核心
+
+`Event Ledger → Context / World State Agent → Resident Interaction Agent → Memory → Privacy Filter → Caregiver Agent` 是產品主路徑。Risk、Policy、Scheduler、Retention 與 Audit 是確定性支援服務；Agent 只能提出 typed output，不能繞過治理服務直接通知或修改緊急規則。
 
 ## 2. 核心元件責任
 

@@ -19,6 +19,8 @@
 | 08 | [健康脈絡整合](08_HEALTH_CONTEXT_INTEGRATION.md) | HealthKit、FHIR 與照護設定如何安全進入推論？ |
 | 09 | [部署與安全](09_DEPLOYMENT_AND_SECURITY.md) | 系統如何部署、隔離、留存與稽核？ |
 | 10 | [MVP 與 Roadmap](10_MVP_AND_ROADMAP.md) | 如何從 Demo 逐步走向可驗證的產品？ |
+| 11 | [本機 Capture Layer](11_LOCAL_CAPTURE_LAYER.md) | 如何用本機麥克風與攝影機建立可重播事件包？ |
+| 12 | [目標架構與 Agent 邊界](12_TARGET_ARCHITECTURE.md) | 新產品方向如何落成可執行的模組邊界？ |
 
 ## 建議閱讀方式
 
@@ -26,8 +28,11 @@
 - 要實作事件 demo：讀 01、02、03、05、07。
 - 要設計資料與評估：讀 04、06、08、10。
 - 要做醫療或照護場域審查：讀 00、05、08、09，並把「待確認」項目轉成場域政策。
+- 要理解本次產品方向：先讀 12，再回看 01、03、04、07 與 10。
 
 ## 文件共通約定
+
+目標架構的 Mermaid 原始碼位於 [`diagrams/`](diagrams/)，包含整體架構、World State loop 與照護者聚合流程。parent workspace 的舊 `deliverables/mermaid/` 仍可作比較，但不作本 repo 的唯一來源。
 
 - `occurred_at` 是現象發生時間；`recorded_at` 是系統收到時間。
 - `confidence` 是模型對該輸出的信心，不等同於醫療確診率。

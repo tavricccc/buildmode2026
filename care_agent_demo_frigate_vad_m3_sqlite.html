@@ -213,16 +213,48 @@ pre{
   line-height:1.65;
   color:#444;
 }
+.target-flow{display:grid;grid-template-columns:repeat(4,minmax(160px,1fr));gap:14px;align-items:stretch}
+.target-node{border:1.6px solid #326789;border-radius:8px;background:#f5f9fc;padding:14px 12px;min-height:92px;display:flex;flex-direction:column;justify-content:center;text-align:center}
+.target-node strong{font-size:14px;margin-bottom:6px}
+.target-node span{font-size:12px;color:#4d6070;line-height:1.5}
+.target-arrow{display:flex;align-items:center;justify-content:center;color:#326789;font-size:22px}
+.legacy-heading{font-size:18px;margin:0 0 14px;color:#555}
 </style>
 </head>
 <body>
 <main>
-  <h1>Care Agent Demo — Frigate + MiniMax M3</h1>
+  <h1>Care Agent Demo — Context / World State</h1>
   <div class="sub">
-    最終 Demo 架構：Frigate 接手本地影像基礎設施，只負責 24/7 camera ingest、motion / object activity、tracking、recording、snapshot / clip 與事件輸出；麥克風 24/7 開著，Silero VAD 只在有人說話時啟動 Whisper Large V3。只要 Frigate 產生值得處理的 candidate event，就把事件畫面 + 最近 10–15 秒 transcript + Fake Health + State 一起送給 MiniMax M3。M3 負責真正的多模態理解、Agent 決策、記憶與 Tool Calling。
+    新版 Demo 核心：攝影機只是有限感知來源。Context / World State Agent 先整理「知道／不知道」與目前狀態；資料不足時，Resident Interaction Agent 以低侵入方式詢問；確認後建立記憶與提醒，再由 Caregiver Agent 產生日誌、趨勢與值得注意事項。
+  </div>
+
+  <div class="legacy-note">
+    <del>最終 Demo 架構：Frigate 接手本地影像基礎設施，只負責 24/7 camera ingest、motion / object activity、tracking、recording、snapshot / clip 與事件輸出；麥克風 24/7 開著，Silero VAD 只在有人說話時啟動 Whisper Large V3。只要 Frigate 產生值得處理的 candidate event，就把事件畫面 + 最近 10–15 秒 transcript + Fake Health + State 一起送給 MiniMax M3。M3 負責真正的多模態理解、Agent 決策、記憶與 Tool Calling。</del>
+    <br><del>舊版主流程：Frigate candidate event → 最近 transcript + 事件畫面 → MiniMax M3 單一大腦 → 直接操作所有工具。</del>
+    舊版節點仍保留在下方並以刪除線標示，方便比較架構演進。
   </div>
 
   <section class="diagram">
+    <h2>新版目標架構</h2>
+    <div class="target-flow">
+      <div class="target-node"><strong>有限感知來源</strong><span>攝影機／VAD／磁簧／穿戴式</span></div>
+      <div class="target-arrow">→</div>
+      <div class="target-node"><strong>Event Ledger</strong><span>正規化、去重、Session、observability</span></div>
+      <div class="target-node"><strong>Context / World State Agent</strong><span>目前狀態、known／unknown、異常</span></div>
+      <div class="target-arrow">↓</div>
+      <div class="target-node"><strong>Resident Interaction Agent</strong><span>必要時友善詢問，建立確認記憶</span></div>
+      <div class="target-arrow">→</div>
+      <div class="target-node"><strong>Memory + Reminder</strong><span>事件、偏好、保存期限與提醒</span></div>
+      <div class="target-node"><strong>Privacy Filter</strong><span>移除不必要的影音與 transcript</span></div>
+      <div class="target-arrow">↓</div>
+      <div class="target-node"><strong>Caregiver Agent</strong><span>日誌、趨勢、證據日期、注意事項</span></div>
+      <div class="target-arrow">→</div>
+      <div class="target-node"><strong>Caregiver Dashboard</strong><span>只顯示必要的聚合資訊</span></div>
+    </div>
+  </section>
+
+  <section class="diagram">
+    <h2 class="legacy-heading"><del>舊版架構圖：Frigate + MiniMax M3（保留作歷史參考）</del></h2>
     <div class="flow">
 
       <div class="row">
@@ -276,8 +308,8 @@ pre{
         </div>
 
         <div class="node" data-id="asr">
-          <strong>Whisper Large V3</strong>
-          <span>只有 VAD 偵測到語音時才啟動 ASR</span>
+          <strong><del>Whisper Large V3（舊版）</del></strong>
+          <span><del>只有 VAD 偵測到語音時才啟動 ASR</del></span>
         </div>
 
         <div class="node" data-id="media">
@@ -293,8 +325,8 @@ pre{
 
       <div class="row">
         <div class="node" data-id="gate">
-          <strong>Event Gate</strong>
-          <span>沒事 → 繼續 Frigate；有 candidate event → 一律上 MiniMax</span>
+          <strong><del>Event Gate（舊版）</del></strong>
+          <span><del>沒事 → 繼續 Frigate；有 candidate event → 一律上 MiniMax</del></span>
         </div>
 
         <div class="node" data-id="transcript_buffer">
@@ -329,8 +361,8 @@ pre{
       </div>
 
       <div class="node" data-id="m3">
-        <strong>MiniMax M3</strong>
-        <span>VLM + Agent + Tool Calling</span>
+        <strong><del>MiniMax M3 單一大腦</del></strong>
+        <span><del>VLM + Agent + 直接 Tool Calling</del></span>
       </div>
 
       <div class="arrow">
@@ -392,7 +424,7 @@ pre{
       <div class="row">
         <div class="node" data-id="db">
           <strong>SQLite</strong>
-          <span>events / transcripts / memories / tool_calls / decisions</span>
+          <span><del>events / transcripts / memories / tool_calls / decisions</del><br>事件與治理資料；transcript 僅保留短期 buffer</span>
         </div>
 
         <div class="node" data-id="runtime">
@@ -403,7 +435,8 @@ pre{
     </div>
 
     <div class="note">
-      <b>這版的重點：</b>Frigate 不是拿來取代 MiniMax 的高階理解，而是把原本要自己寫的 camera ingest、motion、object tracking、recording、snapshot、clip、zone、event lifecycle 全包掉。Demo 本地只需要把 Frigate 的「有活動 / 有人物事件」當成 high-recall trigger；真正「這人在幹嘛、要不要介入」全部交給 M3。
+      <del><b>舊版重點：</b>Frigate 只產生 high-recall trigger，真正理解與介入全部交給 M3。</del>
+      <br><b>新版重點：</b>感知器只提供有限證據；World State 先處理 known／unknown，Resident Agent 再決定是否詢問，Caregiver Agent 只接收隱私過濾後的摘要。
     </div>
   </section>
 </main>
@@ -843,9 +876,10 @@ function table(rows){
 function openDetail(id){
   const d=details[id];
   if(!d)return;
+  const legacyIds=new Set(["asr","gate","transcript_buffer","payload","m3"]);
   title.textContent=d.title;
   body.innerHTML=`
-    <div class="block"><h3>用途</h3><p>${esc(d.desc)}</p></div>
+    <div class="block"><h3>用途</h3><p>${legacyIds.has(id)?`<del>${esc(d.desc)}</del>`:esc(d.desc)}</p></div>
     <div class="block"><h3>接收什麼</h3>${list(d.inputs)}</div>
     <div class="block"><h3>傳給下一層什麼</h3>${list(d.outputs)}</div>
     <div class="block"><h3>欄位 / Schema / Tool 介面</h3>${table(d.fields)}</div>

@@ -4,6 +4,12 @@
 
 動態路由的目標是讓普通事件保持低延遲、低成本與本地處理；只有風險、關聯性或不確定性足夠高時，才使用較昂貴的多模態或強模型。路由是可審計的系統決策，不是由 LLM 自由選擇工具。
 
+### Provider 對齊
+
+本機 vLLM 是主要模型 provider。三個邏輯 Agent 透過 `ModelRuntime` 呼叫模型，不直接依賴 MiniMax 或其他供應商；provider 可替換，但輸出 schema、evidence scope、deadline 與 audit 欄位固定。
+
+~~原 HTML 所描述的「所有高階推理都交給雲端 MiniMax M3」不再是目標行為。~~ 若使用 MiniMax，僅限於明確授權的特定 VLM 工作，且不可取得通知、政策寫入或任意 SQL 權限。
+
 ## 2. 路由等級
 
 | Route | 使用時機 | 執行內容 | 失敗／低信心 |
@@ -37,6 +43,8 @@ Router 至少評估：`urgency`、`uncertainty`、`watchlist_match`、`evidence_
 
 模型只能輸出版本化 JSON schema；至少包含 claim、evidence_refs、confidence、uncertainty、data_quality、provenance 與 model_version。Schema 驗證失敗、evidence 不存在、confidence 不在合法範圍或 output 內容超出 agent scope 時，結果標記 invalid，不得直接進 Risk。
 
+World State Agent 另須輸出 `known[]`、`unknown[]`、`observability` 與可選的 `question_candidate`；Resident Agent 的 transcript 只可在 conversation window 中存在；Caregiver Agent 不接收未聚合的原始影音。
+
 ## 6. 本地優先與強模型邊界
 
 - 原始影片／音訊預設在本地處理；外部強模型只收到必要 clip、轉錄、特徵與最小 context snapshot。
@@ -56,4 +64,3 @@ Router 至少評估：`urgency`、`uncertainty`、`watchlist_match`、`evidence_
 - 所有模型 latency、error、cost、confidence calibration 與 route outcome 可查詢。
 
 事件契約見 [02_EVENT_PIPELINE.md](02_EVENT_PIPELINE.md)，安全限制見 [09_DEPLOYMENT_AND_SECURITY.md](09_DEPLOYMENT_AND_SECURITY.md)。
-

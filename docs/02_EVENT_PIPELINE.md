@@ -4,6 +4,8 @@
 
 把「可能值得注意」的 trigger 轉成可追溯、可重跑、可安全升級的 Multimodal Event Bundle。每個事件只處理必要的時間窗與脈絡，不把所有連續影音直接送到強模型。
 
+~~舊主流程是「候選事件 → 三支模態 → Event Understanding → Risk → Intervention」。~~ 新 Demo 主流程在事件落檔後先進入 Context / World State Agent；只有資料不足且值得確認時，才建立 Resident Interaction 工作，之後再把經確認的內容寫入 Memory，並由 Privacy Filter 產生 Caregiver projection。
+
 ## 2. 事件生命週期
 
 | 步驟 | 元件 | 輸入 | 輸出／責任 |
@@ -64,6 +66,16 @@ quality:
 3. 若本地輸出低信心、模態互相矛盾、命中高優先 watchlist 或出現高風險組合，升級 T2/T3。
 4. 強模型只收到完整事件證據與最小必要照護摘要；不直接收到全部健康資料。
 5. 若升級失敗，Risk 必須使用保守路徑，通常是 L1/L2 或人工確認，而不是生成確定的低風險結論。
+
+## 5.1 World State 與主動詢問
+
+每個事件完成後，World State 至少要更新：目前可能位置、活動／session、感測器健康、`known[]`、`unknown[]`、`observability` 與 evidence refs。當 `unknown` 對照護目的有價值且打擾程度可接受時，產生 `question_candidate`；Policy Gateway 再決定是否由 Resident Agent 發出一次性詢問。
+
+長輩回答只在 conversation window 中處理。回答若未明確確認，不得直接寫入 Fact；可先寫成待確認的 interaction record。
+
+## 5.2 照護者投影
+
+Caregiver Agent 不讀取原始 transcript 或不必要的影音。它接收事件類型、聚合指標、observability／coverage、長輩確認的 Fact 與 evidence refs，輸出日誌、趨勢、資料不足提示與下一步建議。
 
 ## 6. 高風險 Fast Path 示例
 

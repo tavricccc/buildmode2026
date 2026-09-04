@@ -19,6 +19,10 @@
 | Watchlist | 值得觀察的條件與問題 | Watchlist Agent、人工、政策 | candidate/active 分離 | 保留變更歷史 |
 | Medical Context | 病史、用藥、過敏、CarePlan、FHIR 索引 | 授權外部來源、人工 | Agent 只讀或提出修改 | 依來源撤回與保留政策 |
 
+~~舊版原型曾把 transcript 當成一般長期記憶保存。~~ 新方案將 transcript 視為 conversation-window evidence：短期存在、到期刪除；只有長輩明確確認的內容，才轉成帶來源的 Fact、Preference 或 Reminder。
+
+Caregiver projection 是另一個資料層：由 detailed events 經 purpose、角色與 payload level 過濾後產生，不反向修改原始 Event Ledger。
+
 ## 3. 共用欄位
 
 所有核心實體至少包含：
@@ -102,4 +106,3 @@ Confidence 不是疾病機率，也不是行動授權。每次模型或規則重
 - 所有重要 record append-only；更正用新版本，刪除依 retention policy 產生可稽核 tombstone。
 - 每一筆 Observation/Interpretation/Risk 都必須能反查 evidence；不能反查的資料標為 invalid，不得進入介入。
 - Context snapshot 固定查詢當下版本，避免同一事件因後來脈絡改變而無法重現。
-

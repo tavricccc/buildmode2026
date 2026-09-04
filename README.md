@@ -1,6 +1,8 @@
 # AI 長照 Agent OS
 
-本 repository 是「AI 長照 Agent OS」的架構設計與黑客松原型。系統以 Frigate NVR 作為低成本、低延遲的初始事件感知與 trigger，再以多模態理解、個人化照護脈絡、風險治理與長期觀察形成可審計的照護閉環。
+~~本 repository 是「AI 長照 Agent OS」的架構設計與黑客松原型。系統以 Frigate NVR 作為低成本、低延遲的初始事件感知與 trigger，再以多模態理解、個人化照護脈絡、風險治理與長期觀察形成可審計的照護閉環。~~
+
+本 repository 是「AI 長照 Agent OS」的架構設計與黑客松原型。系統以有限感知來源建立事件與脈絡，再由 Context/World State、Resident Interaction 與 Caregiver 三個邏輯 Agent 形成可審計的照護閉環。Frigate 是其中一個可替換的本地感知 adapter，不代表全屋或全時段監控。
 
 ## 文件入口
 
@@ -17,8 +19,9 @@
 9. [健康脈絡整合](docs/08_HEALTH_CONTEXT_INTEGRATION.md)
 10. [部署與安全](docs/09_DEPLOYMENT_AND_SECURITY.md)
 11. [MVP 與 Roadmap](docs/10_MVP_AND_ROADMAP.md)
+12. [目標架構與 Agent 邊界](docs/12_TARGET_ARCHITECTURE.md)
 
-現有的互動式原型位於 [care_agent_demo_frigate_vad_m3_sqlite.html](care_agent_demo_frigate_vad_m3_sqlite.html)；既有 `deliverables/` 為先前產出的參考稿與渲染圖，本次整理不覆蓋或刪除。
+現有的互動式原型位於 [care_agent_demo_frigate_vad_m3_sqlite.html](care_agent_demo_frigate_vad_m3_sqlite.html)。舊版架構節點仍保留並以刪除線標示；新的目標架構與 Mermaid 原始碼以 `docs/12_TARGET_ARCHITECTURE.md` 與 `docs/diagrams/` 為準。
 
 ## 重要安全邊界
 

@@ -4,6 +4,8 @@
 
 Risk Agent 回答「目前證據顯示的風險與不確定性為何」；Intervention Agent 回答「在 Policy Gateway 允許的範圍內，現在如何回應」。兩者不可合併，避免語言模型把不確定的風險描述直接變成外部行動。
 
+產品互動上，Resident Interaction Agent 是 L2 以前的低侵入回應入口：它只能使用已核准的問題、頻率與 conversation window。~~模型可以自行決定何時連續追問或直接通知。~~ 連續追問、通知與升級仍須通過 cooldown、consent 與 Policy Gateway。
+
 ## 2. Risk Assessment 輸入
 
 Risk 不只看單一 confidence，至少綜合：
@@ -63,4 +65,3 @@ LLM 可以建議「需要升級」與提供證據摘要，但不能直接發送 
 | agent_suggested watchlist 要求 L4 | 保持 candidate，要求人工／政策審核 |
 
 模型路由與 Risk 的交界見 [07_MODEL_ROUTING_AND_RUNTIME.md](07_MODEL_ROUTING_AND_RUNTIME.md)。
-

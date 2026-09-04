@@ -19,6 +19,8 @@
 
 範圍：單一住民、單一場域、少數事件類型（例如 impact、floor posture、scream/yell、夜間離床）。
 
+本次 Demo 的主故事改為：冰箱 session 資料不足 → World State Agent 產生 unknown → Resident Interaction Agent 詢問 → 建立食材記憶與提醒 → Caregiver Agent 顯示一週摘要。跌倒／長時間無活動保留為 replay 的安全案例。
+
 實作順序：
 
 1. Frigate event ingest 與本地證據索引。
@@ -29,7 +31,9 @@
 6. Policy Gateway + L0/L1/L2 check-in 模擬。
 7. Demo UI 顯示證據、Observation、風險理由、route 與 intervention 狀態。
 
-驗收案例：正常走動不打擾；影像與 impact 組合觸發 check-in；無回覆進人工隊列；同一事件重送不重複提示；模型失敗時顯示 degraded。
+8. Demo UI 額外顯示「系統知道什麼／不知道什麼」、詢問原因、長輩確認來源、提醒狀態與照護者隱私過濾摘要。
+
+驗收案例：正常走動不打擾；冰箱影像不足時只產生低侵入問題；長輩回答後建立記憶；同一事件重送不重複提示；模型失敗時顯示 degraded；照護者看不到原始 transcript。
 
 ## 4. Phase 2：個人化與可觀測性
 
@@ -64,6 +68,7 @@ L4 僅在 sandbox、模擬通道或具體場域流程下評估：
 | 優先 | 工作 | 原因 |
 |---|---|---|
 | P0 | schema、Ledger、dedup、policy gate、replay | 沒有可重現與可審計基礎就無法安全擴展 |
+| P0 | World State → Resident Interaction → Memory 垂直切片 | 直接呈現新產品核心 |
 | P1 | Frigate adapter、三支模態 adapter、Bundle、Risk | 建立核心事件價值 |
 | P1 | L0–L2 UI 與人工回饋 | 先驗證使用者體驗與誤報成本 |
 | P2 | Health context、baseline、Observer | 產生個人化與長期價值 |
@@ -84,4 +89,3 @@ L4 僅在 sandbox、模擬通道或具體場域流程下評估：
 本架構文件階段完成的判準：所有需求元件都有責任歸屬；文件間鏈接有效；資料層區分 Raw Evidence、Fact、Hypothesis；Risk 與 Intervention 分離；L4 有 deterministic gate；模型路由、錯誤、版本與 provenance 有可實作的欄位；每個 Phase 有可測試驗收條件。
 
 相關實作原型：[care_agent_demo_frigate_vad_m3_sqlite.html](../care_agent_demo_frigate_vad_m3_sqlite.html)。
-

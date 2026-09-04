@@ -4,7 +4,9 @@
 > 本文件取代原架構圖，作為實作依據。
 
 **版本** v0.1 · 2026-09-04
-**唯一可用外部 API** MiniMax（無其他 LLM / VLM / ASR / TTS 供應商，設計上不得假設有 fallback）
+~~**唯一可用外部 API** MiniMax（無其他 LLM / VLM / ASR / TTS 供應商，設計上不得假設有 fallback）~~
+
+**模型執行策略（本次產品方向）**：本機 vLLM 是主要推論入口；模型透過統一的 `ModelRuntime` 使用。MiniMax 若保留，僅作為特定 VLM 任務的可選 provider，不是唯一高階大腦，也不直接取得通知、政策或任意 SQL 權限。
 
 ---
 
@@ -28,9 +30,21 @@
 
 Demo 能展示一份**自動填好的複評摘要**：每個欄位有趨勢曲線、有可回溯到日期的原始事件、有信心度。
 
+### 0.1 新產品方向對齊
+
+本規格保留原有急性事件與趨勢軌設計，但產品展示主軸改為三個邏輯 Agent：
+
+1. **Context / World State Agent**：更新目前位置、活動、感測器狀態，明確區分已知、未知、正常與異常。
+2. **Resident Interaction Agent**：資料不足且值得詢問時，以低侵入方式詢問長輩，建立經確認的事件記憶與提醒。
+3. **Caregiver Agent**：從隱私過濾後的詳細事件與聚合指標產生日誌、趨勢與值得注意事項。
+
+Risk、Policy、Scheduler、Retention 與 Audit 維持為確定性支援服務，不由模型自由決定外部行動。完整目標架構見 [docs/12_TARGET_ARCHITECTURE.md](docs/12_TARGET_ARCHITECTURE.md)。
+
 ---
 
 ## 1. 架構總覽
+
+~~以下原始 L0–L6 骨架仍保留作歷史參考；實作與 Demo 以新的 World State 與三 Agent 邊界為準。~~
 
 ```
 L0  感測層          手機鏡頭(RTSP) / 麥克風 / 磁簧 / Fake Health
@@ -190,7 +204,7 @@ outside_window:
 
 ### 5.1 原規劃的問題
 
-原規劃寫的是「有 candidate event → 一律上 MiniMax」。Frigate 的 person / motion event 產量很大，只要有人在鏡頭前走動就會觸發。「一律上」會讓成本失控、延遲上升，而且本地感知層等於白做。
+~~原規劃寫的是「有 candidate event → 一律上 MiniMax」。~~ Frigate 的 person / motion event 產量很大，只要有人在鏡頭前走動就會觸發。新的 gate 先由 World State 判斷是否足夠、是否異常、是否需要詢問，再決定是否呼叫模型。
 
 在只有一個 API 額度、沒有 fallback 的前提下，這一條必須修正。
 
@@ -220,7 +234,9 @@ def gate(event, budget, state):
 
 ### 5.3 預算控制
 
-只有一個 API 供應商，沒有備援，因此預算必須是硬約束：
+~~只有一個 API 供應商，沒有備援，因此預算必須是硬約束：~~
+
+模型 provider 與預算仍須是硬約束，但本機 vLLM 應作為主要路徑；外部 VLM 只處理明確授權且必要的事件。
 
 ```yaml
 minimax_budget:
@@ -252,7 +268,7 @@ minimax_budget:
 
 ## 6. L3b～L5b 趨勢軌（新增，原規劃完全缺少）
 
-**這是本案唯一無法被市面產品取代的部分。** 原規劃的 SQLite schema 只有 `events / transcripts / memories / tool_calls / decisions`，全是即時事件紀錄，沒有指標累積、沒有基準線、沒有量表對接——跑起來會是一個反應不錯的即時照護 agent，但產不出複評摘要。
+**這是本案的重要差異化部分。** ~~原規劃的 SQLite schema 只有 `events / transcripts / memories / tool_calls / decisions`，全是即時事件紀錄，沒有指標累積、沒有基準線、沒有量表對接。~~ 趨勢軌、基準線與照護摘要維持為長期價值，但 Demo 先用可重播的模擬資料展示。
 
 趨勢軌是**排程批次**（每晚 03:00 執行一次），不是事件驅動。
 

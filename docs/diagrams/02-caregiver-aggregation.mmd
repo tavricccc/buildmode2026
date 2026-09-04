@@ -1,0 +1,9 @@
+flowchart LR
+  E[Detailed Event Ledger] --> A[Metric Aggregator]
+  A --> O[Observability + Coverage]
+  A --> B[Personal Baseline]
+  O --> F[Finding]
+  B --> F
+  F --> Q{Privacy / Scope Filter}
+  Q --> D[Caregiver Digest]
+  D --> H[Evidence Dates + Trend]

@@ -4,6 +4,16 @@
 
 Agent 是受限的工作單元，不是可以任意讀寫資料或呼叫外部服務的全能角色。每個 Agent 有明確的輸入、輸出、工具白名單與不可越過的安全邊界；跨 Agent 溝通使用 typed message，不用自然語言傳遞關鍵決策。
 
+產品對外只呈現三個邏輯 Agent；下表的既有 Agent 保留作為內部責任分解：
+
+| 產品邏輯 Agent | 內部責任 | 主要輸出 |
+|---|---|---|
+| Context / World State Agent | Event Understanding、狀態 reducer、資料品質與不確定性 | World State、known／unknown、question candidate |
+| Resident Interaction Agent | Intervention 的長輩互動部分、Memory 寫入申請、Reminder proposal | prompt、resident reply、confirmed fact、reminder proposal |
+| Caregiver Agent | Long-term Observer、Consolidation、照護者投影 | 日誌、趨勢、finding、evidence refs |
+
+~~既有的 Event Understanding、Risk、Intervention、Observer、Consolidation 名稱不再直接作為產品主敘事；它們保留在 runtime 內，負責可測試與可審計的細部工作。~~
+
 ## 2. Agent 責任矩陣
 
 | Agent | 觸發 | 讀取 | 可寫入 | 明確不能做的事 |
@@ -59,4 +69,3 @@ Runtime 應提供以下能力，讓 Agent 只處理領域工作：
 | 啟動 L4 | Policy Gateway + deterministic executor | Agent 不具直接權限，必須滿足 gate |
 
 詳見 [05_RISK_AND_INTERVENTION.md](05_RISK_AND_INTERVENTION.md) 與 [07_MODEL_ROUTING_AND_RUNTIME.md](07_MODEL_ROUTING_AND_RUNTIME.md)。
-
