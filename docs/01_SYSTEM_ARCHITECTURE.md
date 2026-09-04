@@ -4,6 +4,8 @@
 
 本文件的分層保留既有安全與治理骨架；新的產品邊界以 [12 · 目標架構與 Agent 邊界](12_TARGET_ARCHITECTURE.md) 為準。Frigate、ASR、VLM 與健康資料都是可替換的輸入 adapter，不等於系統持續掌握整個屋內狀態。
 
+目前可執行 v3 的具體邊界以 [docs-implementation-v3/01_SYSTEM_COMPONENTS_AND_BOUNDARIES.md](../docs-implementation-v3/01_SYSTEM_COMPONENTS_AND_BOUNDARIES.md) 為準：RTSP／Replay 直接進 bounded frame buffer 與 fixed-rate QwenVL loop；~~Frigate、go2rtc、MQTT 作為主路徑~~保留在舊架構中作比較。
+
 | 層 | 元件 | 職責 | 主要輸出 |
 |---|---|---|---|
 | 感知 | Camera、Mic、Wearable、Frigate NVR | 捕捉有限資料、偵測物件／音效、建立事件時間窗 | Sensor Event、Evidence Reference |

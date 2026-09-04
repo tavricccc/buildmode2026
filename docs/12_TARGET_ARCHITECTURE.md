@@ -10,6 +10,10 @@
 
 攝影機只是有限感知來源。所有感知器都必須能表示「沒有觀測到」與「無法觀測」的差異；未知不能被當成正常，也不能被模型猜成事實。
 
+### 1.1 與最新 v3 實作的關係
+
+目前 v3 的可執行主路徑是 RTSP／Replay → bounded frame buffer → 固定節拍 Qwen3-VL loop → 跌倒／喝水 state machine → SQLite → WebSocket Dashboard → MiniMax 健康／風險摘要。~~本文件原本以冰箱事件、vLLM 與三個產品 Agent 作為第一條垂直切片~~保留作後續產品方向與架構比較，不宣稱已是 v3 的現場 Demo。
+
 ## 2. 舊方案保留與標示
 
 以下內容保留在 repo，供團隊理解演進，但不再是目標架構：
@@ -76,7 +80,7 @@ Risk、Policy、Scheduler、Retention、Audit 是確定性支援服務，不應�
 
 ## 6. Model Runtime 與 vLLM
 
-本機 vLLM 是主要推論入口；Agent 不直接依賴 provider API，而是呼叫統一的 `ModelRuntime`：
+~~本機 vLLM 是主要推論入口；~~最新 v3 以 `mlx-vlm` 的 Qwen3-VL-8B-Instruct 4-bit 作為 M4 視覺 runtime，並保留 provider abstraction。Agent 不直接依賴 provider API，而是呼叫統一的 `ModelRuntime`：
 
 ```text
 ModelRuntime.generate(
@@ -89,8 +93,8 @@ ModelRuntime.generate(
 )
 ```
 
-- Context Agent：優先使用本地 vLLM 或規則，輸出 World State JSON。
-- Resident Agent：優先使用本地 vLLM，僅在對話窗內接收 transcript。
+- Context Agent：優先使用 v3 的本地 QwenVL 或規則，輸出 World State JSON。
+- Resident Agent：保留為後續互動路徑；若啟用，僅在對話窗內接收 transcript。
 - Caregiver Agent：使用聚合後的結構化資料，不需要原始影音。
 - MiniMax 若保留，應是特定 VLM 任務的可選 provider，不能直接擁有通知、政策或任意 SQL 權限。
 

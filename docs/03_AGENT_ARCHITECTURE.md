@@ -14,6 +14,10 @@ Agent 是受限的工作單元，不是可以任意讀寫資料或呼叫外部�
 
 ~~既有的 Event Understanding、Risk、Intervention、Observer、Consolidation 名稱不再直接作為產品主敘事；它們保留在 runtime 內，負責可測試與可審計的細部工作。~~
 
+### 最新 v3 對照
+
+目前 v3 實作將上述產品概念落在同一個 backend 的 logical agents：`Event Understanding` 負責本地視覺事件解讀，`Health Context` 負責健康／事件摘要，`Risk` 與 `Intervention` 負責政策後的行動；Long-term Observer 產生日／週 finding。這些不是獨立 microservices，詳見 [docs-implementation-v3/02_EVENT_AGENT_AND_POLICY_CONTRACTS.md](../docs-implementation-v3/02_EVENT_AGENT_AND_POLICY_CONTRACTS.md)。
+
 ## 2. Agent 責任矩陣
 
 | Agent | 觸發 | 讀取 | 可寫入 | 明確不能做的事 |

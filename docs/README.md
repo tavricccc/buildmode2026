@@ -4,6 +4,8 @@
 
 這組文件定義從事件感知到長期照護洞察的完整架構。每份文件都可獨立閱讀；文件中的相對鏈接指向同一套設計基線，流程以步驟、狀態表與資料契約描述，方便工程實作與 code review。
 
+目前可執行實作的最新版本是 [docs-implementation-v3/README.md](../docs-implementation-v3/README.md)；本目錄與 `docs/12_TARGET_ARCHITECTURE.md` 保留較早的產品架構、隱私分層與三 Agent 設計，供比較與後續產品化使用。
+
 ## 文件導覽
 
 | 編號 | 文件 | 核心問題 |
@@ -32,7 +34,7 @@
 
 ## 文件共通約定
 
-目標架構的 Mermaid 原始碼位於 [`diagrams/`](diagrams/)，包含整體架構、World State loop 與照護者聚合流程。parent workspace 的舊 `deliverables/mermaid/` 仍可作比較，但不作本 repo 的唯一來源。
+目標架構的 Mermaid 原始碼位於 [`diagrams/`](diagrams/)，包含整體架構、World State loop 與照護者聚合流程。parent workspace 的舊 `deliverables/mermaid/` 仍可作比較，但不作本 repo 的唯一來源。最新 v3 的 QwenVL、SQLite、WebSocket 與 Telegram 契約則以 `docs-implementation-v3/` 為準。
 
 - `occurred_at` 是現象發生時間；`recorded_at` 是系統收到時間。
 - `confidence` 是模型對該輸出的信心，不等同於醫療確診率。

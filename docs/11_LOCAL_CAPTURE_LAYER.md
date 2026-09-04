@@ -1,5 +1,7 @@
 # 11 · 本機 Capture Layer
 
+~~本文件原本描述的是目前產品的 capture 主路徑。~~ 最新 v3 的 canonical path 已改為 `RtspSource / ReplaySource → bounded frame buffer → fixed-rate QwenVL loop`；本文件與 `capture/` 程式保留作早期 bounded capture 參考，不覆蓋 v3 的 source contract。
+
 ## 1. 目前實作範圍
 
 本階段提供一個不依賴雲端服務的本機 capture layer：

@@ -19,7 +19,9 @@
 
 範圍：單一住民、單一場域、少數事件類型（例如 impact、floor posture、scream/yell、夜間離床）。
 
-本次 Demo 的主故事改為：冰箱 session 資料不足 → World State Agent 產生 unknown → Resident Interaction Agent 詢問 → 建立食材記憶與提醒 → Caregiver Agent 顯示一週摘要。跌倒／長時間無活動保留為 replay 的安全案例。
+~~本次 Demo 的主故事改為：冰箱 session 資料不足 → World State Agent 產生 unknown → Resident Interaction Agent 詢問 → 建立食材記憶與提醒 → Caregiver Agent 顯示一週摘要。~~
+
+依最新 v3，Hackathon 可執行 Demo 主故事是：Replay／RTSP → bounded frame buffer → 固定節拍 QwenVL → 跌倒／喝水 state machine → SQLite → WebSocket Dashboard → MiniMax 健康／風險摘要 → Dashboard alert。原本的冰箱詢問流程保留作後續產品化 scenario，不冒充目前已完成的 v3 功能。
 
 實作順序：
 
@@ -33,7 +35,7 @@
 
 8. Demo UI 額外顯示「系統知道什麼／不知道什麼」、詢問原因、長輩確認來源、提醒狀態與照護者隱私過濾摘要。
 
-驗收案例：正常走動不打擾；冰箱影像不足時只產生低侵入問題；長輩回答後建立記憶；同一事件重送不重複提示；模型失敗時顯示 degraded；照護者看不到原始 transcript。
+驗收案例：固定節拍 loop 在沒有 person／motion 前置事件時仍產生 observation；跌倒與喝水事件可去重並寫入 SQLite；Dashboard 在 DB commit 後更新；MiniMax 失敗時顯示 degraded；Telegram L3 acknowledgement 可回寫。
 
 ## 4. Phase 2：個人化與可觀測性
 

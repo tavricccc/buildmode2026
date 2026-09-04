@@ -8,6 +8,8 @@
 
 **模型執行策略（本次產品方向）**：本機 vLLM 是主要推論入口；模型透過統一的 `ModelRuntime` 使用。MiniMax 若保留，僅作為特定 VLM 任務的可選 provider，不是唯一高階大腦，也不直接取得通知、政策或任意 SQL 權限。
 
+**最新版本優先規則**：目前可執行實作以 [docs-implementation-v3/README.md](docs-implementation-v3/README.md) 為準；其主模型是 Mac mini M4 上的 Qwen3-VL-8B 4-bit，MiniMax-M3 負責健康／風險摘要，Replay 與 RTSP 共用 source contract。~~本段原本的 vLLM 主要 provider 設定~~保留作替代 runtime 設計，不覆蓋 v3 的已定案邊界。
+
 ---
 
 ## 0. 範圍宣告

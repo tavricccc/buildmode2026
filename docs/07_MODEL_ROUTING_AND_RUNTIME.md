@@ -6,7 +6,7 @@
 
 ### Provider 對齊
 
-本機 vLLM 是主要模型 provider。三個邏輯 Agent 透過 `ModelRuntime` 呼叫模型，不直接依賴 MiniMax 或其他供應商；provider 可替換，但輸出 schema、evidence scope、deadline 與 audit 欄位固定。
+~~本機 vLLM 是主要模型 provider。~~ 依最新 v3，Mac mini M4 的主要視覺 runtime 是 `mlx-vlm` 上的 Qwen3-VL-8B-Instruct 4-bit；4B 只作實測後的明示降級。三個邏輯 Agent／內部 logical agents 仍透過統一的 runtime contract 使用模型，provider 可替換，但輸出 schema、evidence scope、deadline 與 audit 欄位固定。
 
 ~~原 HTML 所描述的「所有高階推理都交給雲端 MiniMax M3」不再是目標行為。~~ 若使用 MiniMax，僅限於明確授權的特定 VLM 工作，且不可取得通知、政策寫入或任意 SQL 權限。
 
