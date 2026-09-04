@@ -1,0 +1,868 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Care Agent Demo Architecture — Frigate + MiniMax M3</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<style>
+:root{
+  --bg:#fafafa;
+  --paper:#fff;
+  --ink:#202124;
+  --muted:#5f6368;
+  --border:#858585;
+  --line:#727272;
+  --hover:#f3f3f3;
+  --shadow:0 20px 70px rgba(0,0,0,.18);
+}
+*{box-sizing:border-box}
+body{
+  margin:0;
+  background:var(--bg);
+  color:var(--ink);
+  font-family:"Noto Sans TC",system-ui,sans-serif;
+}
+main{
+  width:min(1440px,96vw);
+  margin:28px auto 64px;
+}
+h1{font-size:28px;margin:0 0 8px}
+.sub{
+  color:var(--muted);
+  font-size:14px;
+  line-height:1.75;
+  margin-bottom:20px;
+}
+.diagram{
+  background:var(--paper);
+  border:1px solid #dedede;
+  border-radius:14px;
+  padding:30px 24px 38px;
+  overflow-x:auto;
+}
+.flow{
+  min-width:1140px;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+}
+.row{
+  display:flex;
+  justify-content:center;
+  gap:34px;
+  width:100%;
+}
+.node{
+  width:285px;
+  min-height:96px;
+  border:1.6px solid var(--border);
+  border-radius:8px;
+  background:#fff;
+  padding:14px 16px;
+  cursor:pointer;
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+  text-align:center;
+  transition:.14s ease;
+}
+.node:hover{
+  background:var(--hover);
+  border-color:#222;
+}
+.node strong{
+  font-size:15px;
+  font-weight:700;
+  margin-bottom:6px;
+}
+.node span{
+  font-size:12px;
+  color:var(--muted);
+  line-height:1.5;
+}
+.arrow{
+  height:58px;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  color:var(--muted);
+  font-size:11px;
+}
+.arrow .shaft{
+  width:1.6px;
+  height:28px;
+  background:var(--line);
+}
+.arrow .tip{
+  width:0;height:0;
+  border-left:5px solid transparent;
+  border-right:5px solid transparent;
+  border-top:8px solid var(--line);
+}
+.arrow .label{margin-top:4px}
+.branch{
+  width:850px;
+  margin-top:4px;
+}
+.branch .top{
+  height:22px;
+  border-top:1.6px solid var(--line);
+  border-left:1.6px solid var(--line);
+  border-right:1.6px solid var(--line);
+}
+.branch-labels{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  text-align:center;
+  color:var(--muted);
+  font-size:11px;
+}
+.branch-labels div::before{
+  content:"";
+  display:block;
+  width:1.6px;
+  height:22px;
+  background:var(--line);
+  margin:0 auto 4px;
+}
+.note{
+  margin-top:22px;
+  font-size:12.5px;
+  color:#4b4b4b;
+  line-height:1.75;
+}
+.note b{color:#222}
+
+dialog{
+  width:min(920px,94vw);
+  border:none;
+  border-radius:14px;
+  padding:0;
+  box-shadow:var(--shadow);
+}
+dialog::backdrop{
+  background:rgba(0,0,0,.34);
+  backdrop-filter:blur(2px);
+}
+.modal-head{
+  padding:20px 22px 14px;
+  border-bottom:1px solid #e5e5e5;
+  display:flex;
+  justify-content:space-between;
+  gap:16px;
+  align-items:flex-start;
+}
+.modal-head h2{margin:0;font-size:23px}
+.close{
+  border:1px solid #bbb;
+  background:#f6f6f6;
+  width:34px;height:34px;
+  border-radius:8px;
+  cursor:pointer;
+  font-size:18px;
+}
+.modal-body{
+  padding:18px 22px 26px;
+  max-height:76vh;
+  overflow:auto;
+}
+.block{margin-bottom:18px}
+.block h3{font-size:14px;margin:0 0 8px}
+.block p,.block li{
+  color:#444;
+  font-size:13.5px;
+  line-height:1.65;
+}
+.block ul{margin:6px 0;padding-left:20px}
+table{
+  width:100%;
+  border-collapse:collapse;
+  font-size:12.5px;
+}
+th,td{
+  text-align:left;
+  vertical-align:top;
+  padding:9px 8px;
+  border-bottom:1px solid #e6e6e6;
+}
+th{
+  background:#f7f7f7;
+  color:#555;
+}
+pre{
+  white-space:pre-wrap;
+  background:#f7f7f7;
+  border:1px solid #e0e0e0;
+  border-radius:8px;
+  padding:12px;
+  overflow:auto;
+  font-size:12px;
+  line-height:1.55;
+}
+.warn{
+  border-left:3px solid #666;
+  background:#f6f6f6;
+  padding:10px 12px;
+  font-size:12.5px;
+  line-height:1.65;
+  color:#444;
+}
+</style>
+</head>
+<body>
+<main>
+  <h1>Care Agent Demo — Frigate + MiniMax M3</h1>
+  <div class="sub">
+    最終 Demo 架構：Frigate 接手本地影像基礎設施，只負責 24/7 camera ingest、motion / object activity、tracking、recording、snapshot / clip 與事件輸出；麥克風 24/7 開著，Silero VAD 只在有人說話時啟動 Whisper Large V3。只要 Frigate 產生值得處理的 candidate event，就把事件畫面 + 最近 10–15 秒 transcript + Fake Health + State 一起送給 MiniMax M3。M3 負責真正的多模態理解、Agent 決策、記憶與 Tool Calling。
+  </div>
+
+  <section class="diagram">
+    <div class="flow">
+
+      <div class="row">
+        <div class="node" data-id="camera">
+          <strong>手機鏡頭</strong>
+          <span>RTSP / ffmpeg-compatible stream</span>
+        </div>
+
+        <div class="node" data-id="mic">
+          <strong>麥克風</strong>
+          <span>24/7 持續收音</span>
+        </div>
+
+        <div class="node" data-id="fake_health">
+          <strong>Fake Health Data</strong>
+          <span>Demo 模擬 heart rate / activity</span>
+        </div>
+      </div>
+
+      <div class="arrow">
+        <div class="shaft"></div><div class="tip"></div>
+        <div class="label">video / continuous audio / mock health</div>
+      </div>
+
+      <div class="row">
+        <div class="node" data-id="frigate">
+          <strong>Frigate</strong>
+          <span>Camera ingest + Motion + Object Detection + Tracking + Recording + Events</span>
+        </div>
+
+        <div class="node" data-id="vad">
+          <strong>Silero VAD</strong>
+          <span>24/7 判斷目前有沒有人說話</span>
+        </div>
+
+        <div class="node" data-id="runtime_health">
+          <strong>Health Runtime</strong>
+          <span>保留最近的 Fake Health 狀態</span>
+        </div>
+      </div>
+
+      <div class="arrow">
+        <div class="shaft"></div><div class="tip"></div>
+        <div class="label">Frigate event stream / speech segments / health state</div>
+      </div>
+
+      <div class="row">
+        <div class="node" data-id="event_adapter">
+          <strong>Frigate Event Adapter</strong>
+          <span>把 Frigate object / motion / zone event 正規化成 candidate event</span>
+        </div>
+
+        <div class="node" data-id="asr">
+          <strong>Whisper Large V3</strong>
+          <span>只有 VAD 偵測到語音時才啟動 ASR</span>
+        </div>
+
+        <div class="node" data-id="media">
+          <strong>Frigate Snapshot / Clip</strong>
+          <span>直接取事件附近圖片或短片</span>
+        </div>
+      </div>
+
+      <div class="arrow">
+        <div class="shaft"></div><div class="tip"></div>
+        <div class="label">candidate event + transcript segments + event media</div>
+      </div>
+
+      <div class="row">
+        <div class="node" data-id="gate">
+          <strong>Event Gate</strong>
+          <span>沒事 → 繼續 Frigate；有 candidate event → 一律上 MiniMax</span>
+        </div>
+
+        <div class="node" data-id="transcript_buffer">
+          <strong>Transcript Buffer</strong>
+          <span>保留最近 10–15 秒老人說了什麼</span>
+        </div>
+      </div>
+
+      <div class="branch">
+        <div class="top"></div>
+        <div class="branch-labels">
+          <div>沒有 candidate event</div>
+          <div>有 candidate event</div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="node" data-id="continue">
+          <strong>Continue Local Monitoring</strong>
+          <span>不呼叫 MiniMax、不上傳事件畫面</span>
+        </div>
+
+        <div class="node" data-id="payload">
+          <strong>Build M3 Payload</strong>
+          <span>Frigate clip + Event JSON + 10–15 秒 transcript + Health + State + Memory</span>
+        </div>
+      </div>
+
+      <div class="arrow">
+        <div class="shaft"></div><div class="tip"></div>
+        <div class="label">multimodal event package</div>
+      </div>
+
+      <div class="node" data-id="m3">
+        <strong>MiniMax M3</strong>
+        <span>VLM + Agent + Tool Calling</span>
+      </div>
+
+      <div class="arrow">
+        <div class="shaft"></div><div class="tip"></div>
+        <div class="label">M3 自己查資料、更新記憶、決定要不要說話或通知</div>
+      </div>
+
+      <div class="row">
+        <div class="node" data-id="memory_tool">
+          <strong>Memory Tools</strong>
+          <span>search / save / update / invalidate</span>
+        </div>
+
+        <div class="node" data-id="state_tool">
+          <strong>State Tools</strong>
+          <span>get / update current state</span>
+        </div>
+
+        <div class="node" data-id="health_tool">
+          <strong>Health Tool</strong>
+          <span>讀 Fake Health Data</span>
+        </div>
+      </div>
+
+      <div style="height:22px"></div>
+
+      <div class="row">
+        <div class="node" data-id="speak_tool">
+          <strong>Speak Tool</strong>
+          <span>TTS 對老人說話</span>
+        </div>
+
+        <div class="node" data-id="notify_tool">
+          <strong>Notify Tool</strong>
+          <span>通知家屬 / 照護者</span>
+        </div>
+
+        <div class="node" data-id="frontend_tool">
+          <strong>Frontend Tool</strong>
+          <span>更新 Timeline / State / Decision Log</span>
+        </div>
+      </div>
+
+      <div class="arrow">
+        <div class="shaft"></div><div class="tip"></div>
+        <div class="label">老人新的回答 → VAD → Whisper → Transcript Buffer</div>
+      </div>
+
+      <div class="node" data-id="feedback">
+        <strong>User Feedback</strong>
+        <span>新的語音逐字稿成為下一輪 M3 context / memory 更新依據</span>
+      </div>
+
+      <div class="arrow">
+        <div class="shaft"></div><div class="tip"></div>
+        <div class="label">persistent / runtime data</div>
+      </div>
+
+      <div class="row">
+        <div class="node" data-id="db">
+          <strong>SQLite</strong>
+          <span>events / transcripts / memories / tool_calls / decisions</span>
+        </div>
+
+        <div class="node" data-id="runtime">
+          <strong>Runtime State</strong>
+          <span>Current State、recent events、transcript buffer、cooldown</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="note">
+      <b>這版的重點：</b>Frigate 不是拿來取代 MiniMax 的高階理解，而是把原本要自己寫的 camera ingest、motion、object tracking、recording、snapshot、clip、zone、event lifecycle 全包掉。Demo 本地只需要把 Frigate 的「有活動 / 有人物事件」當成 high-recall trigger；真正「這人在幹嘛、要不要介入」全部交給 M3。
+    </div>
+  </section>
+</main>
+
+<dialog id="detailDialog">
+  <div class="modal-head">
+    <h2 id="detailTitle"></h2>
+    <button class="close" id="closeDialog">×</button>
+  </div>
+  <div class="modal-body" id="detailBody"></div>
+</dialog>
+
+<script>
+const details = {
+camera:{
+  title:"手機鏡頭",
+  desc:"Frigate 最順的輸入是 ffmpeg 能吃的 camera stream，通常是 RTSP / RTMP / HTTP 等。Demo 如果用手機，建議直接讓手機提供 RTSP 或其他網路串流，再交給 Frigate / go2rtc。iPhone Continuity Camera 雖然能直接當 Mac webcam，但它不是 Frigate 最自然的 camera source。",
+  inputs:["iPhone / Android camera app","RTSP / ffmpeg-compatible source"],
+  outputs:["camera stream"],
+  fields:[
+    ["camera_name","string","例如 living_room"],
+    ["stream_url","string","RTSP / HTTP stream"],
+    ["resolution","string","原始解析度"],
+    ["fps","number","camera FPS"],
+    ["detect_fps","number","Frigate detection FPS"]
+  ],
+  runtime:"如果朋友要快速試做，手機直接開 RTSP stream 通常比把 Continuity Camera 硬塞進 Docker / Frigate 乾淨。",
+  example:`cameras:
+  living_room:
+    ffmpeg:
+      inputs:
+        - path: rtsp://PHONE_IP:8554/live
+          roles:
+            - detect
+            - record`
+},
+mic:{
+  title:"麥克風",
+  desc:"麥克風 24/7 保持開啟，但不代表 Whisper 24/7 做完整解碼。audio stream 先進 VAD。",
+  inputs:["PCM audio stream"],
+  outputs:["audio chunks"],
+  fields:[
+    ["source_id","string","麥克風 ID"],
+    ["sample_rate","int","建議 16000 Hz"],
+    ["channels","int","通常 1"],
+    ["chunk_ms","int","處理區塊大小"],
+    ["timestamp","datetime","音訊時間"]
+  ],
+  runtime:"持續收音本身很輕，真正吃資源的是 ASR。",
+  example:`{
+  "source_id":"mac_mic",
+  "sample_rate":16000,
+  "channels":1
+}`
+},
+fake_health:{
+  title:"Fake Health Data",
+  desc:"Demo 不接真的 HealthKit，就用 mock data 驗證 M3 是否能把健康 context 和視覺事件一起推理。",
+  inputs:["demo controls"],
+  outputs:["fake measurements"],
+  fields:[
+    ["sample_type","string","heart_rate / steps / activity"],
+    ["value","number/string","資料值"],
+    ["unit","string","bpm / count 等"],
+    ["is_mock","boolean","永遠 true"],
+    ["recorded_at","datetime","時間"]
+  ],
+  runtime:"幾乎零成本。",
+  example:`{"sample_type":"heart_rate","value":118,"unit":"bpm","is_mock":true}`
+},
+frigate:{
+  title:"Frigate",
+  desc:"本地影像基礎設施核心。Frigate 負責 camera ingest、ffmpeg / go2rtc、motion detection、object detection、tracked objects、zones、recording、snapshots、clips、event lifecycle，以及透過 API / MQTT 把事件交給你的 agent backend。",
+  inputs:["camera stream"],
+  outputs:["motion / object events","tracked object updates","zone events","recordings","snapshots","clips"],
+  fields:[
+    ["camera","string","來源 camera"],
+    ["label","string","例如 person"],
+    ["score","number","object detector confidence"],
+    ["box","array","bounding box"],
+    ["zones","array","目前進入的 zones"],
+    ["start_time","number","event 開始時間"],
+    ["end_time","number/null","event 結束"],
+    ["has_clip","boolean","是否有錄影片段"],
+    ["has_snapshot","boolean","是否可取 snapshot"]
+  ],
+  runtime:"Frigate 本身比最小手寫 YOLO loop 多一些 ffmpeg / recording / UI / DB 開銷，但它把大量 NVR 基礎工作都做好了。Demo 只要 1 路手機 camera 時可關掉不必要的長期 recording，降低 SSD I/O。",
+  example:`{
+  "camera":"living_room",
+  "label":"person",
+  "score":0.91,
+  "zones":["center"],
+  "has_clip":true,
+  "has_snapshot":true
+}`
+},
+vad:{
+  title:"Silero VAD",
+  desc:"24/7 常駐，只判斷這段 audio 有沒有語音。偵測到 speech segment 才啟動 Whisper Large V3。",
+  inputs:["continuous microphone audio"],
+  outputs:["speech start / end segments"],
+  fields:[
+    ["speech_probability","number","目前語音機率"],
+    ["start_ms","int","語音開始"],
+    ["end_ms","int","語音結束"],
+    ["segment_id","string","語音片段 ID"]
+  ],
+  runtime:"極輕量，拿來 gate Whisper 很適合。",
+  example:`{"speech_probability":0.98,"start_ms":1230,"end_ms":4610}`
+},
+runtime_health:{
+  title:"Health Runtime",
+  desc:"把 Fake Health Generator 的最近狀態維持在記憶體中，事件發生時直接塞進 M3 payload。",
+  inputs:["fake health measurements"],
+  outputs:["latest health state"],
+  fields:[
+    ["heart_rate","number/null","最近心率"],
+    ["activity","string/null","最近活動"],
+    ["updated_at","datetime","最後更新"]
+  ],
+  runtime:"Demo 可直接用 process memory，不需要獨立服務。",
+  example:`{"heart_rate":118,"activity":"walking","updated_at":"..."}`
+},
+event_adapter:{
+  title:"Frigate Event Adapter",
+  desc:"把 Frigate 原生 event / tracked object update 轉成你自己的 candidate event schema。這層故意 high recall：只要 person 有明顯 motion、進 zone、出現新 tracked object、event lifecycle 更新，都可以考慮送 M3。",
+  inputs:["Frigate MQTT / API events"],
+  outputs:["candidate event JSON"],
+  fields:[
+    ["event_id","string","你自己的事件 ID"],
+    ["frigate_event_id","string","Frigate event ID"],
+    ["camera","string","來源 camera"],
+    ["type","string","person_activity / zone_enter / motion_change 等"],
+    ["confidence","number","本地粗略信心"],
+    ["started_at","datetime","事件開始"],
+    ["evidence","array","Frigate evidence"]
+  ],
+  runtime:"這層只做 schema normalize + trigger policy，不做高階語意。",
+  example:`{
+  "event_id":"evt_17",
+  "frigate_event_id":"1712.abc",
+  "camera":"living_room",
+  "type":"person_activity",
+  "confidence":0.74,
+  "evidence":["person tracked","large motion","zone=center"]
+}`
+},
+asr:{
+  title:"Whisper Large V3",
+  desc:"VAD 觸發後才跑的本地 ASR。每段語音完成後寫進 transcript buffer，所以視覺事件出現時可以直接抓最近 10–15 秒老人講了什麼。",
+  inputs:["VAD speech segment"],
+  outputs:["timestamped transcript segment"],
+  fields:[
+    ["segment_id","string","語音片段 ID"],
+    ["text","string","逐字稿"],
+    ["started_at","datetime","開始時間"],
+    ["ended_at","datetime","結束時間"],
+    ["language","string","例如 zh"],
+    ["confidence","number/null","若 runtime 提供"]
+  ],
+  runtime:"Large V3 約 1.55B 參數，16GB Mac mini 能不能同時和 Frigate 跑得漂亮要實機 benchmark；VAD gate 會比 24/7 無條件 decode 省很多。如果壓力太大，可把 ASR fallback 換 large-v3-turbo，而不改整個架構。",
+  example:`{
+  "segment_id":"seg_21",
+  "text":"我等等要出去一下",
+  "started_at":"14:31:02",
+  "ended_at":"14:31:05"
+}`
+},
+media:{
+  title:"Frigate Snapshot / Clip",
+  desc:"不需要自己再寫 rolling video ring buffer。Frigate 本來就能為 tracked-object event 產生 snapshot / clip；candidate event 觸發時直接取得對應圖片或短片。",
+  inputs:["Frigate event ID"],
+  outputs:["snapshot URL / bytes","event clip URL / file"],
+  fields:[
+    ["frigate_event_id","string","Frigate event ID"],
+    ["snapshot","file/url","事件 snapshot"],
+    ["clip","file/url","事件短片"],
+    ["start_time","datetime","clip 開始"],
+    ["end_time","datetime","clip 結束"]
+  ],
+  runtime:"要注意保留策略。Demo 不需要長期 24/7 錄影，也可以只保留短事件片段。",
+  example:`{
+  "frigate_event_id":"1712.abc",
+  "snapshot":"/api/events/1712.abc/snapshot.jpg",
+  "clip":"/api/events/1712.abc/clip.mp4"
+}`
+},
+gate:{
+  title:"Event Gate",
+  desc:"邏輯非常簡單：沒有 candidate event 就繼續 Frigate；只要 Frigate Event Adapter 產生 candidate event，就一律交給 MiniMax M3。",
+  inputs:["candidate event"],
+  outputs:["CONTINUE / SEND_TO_M3"],
+  fields:[
+    ["event_id","string","事件 ID"],
+    ["has_candidate","boolean","是否有事件"],
+    ["route","enum","CONTINUE / SEND_TO_M3"]
+  ],
+  runtime:"純邏輯，幾乎零成本。",
+  example:`{"event_id":"evt_17","has_candidate":true,"route":"SEND_TO_M3"}`
+},
+transcript_buffer:{
+  title:"Transcript Buffer",
+  desc:"保存最近一小段 Whisper 逐字稿。視覺事件發生時，抓最近約 10–15 秒文字一起塞給 M3；比把連續 audio 上雲簡單很多。",
+  inputs:["Whisper transcript segments"],
+  outputs:["recent speech context"],
+  fields:[
+    ["window_sec","int","例如 15"],
+    ["segments","array","最近語音片段"],
+    ["combined_text","string","合併文字"],
+    ["start_time","datetime","buffer 起點"],
+    ["end_time","datetime","buffer 終點"]
+  ],
+  runtime:"純文字 ring buffer，成本極低。",
+  example:`{
+  "window_sec":15,
+  "combined_text":"我等等要出去一下。我的袋子放哪裡？"
+}`
+},
+continue:{
+  title:"Continue Local Monitoring",
+  desc:"沒有事件時，Frigate 繼續做本地 camera / motion / object tracking；音訊 VAD 也照常工作。MiniMax 完全不會被叫。",
+  inputs:["no candidate event"],
+  outputs:["monitoring loop"],
+  fields:[
+    ["route","string","CONTINUE"]
+  ],
+  runtime:"正常狀態下雲端視覺推理為零。",
+  example:`{"route":"CONTINUE"}`
+},
+payload:{
+  title:"Build M3 Payload",
+  desc:"把 Frigate candidate event、事件 snapshot / clip、最近 10–15 秒 transcript、Fake Health、Current State、相關 Memory 組成一個 multimodal request。",
+  inputs:["candidate event","Frigate media","transcript buffer","health","state","memory"],
+  outputs:["MiniMax M3 request payload"],
+  fields:[
+    ["event","json","Frigate-derived candidate event"],
+    ["visual_context","image/video","事件圖片或短片"],
+    ["recent_speech","string","最近 10–15 秒逐字稿"],
+    ["health","json/null","Fake Health"],
+    ["state","json","Current State"],
+    ["memories","array","相關記憶"],
+    ["task","string","要求 M3 做判斷與行動"]
+  ],
+  runtime:"這才是高資訊密度 payload；不是把整條 camera stream 丟雲端。",
+  example:`{
+  "event":{
+    "type":"person_activity",
+    "camera":"living_room"
+  },
+  "visual_context":"frigate_event_1712.abc.mp4",
+  "recent_speech":"我等等要出去一下，我的袋子呢？",
+  "health":{"heart_rate":91,"is_mock":true},
+  "task":"理解現在發生什麼，必要時自行呼叫工具"
+}`
+},
+m3:{
+  title:"MiniMax M3",
+  desc:"唯一高階智能核心。M3 看 Frigate 事件畫面與 transcript，自己判斷『到底發生什麼』，再自主呼叫 Memory / State / Health / Speak / Notify / Frontend 等工具。",
+  inputs:["multimodal event package"],
+  outputs:["semantic interpretation","tool calls","final action","memory/state updates"],
+  fields:[
+    ["interpretation","string","事件高階解讀"],
+    ["tool_calls","array","工具呼叫"],
+    ["final_action","string","speak / notify / nothing / ask"],
+    ["memory_proposals","array","要保存的記憶"],
+    ["state_updates","array","狀態更新"]
+  ],
+  runtime:"本地不需要任何真正 LLM / VLM；所有高階推理都交給雲端 M3。",
+  example:`{
+  "interpretation":"使用者正在拿袋子準備出門",
+  "tool_calls":[
+    {"name":"search_memory","args":{"query":"今天已買過哪些東西"}},
+    {"name":"speak","args":{"text":"如果要出門，牛奶今天已經買過了喔。"}}
+  ]
+}`
+},
+memory_tool:{
+  title:"Memory Tools",
+  desc:"提供受控工具給 M3 管理記憶，不讓模型直接寫 arbitrary SQL。",
+  inputs:["M3 tool call"],
+  outputs:["memory result / confirmation"],
+  fields:[
+    ["search_memory(query, limit)","tool","搜尋"],
+    ["save_memory(type, content, source_id)","tool","新增"],
+    ["update_memory(memory_id, content)","tool","更新"],
+    ["invalidate_memory(memory_id)","tool","失效"]
+  ],
+  runtime:"所有 args 應做 JSON Schema 驗證。",
+  example:`search_memory(query="今天有沒有買牛奶", limit=5)`
+},
+state_tool:{
+  title:"State Tools",
+  desc:"讓 M3 查 / 更新 Current State。",
+  inputs:["M3 tool call"],
+  outputs:["state / confirmation"],
+  fields:[
+    ["get_state(entity_id)","tool","查狀態"],
+    ["update_state(entity_id, property, value)","tool","更新狀態"]
+  ],
+  runtime:"Demo 可直接用 in-memory；需要持久化的資料寫 SQLite。正式版再視需求加入 Redis。",
+  example:`update_state(entity_id="resident_001", property="activity", value="leaving_home")`
+},
+health_tool:{
+  title:"Health Tool",
+  desc:"Demo 從 Fake Health Runtime 讀資料。之後換 HealthKit backend 時保留相同 tool interface。",
+  inputs:["M3 health query"],
+  outputs:["health data"],
+  fields:[
+    ["get_recent_health(type, seconds)","tool","查最近資料"],
+    ["get_health_summary(minutes)","tool","查摘要"]
+  ],
+  runtime:"Demo 是 mock。",
+  example:`get_recent_health(type="heart_rate", seconds=60)`
+},
+speak_tool:{
+  title:"Speak Tool",
+  desc:"M3 決定需要對老人說話時呼叫 TTS。",
+  inputs:["text","priority"],
+  outputs:["spoken response"],
+  fields:[
+    ["text","string","內容"],
+    ["priority","string","normal / high"],
+    ["interruptible","boolean","可否被打斷"]
+  ],
+  runtime:"Mac / Windows 都可以先用系統 TTS。",
+  example:`{"text":"你還好嗎？","priority":"high","interruptible":true}`
+},
+notify_tool:{
+  title:"Notify Tool",
+  desc:"M3 判斷需要照護者介入時呼叫。",
+  inputs:["recipient","message","severity","event_id"],
+  outputs:["notification"],
+  fields:[
+    ["recipient_id","string","對象"],
+    ["message","string","內容"],
+    ["severity","string","風險"],
+    ["event_id","string","來源事件"]
+  ],
+  runtime:"Demo 可先在前端模擬通知卡。",
+  example:`{"recipient_id":"caregiver_01","severity":"critical","message":"疑似跌倒且沒有回應"}`
+},
+frontend_tool:{
+  title:"Frontend Tool",
+  desc:"把 Frigate event、M3 interpretation、tool calls、current state、decision log 更新到 Dashboard。",
+  inputs:["event / decision / state update"],
+  outputs:["frontend update"],
+  fields:[
+    ["event_id","string","事件"],
+    ["camera","string","來源鏡頭"],
+    ["interpretation","string","M3 解讀"],
+    ["action","string","最終行動"],
+    ["tool_log","array","工具紀錄"]
+  ],
+  runtime:"Demo UI 最適合展示 Frigate Trigger → M3 Understanding → Tool Call 的完整時間線。",
+  example:`{"event_id":"evt_17","interpretation":"picking object","action":"nothing"}`
+},
+feedback:{
+  title:"User Feedback",
+  desc:"老人新的回答仍然走 Mic → VAD → Whisper → Transcript Buffer。M3 下次被觸發或建立新的 Agent turn 時，就能把這些回答作為 correction / confirmation / preference。",
+  inputs:["new transcript"],
+  outputs:["new conversational context"],
+  fields:[
+    ["related_event_id","string/null","關聯事件"],
+    ["text","string","老人回答"],
+    ["timestamp","datetime","時間"],
+    ["type","string/null","correction / confirmation / preference"]
+  ],
+  runtime:"不需要另外做 feedback ASR。",
+  example:`{"related_event_id":"evt_17","text":"沒有啦，我只是撿東西","type":"correction"}`
+},
+db:{
+  title:"SQLite",
+  desc:"Demo 的唯一持久化資料庫。用單一 .db 檔保存事件、語音逐字稿、M3 判斷、記憶、工具呼叫、決策與假健康資料；不需要額外啟動 PostgreSQL / Supabase service。",
+  inputs:["persistent structured data from Frigate adapter / Whisper / MiniMax tool runtime"],
+  outputs:["history queries","memory search","decision audit"],
+  fields:[
+    ["events","table","candidate event、final label、confidence、status、timestamps"],
+    ["event_media","table","Frigate snapshot / clip 的 path 或 URL reference"],
+    ["transcripts","table","Whisper transcript、start/end time、related_event_id"],
+    ["memories","table","episodic / semantic / preference memory"],
+    ["tool_calls","table","MiniMax M3 呼叫過的工具、args、result、timestamp"],
+    ["decisions","table","M3 interpretation、final action、reason"],
+    ["health_samples","table","Demo fake health samples，is_mock=1"],
+    ["settings","table","Demo 設定、buffer window、模型版本等"]
+  ],
+  runtime:"Demo 直接使用單檔 SQLite。啟動時建議執行 PRAGMA journal_mode=WAL; 與 PRAGMA foreign_keys=ON;。event media 不存 blob，只存 Frigate clip / snapshot 的 path 或 reference，避免 DB 爆肥。朋友 clone 專案後不必另起 DB service；之後真的要多使用者、多裝置、遠端同步時，再把 repository layer 換成 PostgreSQL 即可。",
+  example:`PRAGMA journal_mode=WAL;
+PRAGMA foreign_keys=ON;
+
+events
+event_media
+transcripts
+memories
+tool_calls
+decisions
+health_samples
+settings`
+},runtime:{
+  title:"Runtime State",
+  desc:"保存 Current State、最近 events、Transcript Buffer、cooldown 等短命資料。",
+  inputs:["local / M3 updates"],
+  outputs:["fast context lookup"],
+  fields:[
+    ["current_state","json","現在狀態"],
+    ["recent_events","array","近期事件"],
+    ["transcript_buffer","array","最近 10–15 秒文字"],
+    ["cooldowns","json","避免重複 action"]
+  ],
+  runtime:"Demo 可直接用 process memory，不需要 Redis。",
+  example:`{
+  "current_state":{"location":"living_room"},
+  "recent_events":["evt_17"],
+  "transcript_buffer":["我等等要出去一下"]
+}`
+}
+};
+
+const dialog=document.getElementById("detailDialog");
+const title=document.getElementById("detailTitle");
+const body=document.getElementById("detailBody");
+
+function esc(s){
+  return String(s??"")
+    .replaceAll("&","&amp;")
+    .replaceAll("<","&lt;")
+    .replaceAll(">","&gt;");
+}
+function list(items){
+  return `<ul>${(items||[]).map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`;
+}
+function table(rows){
+  return `<table>
+    <thead><tr><th>欄位 / Tool</th><th>型別</th><th>說明</th></tr></thead>
+    <tbody>${(rows||[]).map(r=>`<tr><td><code>${esc(r[0])}</code></td><td>${esc(r[1])}</td><td>${esc(r[2])}</td></tr>`).join("")}</tbody>
+  </table>`;
+}
+function openDetail(id){
+  const d=details[id];
+  if(!d)return;
+  title.textContent=d.title;
+  body.innerHTML=`
+    <div class="block"><h3>用途</h3><p>${esc(d.desc)}</p></div>
+    <div class="block"><h3>接收什麼</h3>${list(d.inputs)}</div>
+    <div class="block"><h3>傳給下一層什麼</h3>${list(d.outputs)}</div>
+    <div class="block"><h3>欄位 / Schema / Tool 介面</h3>${table(d.fields)}</div>
+    <div class="block"><h3>執行位置 / 成本 / 注意事項</h3><div class="warn">${esc(d.runtime)}</div></div>
+    <div class="block"><h3>資料範例</h3><pre>${esc(d.example)}</pre></div>
+  `;
+  dialog.showModal();
+}
+
+document.querySelectorAll(".node[data-id]").forEach(el=>{
+  el.addEventListener("click",()=>openDetail(el.dataset.id));
+});
+document.getElementById("closeDialog").onclick=()=>dialog.close();
+dialog.addEventListener("click",e=>{
+  const r=dialog.getBoundingClientRect();
+  if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)dialog.close();
+});
+</script>
+</body>
+</html>
