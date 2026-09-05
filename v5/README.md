@@ -28,7 +28,7 @@ RTSP / Replay
       │ person, or L1 unhealthy, or a fall being tracked
       ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ L2 · Gemini 3.5 Flash Lite        cost: per window          │
+│ L2 · local vLLM / Nemotron        cost: per window          │
 │ structured observation + an explicit escalation decision    │
 └─────────────────────────────────────────────────────────────┘
       │
@@ -39,7 +39,7 @@ RTSP / Replay
       │ escalation.required, or a high-risk state
       ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ L3 · MiniMax M3                   cost: per escalation      │
+│ L3 · same local vLLM model        cost: per escalation      │
 │ sees the clip itself, may contradict L2, recommends only    │
 └─────────────────────────────────────────────────────────────┘
       │
@@ -88,20 +88,23 @@ Windows/WSL, macOS or Linux with nothing else installed.
 cd v5
 bun install
 bun run migrate          # create data/care.sqlite3
-bun start                # http://127.0.0.1:8000
+bun start                # http://127.0.0.1:8200
 ```
 
-With no API keys configured, both model slots fall back to offline stubs
-that reproduce the providers' *contracts* — so schema validation, the
-repair path, the state machines, escalation and the audit trail are all
-exercised for real. Open **Setup**, run a scenario, and watch the cascade:
+By default, L2, L3 and the legacy Main Agent use one local vLLM
+OpenAI-compatible endpoint (`VLLM_BASE_URL`, model `nemotron_omni`). Use
+`--stubs` when vLLM is unavailable; the stubs reproduce the provider
+contracts so schema validation, repair, state machines, escalation and the
+audit trail can still be exercised:
 
 ```bash
 bun start -- --source fall     # or: empty_room, hydration, l1_false_negative
+bun start -- --stubs --source fall  # offline contract trial
 ```
 
-Then configure real providers in **Settings**. L2 and L3 are configured
-independently, by design.
+The care API uses port 8200 so it does not collide with local vLLM on port
+8000. Gemini and MiniMax adapters remain available with `L2_PROVIDER=gemini`
+and `L3_PROVIDER=minimax`.
 
 ```bash
 bun run verify           # compile check + 122 tests + frontend typecheck
@@ -182,12 +185,13 @@ realistic way for a key to end up in a database.
 
 ## Status
 
-Implemented and verified: the full L1 → L2 → L3 → Policy cascade, both
-state machines, the SQLite schema with `pipeline_runs`, the REST API and
-WebSocket push, the Dashboard with the three-layer panel and the cascade
-trace, Setup and Settings with versioning and rollback, Telegram delivery
-with opaque single-use acknowledgement tokens, the daily observer, RTSP
-and replay ingest, and both capability probes.
+Implemented and verified: the full L1 → L2 → L3 → Policy cascade, the
+original-flow-compatible change gate, browser WebM/audio ingress, Main Agent,
+memory candidates and resident interaction, both state machines, the SQLite
+schema with `pipeline_runs`, the REST API and WebSocket push, the Dashboard
+with the three-layer panel and cascade trace, Setup and Settings with
+versioning and rollback, Telegram delivery, the daily observer, RTSP and
+replay ingest, and both capability probes.
 
 Known gaps: the Gemini probe has not been run against a real key (see
 `docs/MEASURED_CAPABILITIES.md`); the audio/ASR path is specified and has

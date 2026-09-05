@@ -2,10 +2,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import type { RealtimeClient } from "../api/ws";
 import { Card, Empty } from "../components/ui";
-import type { CareAction, CareEvent, PipelineRun, RunStats, Status } from "../types/api";
+import type { CareAction, CareEvent, ObservationRecord, PipelineRun, RunStats, Status } from "../types/api";
 import { CascadeTrace } from "./CascadeTrace";
 import { PipelinePanel } from "./PipelinePanel";
 import { RunTable } from "./RunTable";
+import { CapturePanel } from "../media/CapturePanel";
+import { InteractionPanel } from "../interaction/Panel";
+import { ObservationHistory } from "./ObservationHistory";
 import {
   ActionsPanel, EventTimeline, HealthPanel, HydrationPanel, LogPanel, SourcePanel,
 } from "./SidePanels";
@@ -14,6 +17,7 @@ type Hydration = { sessions: number; total_ml: number; target_ml: number; progre
 
 export function DashboardPage({ status, realtime }: { status: Status | null; realtime: RealtimeClient }) {
   const [runs, setRuns] = useState<PipelineRun[]>([]);
+  const [observations, setObservations] = useState<ObservationRecord[]>([]);
   const [stats, setStats] = useState<RunStats | null>(null);
   const [events, setEvents] = useState<CareEvent[]>([]);
   const [actions, setActions] = useState<CareAction[]>([]);
@@ -30,12 +34,13 @@ export function DashboardPage({ status, realtime }: { status: Status | null; rea
   const pending = useRef<number | null>(null);
 
   const refresh = useCallback(async () => {
-    const [runData, eventData, actionData, hydrationData, healthData, logData, observerData] =
+    const [runData, observationData, eventData, actionData, hydrationData, healthData, logData, observerData] =
       await Promise.allSettled([
-        api.runs(60), api.events(30), api.actions(30), api.hydration(),
+        api.runs(60), api.observations(12), api.events(30), api.actions(30), api.hydration(),
         api.health(), api.logs(60), api.observerFindings(),
       ]);
     if (runData.status === "fulfilled") { setRuns(runData.value.runs); setStats(runData.value.stats); }
+    if (observationData.status === "fulfilled") setObservations(observationData.value.observations);
     if (eventData.status === "fulfilled") setEvents(eventData.value.events);
     if (actionData.status === "fulfilled") setActions(actionData.value.actions);
     if (hydrationData.status === "fulfilled") setHydration(hydrationData.value);
@@ -77,6 +82,8 @@ export function DashboardPage({ status, realtime }: { status: Status | null; rea
     <div className="stack">
       {stats && <PipelinePanel status={status} stats={stats} />}
 
+      <CapturePanel />
+
       <SourcePanel
         status={status}
         scenarios={scenarios}
@@ -84,6 +91,8 @@ export function DashboardPage({ status, realtime }: { status: Status | null; rea
         onStart={(id) => control(() => api.startSource("replay_scenario", id))}
         onStop={() => control(() => api.stopSource())}
       />
+
+      <ObservationHistory observations={observations} />
 
       {selected && <CascadeTrace eventId={selected} onClose={() => setSelected(null)} />}
 
@@ -101,6 +110,8 @@ export function DashboardPage({ status, realtime }: { status: Status | null; rea
         <ActionsPanel actions={actions} />
         <LogPanel logs={logs} />
       </div>
+
+      <InteractionPanel />
     </div>
   );
 }

@@ -21,6 +21,7 @@ from typing import Iterable
 #: Every secret the system knows about. Anything not listed is rejected,
 #: so a typo cannot silently create an unreachable second key.
 SECRET_KEYS = (
+    "VLLM_API_KEY",
     "GEMINI_API_KEY",
     "MINIMAX_API_KEY",
     "RTSP_PASSWORD",

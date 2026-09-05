@@ -30,6 +30,9 @@ class FramePacket:
     #: deterministic replay can exercise the cascade end to end; the real
     #: L1 and L2 adapters ignore it entirely.
     annotation: dict | None = None
+    #: Optional PCM snapshot attached by the browser media bridge. Sources
+    #: without audio leave it unset; the frame contract remains unchanged.
+    audio_pcm: bytes | None = None
 
     @property
     def size_bytes(self) -> int:

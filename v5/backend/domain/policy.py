@@ -7,8 +7,19 @@ move any of them.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, replace
 from typing import Any
+
+
+def _env_int(name: str, default: int, minimum: int = 1, maximum: int | None = None) -> int:
+    try:
+        value = int(os.environ.get(name, str(default)))
+    except ValueError:
+        value = default
+    if maximum is not None:
+        value = min(maximum, value)
+    return max(minimum, value)
 
 
 @dataclass(frozen=True)
@@ -36,8 +47,19 @@ class CadencePolicy:
     heartbeat_interval_sec: float = 45.0
     #: follow-up cadence once an event is suspect/confirmed
     high_risk_interval_sec: float = 4.0
-    window_seconds: float = 8.0
-    clip_fps: float = 4.0
+    window_seconds: float = 5.0
+    clip_fps: float = 2.0
+    #: Local vLLM observation fan-out. 12 is a ceiling, not a requirement.
+    max_parallel_observations: int = _env_int("VLLM_MAX_CONCURRENCY", 12, maximum=12)
+    #: Keep recent work for the idle drain; urgent items are selected first.
+    observation_queue_capacity: int = _env_int("VLLM_MAX_PENDING_WINDOWS", 48)
+    #: Original Longcare L0 change gate. It is an accelerator, never a
+    #: safety veto for high-risk or heartbeat windows.
+    change_gate_enabled: bool = True
+    change_gate_threshold: float = 0.06
+    change_gate_audio_delta_threshold: float = 0.06
+    change_gate_min_changed_pairs: int = 2
+    change_gate_strong_score_multiplier: float = 2.5
 
 
 @dataclass(frozen=True)

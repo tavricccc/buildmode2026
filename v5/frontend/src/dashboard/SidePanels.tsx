@@ -60,11 +60,12 @@ export function SourcePanel({ status, onStart, onStop, scenarios, busy }: {
   busy: boolean;
 }) {
   const source = status.source;
+  const browserLive = Boolean(status.browser_media?.some((item) => item.running));
   const frames = status.cascade.frames;
-  const starved = status.cascade.starved_since_ms !== null;
+  const starved = status.cascade.starved_since_ms !== null && !browserLive;
   return (
-    <Card title="Source" aside={<Badge tone={source.running ? "ok" : "muted"} dot>
-      {source.running ? source.kind ?? "running" : "stopped"}
+    <Card title="Source" aside={<Badge tone={source.running || browserLive ? "ok" : "muted"} dot>
+      {browserLive ? "browser live" : source.running ? source.kind ?? "running" : "stopped"}
     </Badge>}>
       {starved && <p className="banner" style={{ marginBottom: ".6rem" }}>
         No frames arriving — the source has stopped producing.
@@ -81,7 +82,7 @@ export function SourcePanel({ status, onStart, onStop, scenarios, busy }: {
             ▶ {scenario.name}
           </button>
         ))}
-        <button className="action" disabled={busy || !source.running} onClick={onStop}>■ Stop</button>
+        <button className="action" disabled={busy || !source.running} onClick={onStop}>■ Stop replay</button>
       </div>
     </Card>
   );

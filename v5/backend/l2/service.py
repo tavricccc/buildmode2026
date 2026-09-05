@@ -71,6 +71,8 @@ class L2Service:
         self,
         clip: VideoClip | None,
         *,
+        frames: list[bytes] | tuple[bytes, ...] | None = None,
+        audio_pcm: bytes | None = None,
         event_state: str = "idle",
         transcript: str | None = None,
         heartbeat: bool = False,
@@ -99,7 +101,14 @@ class L2Service:
         parts: list[dict[str, Any]] = [self.backend.text_part(prompt)]
         try:
             if clip is not None:
-                parts.append(self.backend.media_part(clip.path, clip.mime_type, cleanup))
+                frame_builder = getattr(self.backend, "frame_parts", None)
+                if frames and frame_builder is not None:
+                    try:
+                        parts.extend(frame_builder(frames, clip.mime_type, audio_pcm))
+                    except TypeError:
+                        parts.extend(frame_builder(frames, clip.mime_type))
+                else:
+                    parts.append(self.backend.media_part(clip.path, clip.mime_type, cleanup))
         except (GeminiError, OSError) as exc:
             return self._fail(call, "media_upload_failed", str(exc), 0)
 
@@ -187,3 +196,17 @@ def build_gemini_l2(api_key: str, model: str, base_url: str, timeout_sec: float,
         inline_limit_bytes=inline_limit_bytes,
     )
     return L2Service(client, provider="gemini", redact=redact)
+
+
+def build_local_vllm_l2(api_key: str, model: str, base_url: str, timeout_sec: float,
+                        redact: Any = None, enable_thinking: bool = False) -> L2Service:
+    from ..local_vllm import LocalVllmClient
+
+    client = LocalVllmClient(
+        model=model,
+        base_url=base_url,
+        api_key=api_key,
+        timeout_sec=timeout_sec,
+        enable_thinking=enable_thinking,
+    )
+    return L2Service(client, provider="local_vllm", redact=redact)

@@ -86,18 +86,52 @@ class Repositories:
         )
         return evidence_id
 
+    # -- observation history --------------------------------------------
+
+    def save_observation(self, run_id: str, subject_id: str, observed_at_ms: int,
+                         summary: str, confidence: float,
+                         payload: dict[str, Any]) -> str:
+        observation_id = new_id("obs")
+        self.db.execute(
+            """INSERT OR REPLACE INTO observations
+               (observation_id, run_id, subject_id, observed_at_ms, summary,
+                confidence, payload_json, created_at)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (observation_id, run_id, subject_id, observed_at_ms, summary[:1200],
+             max(0.0, min(1.0, float(confidence))), _json(payload), iso()),
+        )
+        return observation_id
+
+    def list_observations(self, subject_id: str, limit: int = 12) -> list[dict[str, Any]]:
+        rows = self.db.query(
+            "SELECT * FROM observations WHERE subject_id=? "
+            "ORDER BY observed_at_ms DESC, created_at DESC LIMIT ?",
+            (subject_id, limit),
+        )
+        out = []
+        for row in rows:
+            item = _row(row)
+            try:
+                item["payload"] = json.loads(item.pop("payload_json") or "{}")
+            except json.JSONDecodeError:
+                item["payload"] = {}
+            out.append(item)
+        return out
+
     # -- pipeline runs ---------------------------------------------------
 
     def save_run(self, run: PipelineRun) -> str:
+        placeholders = ",".join("?" for _ in range(34))
         self.db.execute(
-            """INSERT OR REPLACE INTO pipeline_runs
+            f"""INSERT OR REPLACE INTO pipeline_runs
                (run_id, subject_id, window_started_at_ms, window_ended_at_ms, config_version,
                 l1_decision, l1_confidence, l1_detector_id, l1_latency_ms, l1_health,
                 l2_outcome, l2_reason, l2_model, l2_call_id, l2_latency_ms, l2_repaired,
                 l2_escalation_required, l2_escalation_reasons, l2_error,
                 l3_outcome, l3_reason, l3_model, l3_call_id, l3_latency_ms, l3_risk_level, l3_error,
-                evidence_id, clip_path, event_ids, action_ids, created_at)
-               VALUES (?,?,?,?,?, ?,?,?,?,?, ?,?,?,?,?,?, ?,?,?, ?,?,?,?,?,?,?, ?,?,?,?,?)""",
+                evidence_id, clip_path, change_detected, change_score, change_reasons,
+                event_ids, action_ids, created_at)
+               VALUES ({placeholders})""",
             (
                 run.run_id, run.subject_id, run.window_started_at_ms, run.window_ended_at_ms,
                 run.config_version,
@@ -107,7 +141,8 @@ class Repositories:
                 _json(run.l2_escalation_reasons), run.l2_error,
                 run.l3_outcome, run.l3_reason, run.l3_model, run.l3_call_id, run.l3_latency_ms,
                 run.l3_risk_level, run.l3_error,
-                run.evidence_id, run.clip_path, _json(run.event_ids), _json(run.action_ids),
+                run.evidence_id, run.clip_path, int(run.change_detected), run.change_score,
+                _json(run.change_reasons), _json(run.event_ids), _json(run.action_ids),
                 run.created_at,
             ),
         )
@@ -144,13 +179,14 @@ class Repositories:
 
     @staticmethod
     def _decode_run(row: dict[str, Any]) -> dict[str, Any]:
-        for column in ("l2_escalation_reasons", "event_ids", "action_ids"):
+        for column in ("l2_escalation_reasons", "change_reasons", "event_ids", "action_ids"):
             try:
                 row[column] = json.loads(row.get(column) or "[]")
             except json.JSONDecodeError:
                 row[column] = []
         row["l2_repaired"] = bool(row.get("l2_repaired"))
         row["l2_escalation_required"] = bool(row.get("l2_escalation_required"))
+        row["change_detected"] = bool(row.get("change_detected", 1))
         return row
 
     def run_stats(self, since_ms: int) -> dict[str, Any]:
@@ -452,6 +488,119 @@ class Repositories:
     def list_findings(self, limit: int = 30) -> list[dict[str, Any]]:
         return [_row(r) for r in self.db.query(
             "SELECT * FROM observer_findings ORDER BY created_at DESC LIMIT ?", (limit,))]
+
+    # -- original Longcare flow: agent / memory / interaction ------------
+
+    def save_agent_run(self, subject_id: str, agent_name: str, trigger_type: str,
+                       trigger_id: str | None, window_id: str | None,
+                       input_context: dict[str, Any], dedup_key: str,
+                       provider: str = "local_vllm", model: str = "",
+                       status: str = "running") -> tuple[str, bool]:
+        existing = self.db.query_one(
+            "SELECT agent_run_id, status FROM agent_runs WHERE dedup_key=?", (dedup_key,))
+        if existing is not None:
+            return str(existing["agent_run_id"]), False
+        agent_run_id = new_id("agent")
+        self.db.execute(
+            """INSERT INTO agent_runs
+               (agent_run_id, subject_id, agent_name, trigger_type, trigger_id,
+                window_id, status, input_context_json, provider, model,
+                dedup_key, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (agent_run_id, subject_id, agent_name, trigger_type, trigger_id,
+             window_id, status, _json(input_context), provider, model,
+             dedup_key, iso()),
+        )
+        return agent_run_id, True
+
+    def finish_agent_run(self, agent_run_id: str, status: str,
+                         output: dict[str, Any] | None = None,
+                         error_code: str | None = None,
+                         latency_ms: int | None = None) -> None:
+        self.db.execute(
+            """UPDATE agent_runs SET status=?, output_json=?, error_code=?,
+               latency_ms=?, completed_at=? WHERE agent_run_id=?""",
+            (status, _json(output or {}), error_code, latency_ms, iso(), agent_run_id),
+        )
+
+    def list_agent_runs(self, limit: int = 50, agent_name: str | None = None) -> list[dict[str, Any]]:
+        if agent_name:
+            rows = self.db.query(
+                "SELECT * FROM agent_runs WHERE agent_name=? ORDER BY created_at DESC LIMIT ?",
+                (agent_name, limit),
+            )
+        else:
+            rows = self.db.query("SELECT * FROM agent_runs ORDER BY created_at DESC LIMIT ?", (limit,))
+        out = []
+        for row in rows:
+            item = _row(row)
+            for column in ("input_context_json", "output_json"):
+                try:
+                    item[column.removesuffix("_json")] = json.loads(item.pop(column) or "{}")
+                except json.JSONDecodeError:
+                    item[column.removesuffix("_json")] = {}
+            out.append(item)
+        return out
+
+    def save_memory(self, subject_id: str, memory_type: str, title: str,
+                    content: str, confidence: float, source_agent_run_id: str | None,
+                    requires_confirmation: bool = True) -> str:
+        memory_id = new_id("mem")
+        stamp = iso()
+        self.db.execute(
+            """INSERT INTO memories
+               (memory_id, subject_id, memory_type, title, content, confidence,
+                status, requires_confirmation, source_agent_run_id, created_at, updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            (memory_id, subject_id, memory_type[:40], title[:120], content[:600],
+             max(0.0, min(1.0, float(confidence))),
+             "pending" if requires_confirmation else "confirmed",
+             int(requires_confirmation), source_agent_run_id, stamp, stamp),
+        )
+        return memory_id
+
+    def list_memories(self, subject_id: str, status: str | None = None,
+                      limit: int = 50) -> list[dict[str, Any]]:
+        if status:
+            rows = self.db.query(
+                "SELECT * FROM memories WHERE subject_id=? AND status=? "
+                "ORDER BY updated_at DESC LIMIT ?", (subject_id, status, limit))
+        else:
+            rows = self.db.query(
+                "SELECT * FROM memories WHERE subject_id=? ORDER BY updated_at DESC LIMIT ?",
+                (subject_id, limit))
+        return [_row(row) for row in rows]
+
+    def set_memory_status(self, memory_id: str, status: str) -> bool:
+        if status not in {"pending", "confirmed", "invalidated"}:
+            return False
+        return self.db.execute(
+            "UPDATE memories SET status=?, updated_at=? WHERE memory_id=?",
+            (status, iso(), memory_id),
+        ) > 0
+
+    def add_interaction_message(self, subject_id: str, conversation_id: str,
+                                role: str, text: str, intent: str,
+                                agent_run_id: str | None) -> str:
+        message_id = new_id("msg")
+        self.db.execute(
+            """INSERT INTO interaction_messages
+               (message_id, subject_id, conversation_id, role, text, intent,
+                agent_run_id, created_at) VALUES (?,?,?,?,?,?,?,?)""",
+            (message_id, subject_id, conversation_id, role, text[:4000],
+             intent[:80], agent_run_id, iso()),
+        )
+        return message_id
+
+    def interaction_messages(self, subject_id: str, conversation_id: str,
+                              limit: int = 40) -> list[dict[str, Any]]:
+        rows = self.db.query(
+            """SELECT * FROM interaction_messages
+               WHERE subject_id=? AND conversation_id=?
+               ORDER BY created_at DESC LIMIT ?""",
+            (subject_id, conversation_id, limit),
+        )
+        return [_row(row) for row in reversed(rows)]
 
     # -- config ----------------------------------------------------------
 

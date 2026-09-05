@@ -35,6 +35,21 @@ export interface PipelineRun {
   event_ids: string[];
 }
 
+export interface ObservationRecord {
+  observation_id: string;
+  run_id: string;
+  observed_at_ms: number;
+  summary: string;
+  confidence: number;
+  payload: {
+    person_visible?: boolean;
+    scene_summary?: string;
+    fall?: { posture?: string; near_floor?: boolean; motionless?: boolean; confidence?: number };
+    hydration?: { container?: string; drinking_motion?: boolean; confidence?: number };
+    escalation?: { required?: boolean; reason_codes?: string[] };
+  };
+}
+
 export interface RunStats {
   windows: number;
   skipped_by_l1: number;
@@ -110,7 +125,11 @@ export interface EventDetail {
 
 export interface QueueMetrics {
   running: boolean;
+  running_count?: number;
+  max_running?: number;
   pending: boolean;
+  pending_count?: number;
+  max_pending?: number;
   pending_high_risk: boolean;
   accepted: number;
   dropped: number;
@@ -123,6 +142,7 @@ export interface Status {
   subject_id: string;
   config_version: string;
   source: { running?: boolean; kind?: string; frames_emitted?: number; scenario?: string };
+  browser_media?: { running?: boolean; frames_emitted?: number; audio_bytes?: number; error?: string | null }[];
   cascade: {
     windows_seen: number;
     starved_since_ms: number | null;
@@ -138,6 +158,7 @@ export interface Status {
     events: Record<string, { status: string; event_id: string | null; observations: number }>;
   };
   realtime: { clients: number; sequence: number; sent: number; dropped: number };
+  legacy_flow?: { provider: string; model: string; pending_main_agent: number };
   providers: Record<"l2" | "l3", {
     name: string; model: string; base_url: string; api_style: string;
     key_configured: boolean; active: string | null; stub: boolean;

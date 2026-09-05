@@ -36,7 +36,7 @@ export function PipelinePanel({ status, stats }: { status: Status; stats: RunSta
 
       <Card
         className="layer l2"
-        title="L2 · Gemini"
+        title="L2 · local vLLM observation"
         aside={<Badge tone={stats.l2_failures > 0 ? "warn" : "ok"} dot>
           {status.providers.l2.stub ? "stub" : "live"}
         </Badge>}
@@ -53,13 +53,14 @@ export function PipelinePanel({ status, stats }: { status: Status; stats: RunSta
         </div>
         <p className="muted" style={{ margin: ".7rem 0 0", fontSize: 12.5 }}>
           <code>{l2.model ?? status.providers.l2.model}</code>
-          {l2.queue.pending && <> · queue pending</>}
+          {l2.queue.pending && <> · queue {l2.queue.pending_count ?? 0}/{l2.queue.max_pending ?? "—"}</>}
+          <> · {l2.queue.running_count ?? (l2.queue.running ? 1 : 0)}/{l2.queue.max_running ?? 1} running</>
         </p>
       </Card>
 
       <Card
         className="layer l3"
-        title="L3 · MiniMax"
+        title="L3 · escalation"
         aside={<Badge tone={l3.enabled ? (status.providers.l3.stub ? "muted" : "ok") : "muted"} dot>
           {l3.enabled ? (status.providers.l3.stub ? "stub" : "live") : "disabled"}
         </Badge>}

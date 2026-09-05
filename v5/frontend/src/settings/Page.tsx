@@ -69,6 +69,8 @@ export function SettingsPage() {
   return (
     <div className="stack">
       <Card title="Secrets" aside={<span className="muted" style={{ fontSize: 12 }}>write-only — never returned by the API</span>}>
+        <SecretInput label="Local vLLM API key (optional)" secretKey="VLLM_API_KEY"
+                     state={settings.secrets["VLLM_API_KEY"]} onSaved={load} />
         <SecretInput label="Gemini API key (L2)" secretKey="GEMINI_API_KEY"
                      state={settings.secrets["GEMINI_API_KEY"]} onSaved={load} />
         <SecretInput label="MiniMax API key (L3)" secretKey="MINIMAX_API_KEY"
@@ -92,8 +94,8 @@ export function SettingsPage() {
                 <input defaultValue={settings.providers[slot].base_url}
                        onBlur={(event) => void api.saveProviders({ [slot]: { base_url: event.target.value } }).then(load)} />
               </label>
-              <Badge tone={settings.providers[slot].key_configured ? "ok" : "warn"}>
-                {settings.providers[slot].key_configured ? "key configured" : "no key — using the offline stub"}
+              <Badge tone={settings.providers[slot].name === "local_vllm" || settings.providers[slot].key_configured ? "ok" : "warn"}>
+                {settings.providers[slot].name === "local_vllm" ? "local vLLM endpoint" : settings.providers[slot].key_configured ? "key configured" : "no key — using the offline stub"}
               </Badge>
             </div>
           ))}

@@ -1,6 +1,7 @@
 import type {
   CareAction, CareEvent, CascadeTestResult, EventDetail, PipelineRun,
   RunStats, SettingsPayload, SetupState, Status,
+  ObservationRecord,
 } from "../types/api";
 
 export class ApiError extends Error {
@@ -31,6 +32,7 @@ export const api = {
   setupState: () => call<SetupState>("/api/setup/state"),
 
   runs: (limit = 60) => call<{ runs: PipelineRun[]; stats: RunStats }>(`/api/pipeline/runs?limit=${limit}`),
+  observations: (limit = 12) => call<{ observations: ObservationRecord[] }>(`/api/observations?limit=${limit}`),
   events: (limit = 30) => call<{ events: CareEvent[] }>(`/api/events?limit=${limit}`),
   event: (id: string) => call<EventDetail>(`/api/events/${encodeURIComponent(id)}`),
   actions: (limit = 30) => call<{ actions: CareAction[] }>(`/api/actions?limit=${limit}`),
@@ -55,4 +57,10 @@ export const api = {
   startSource: (kind: string, target: string) => post<unknown>("/api/source/start", { kind, target }),
   stopSource: () => post<unknown>("/api/source/stop"),
   runObserver: () => post<unknown>("/api/observer/run"),
+  interactionTurn: (text: string, conversationId = "default") =>
+    post<{ status: string; reply_text: string; intent: string }>("/api/interaction/turn", { text, conversation_id: conversationId }),
+  interactionMessages: (conversationId = "default") =>
+    call<{ messages: { message_id: string; role: string; text: string; intent: string; created_at: string }[] }>(`/api/interaction/messages?conversation_id=${encodeURIComponent(conversationId)}`),
+  memories: (status?: string) => call<{ memories: { memory_id: string; title: string; content: string; status: string; confidence: number }[] }>(`/api/memory${status ? `?status=${encodeURIComponent(status)}` : ""}`),
+  memoryStatus: (memoryId: string, status: string) => post<unknown>(`/api/memory/${encodeURIComponent(memoryId)}/status`, { status }),
 };
