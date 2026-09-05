@@ -1,8 +1,9 @@
 {
   "name": "care-agent-frontend",
-  "private": true,
   "version": "5.0.0",
+  "private": true,
   "type": "module",
+  "license": "GPL-3.0-or-later",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",

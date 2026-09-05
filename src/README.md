@@ -222,7 +222,24 @@ with the three-layer panel and cascade trace, Setup and Settings with
 versioning and rollback, Telegram delivery, the daily observer, RTSP and
 replay ingest, and both capability probes.
 
-Known gaps: the audio/ASR path is specified and has
-its storage and retention in place, but no ASR engine is wired in; the
-YOLO11n detector needs `onnxruntime` and weights that Setup does not yet
-fetch automatically.
+Known gaps: the audio/ASR path is specified and has its storage and
+retention in place, but no ASR engine is wired in; the YOLO11n detector
+needs `onnxruntime` and weights that Setup does not yet fetch
+automatically.
+
+
+## License
+
+Copyright (C) 2026 Artificial Illusion
+
+Care Agent is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+The full text is in [`../LICENSE`](../LICENSE). Every runtime dependency is
+MIT, ISC, BSD-3-Clause or Apache-2.0, all of which GPL-3.0 permits.

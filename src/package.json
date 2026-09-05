@@ -4,7 +4,11 @@
   "private": true,
   "type": "module",
   "description": "Care Agent — L1 local person gate → L2 Gemini → L3 MiniMax escalation",
-  "workspaces": ["frontend"],
+  "author": "Artificial Illusion",
+  "license": "GPL-3.0-or-later",
+  "workspaces": [
+    "frontend"
+  ],
   "scripts": {
     "start": "bun run scripts/start.ts",
     "dev": "bun run scripts/start.ts --dev",
