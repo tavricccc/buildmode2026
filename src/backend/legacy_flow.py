@@ -498,6 +498,12 @@ class LegacyFlow:
         reply_text = str(raw.get("reply_text") or raw.get("response") or "").strip()
         if not reply_text:
             reply_text = LegacyFlow._fallback_reply(text, intent)
+        elif LegacyFlow._is_simple_greeting(text):
+            # A short greeting has no useful context to infer. Prefer a
+            # deterministic acknowledgement so an LLM cannot copy the
+            # previous turn into a reply to "hi".
+            intent = "conversation"
+            reply_text = "嗨，您好！今天感覺如何？有什麼想和我聊聊嗎？"
         reported_type = raw.get("reported_event_type") if intent in {"event_report", "emergency_response"} else None
         reported_summary = raw.get("reported_event_summary") if reported_type else None
         reminder_time = raw.get("reminder_time") if intent == "schedule_reminder" else None
@@ -538,6 +544,11 @@ class LegacyFlow:
         if "?" in text or "？" in text or any(token in value for token in ("什麼", "為什麼", "怎麼", "哪裡", "現在在做")):
             return "question"
         return "conversation"
+
+    @staticmethod
+    def _is_simple_greeting(text: str) -> bool:
+        value = text.strip().lower().strip(" !！,，.。?？~～")
+        return value in {"hi", "hello", "hey", "嗨", "哈囉", "你好", "您好", "早安", "午安", "晚安"}
 
     @staticmethod
     def _fallback_reply(text: str, intent: str) -> str:

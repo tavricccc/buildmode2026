@@ -40,6 +40,14 @@ class TestLegacyFlow(unittest.TestCase):
         self.assertEqual(len(runs), 1)
         self.assertEqual(runs[0]["output"]["proposed_action"], "observe")
 
+    def test_simple_greeting_does_not_reuse_previous_turn(self):
+        result = LegacyFlow._normalise_reply(
+            {"reply_text": "好的，我現在就提醒您慢慢喝水。", "intent": "conversation"}, "hi"
+        )
+        self.assertEqual(result["intent"], "conversation")
+        self.assertIn("您好", result["reply_text"])
+        self.assertNotIn("喝水", result["reply_text"])
+
 
 if __name__ == "__main__":
     unittest.main()

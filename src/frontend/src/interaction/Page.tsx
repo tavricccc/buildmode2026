@@ -12,6 +12,25 @@ const QUICK_PROMPTS = [
   "我想問一下今天社工或護理師什麼時候會來？",
 ];
 
+const INTENT_LABELS: Record<string, string> = {
+  input: "住民訊息",
+  conversation: "日常對話",
+  question: "問題",
+  help: "求助",
+  stop: "保持安靜",
+  forget: "遺忘請求",
+  preference_statement: "生活偏好",
+  schedule_reminder: "提醒需求",
+  event_report: "事件回報",
+  emergency_response: "緊急回應",
+  unknown: "待判讀",
+};
+
+function intentLabel(message: InteractionMessage): string {
+  if (message.role === "user") return "住民訊息";
+  return INTENT_LABELS[message.intent] ?? (message.intent || "生活互動");
+}
+
 export function InteractionPage() {
   const [messages, setMessages] = useState<InteractionMessage[]>([]);
   const [memories, setMemories] = useState<MemoryRecord[]>([]);
@@ -99,30 +118,26 @@ export function InteractionPage() {
   const pending = memories.filter((memory) => memory.status === "pending");
 
   return (
-    <div className="page-stack">
+    <div className="page-stack interaction-page">
       <header className="page-heading">
         <div>
           <span className="eyebrow">ONE AGENT · TWO DRIVERS</span>
           <h1>住民互動與生活溝通</h1>
-          <p>支援以同理、溫暖台灣在地口吻與長輩自然溝通；支援常見生活對話捷徑、動態語意生成與待確認照護記憶萃取。</p>
+          <p>以自然、溫暖的繁體中文陪伴長輩對話；互動回覆與背景理解分開記錄，照護記憶仍需人工確認。</p>
         </div>
       </header>
 
       {error && <ErrorBanner>{error}</ErrorBanner>}
 
       <div className="interaction-grid">
-        <Card title="生活對話互動" aside={<Badge tone="ok">自然雙向對話 · 台灣在地語意</Badge>}>
-          {/* 快捷對話氣泡 */}
-          <div style={{ marginBottom: "12px" }}>
-            <span style={{ fontSize: "0.85rem", color: "var(--muted)", display: "block", marginBottom: "6px" }}>
-              💡 常見生活情境快捷傳送：
-            </span>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+        <Card className="interaction-conversation-card" title="生活對話互動" aside={<Badge tone="ok">自然雙向對話</Badge>}>
+          <div className="quick-prompts-section">
+            <span className="quick-prompts-label">💡 常見生活情境快捷傳送</span>
+            <div className="quick-prompts">
               {QUICK_PROMPTS.map((prompt, idx) => (
                 <button
                   key={idx}
-                  className="action ghost"
-                  style={{ fontSize: "0.8rem", padding: "4px 8px", borderRadius: "14px" }}
+                  className="action ghost quick-prompt"
                   disabled={busy}
                   onClick={() => void sendText(prompt)}
                 >
@@ -132,12 +147,12 @@ export function InteractionPage() {
             </div>
           </div>
 
-          <div className="interaction-messages">
+          <div className="interaction-messages" aria-live="polite" aria-label="住民對話紀錄">
             {messages.length ? (
               messages.slice(-40).map((message) => (
                 <article className={`interaction-message ${message.role}`} key={message.message_id}>
                   <small>
-                    {message.role === "user" ? "👤 住民" : "🤖 長照照護助理"} · {message.intent || "生活互動"}
+                    {message.role === "user" ? "👤 住民" : "🤖 長照照護助理"} · {intentLabel(message)}
                   </small>
                   <p>{message.text}</p>
                 </article>
@@ -147,7 +162,7 @@ export function InteractionPage() {
             )}
 
             {busy && (
-              <article className="interaction-message assistant" style={{ opacity: 0.85, borderLeft: "3px solid #f59e0b" }}>
+              <article className="interaction-message assistant pending-message">
                 <small>🤖 長照照護助理 · 思考與生成中…</small>
                 <p style={{ fontStyle: "italic", color: "var(--muted)" }}>正在同理長輩當前需求並生成溫暖回覆，請稍候…</p>
               </article>
@@ -155,36 +170,38 @@ export function InteractionPage() {
             <div ref={messagesEndRef} />
           </div>
 
-          <textarea
-            value={text}
-            disabled={busy}
-            onChange={(event) => setText(event.target.value)}
-            placeholder="對住民長輩說話或代表長輩輸入訊息；Enter 傳送，Shift+Enter 換行"
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault();
-                void sendText(text);
-              }
-            }}
-          />
-
-          <div className="button-row" style={{ marginTop: "8px" }}>
-            <button
-              className="action primary"
-              disabled={busy || !text.trim()}
-              onClick={() => void sendText(text)}
-            >
-              {busy ? "處理中…" : "送出對話"}
-            </button>
-            <button className="action" disabled={busy} onClick={() => void understand()}>
-              執行理解層（萃取動機與記憶）
-            </button>
+          <div className="interaction-composer">
+            <textarea
+              value={text}
+              disabled={busy}
+              aria-label="輸入住民對話"
+              onChange={(event) => setText(event.target.value)}
+              placeholder="輸入住民想說的話；Enter 傳送，Shift+Enter 換行"
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  void sendText(text);
+                }
+              }}
+            />
+            <div className="interaction-actions">
+              <button
+                className="action primary"
+                disabled={busy || !text.trim()}
+                onClick={() => void sendText(text)}
+              >
+                {busy ? "處理中…" : "送出對話"}
+              </button>
+              <button className="action" disabled={busy} onClick={() => void understand()}>
+                執行理解層
+              </button>
+            </div>
           </div>
 
-          {notice && <p className="banner" style={{ marginTop: "10px" }}>{notice}</p>}
+          {notice && <p className="banner interaction-notice">{notice}</p>}
         </Card>
 
-        <div className="side-stack">
+        <div className="side-stack interaction-side-stack">
           <Card title="理解／動機提案" aside={<Badge tone="muted">advisory</Badge>}>
             {insights.length ? (
               insights.map((run) => (

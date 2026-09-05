@@ -765,7 +765,7 @@ class Repositories:
         rows = self.db.query(
             """SELECT * FROM interaction_messages
                WHERE subject_id=? AND conversation_id=?
-               ORDER BY created_at DESC LIMIT ?""",
+               ORDER BY created_at DESC, rowid DESC LIMIT ?""",
             (subject_id, conversation_id, limit),
         )
         return [_row(row) for row in reversed(rows)]
