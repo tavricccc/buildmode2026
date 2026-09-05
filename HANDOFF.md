@@ -1,97 +1,86 @@
-# HANDOFF — Care Agent v5 Frontend Reimagine（2026-09-05）
+# HANDOFF — Care Agent v5 Frontend（接手第 2 輪）
 
-Branch: `frontend`
+_Updated: 2026-09-05 22:27 · 5h usage: 15%（03:10 重置）· 7d: 61% · ctx: 16%_
 
-Base: `origin/main` @ `ceea44a`
+Branch: `frontend` · Head: `67a5222` · Base: `origin/main` @ `ceea44a`
 
-Design source: Google Stitch project `Care Agent v5 · Frontend Reimagine`
+## Goal
 
-## 本次交付
+接手上一輪的 `v5/frontend` 重構交付，把環境裝起來、對著真的後端驗證，並修掉驗證過程中找到的缺陷。
 
-以 Stitch「Calm Vigilance」方向完整重構 `v5/frontend`，並補上前端所需的真實 Observer、統計與影像 Snapshot 後端能力。不是靜態 mock；畫面仍接既有 REST、WebSocket、SQLite、L1/L2/L3 與 Policy Gateway。
+## 這一輪做了什麼
 
-### 資訊架構
+### 環境（已可直接使用）
 
-- **照護總覽**：住戶安全狀態、來源狀態、AI 身體狀況、L1→L2→L3→Policy 連續管線、事件、飲水、健康、Pipeline Runs、Policy 決策與日誌。
-- **即時影像**：RTSP、內建 Replay Scenario、本機錄影三種來源；開始、停止、重新連線；顯示低頻分析 Snapshot 與來源健康指標。
-- **趨勢與統計**：7/30/90 日區間、飲水、跌倒、L2/L3 使用量、每日活動/飲水趨勢、AI 狀態與完整 Observer 紀錄。
-- **初始設定**：環境、L1、L2、L3 與端到端 Cascade Test，繁體中文化並明確區分 offline stub 與真模型。
-- **系統設定**：Write-only Secrets、Providers、Policy 群組、版本與 Rollback，繁體中文化。
+- `bun install` — 上一輪的 `@phosphor-icons/react` 在 `package.json` 與 root `bun.lock` 裡，但沒裝，typecheck 4 檔失敗。
+- **macOS Gatekeeper 擋住 bun 解壓的原生二進位檔**（rollup、esbuild）。來源標記是 Sourcetree，整個 checkout 底下新寫入的檔案都繼承 `com.apple.quarantine`。解法已寫進 `v5/README.md`：
+  `xattr -dr com.apple.quarantine node_modules frontend/node_modules`
+- GMI key（repo 根目錄 `GMIAPI.txt`，是 JWT，L3/MiniMax 用）已寫入 secret store `v5/data/secrets.json`（0600，已 gitignore）。
+- `GMIAPI.txt` 原本**沒有**被 gitignore，違反 v5 00 DoD 13。已加規則。
+- port 8000 被另一個 Python 服務（PID 62210，FastAPI 風格）占用，非 v5。測試改用 `CARE_PORT=8010`。
 
-## 持續型 AI Observer
+### 驗證（對真後端，不是 mock）
 
-新增 `observer_runs` 稽核表與 `ObserverScheduler`：
+- `bun run verify` → Python compile、**124 tests**、frontend typecheck、ffmpeg 全過。
+- `bun run build` → Vite production build 過。
+- `bun run probe:minimax` → **8/8 通過**。83 models、`json_object` 結構化輸出、video+text 同一請求、
+  **prompt tokens 帶 frames 1594 vs 純文字 584（delta 1010）**、bad model id 回 `model_not_found`。
+  與 `v5/docs/MEASURED_CAPABILITIES.md` 既有數字一致。
+- `CARE_PORT=8010 bun start -- --source fall` 實跑：
+  - L1 `skipped_l1` 14 個 window（DoD 3 ✓）
+  - `forced_high_risk` 繞過 L1 持續 follow-up（DoD 8 ✓）
+  - escalation rate limit 生效（`escalation_rate_limited_8s/12s`）
+  - **L3 打到真的 MiniMax M3**：latency 4149 ms / 5462 ms，`l3_error: null`
+  - `l3_risk_level: none` — 與 MEASURED_CAPABILITIES 記載一致：replay fixture 的影格是空白灰底，真 M3 正確拒絕背書 stub L2 的高信心跌倒宣稱。
+- 新 API 全部實測 200：`/api/observer/status`、`/api/observer/records`、`/api/statistics`、`/api/observer/run`、`/api/source/snapshot`（回 image/jpeg）。
+- Secret scan：production bundle 只含 `GEMINI_API_KEY` / `MINIMAX_API_KEY` 這兩個**欄位名稱**（write-only API 需要），key 值 0 筆。DoD 13 ✓
+- TS `types/api.ts` 與實際 payload 逐欄比對，無 drift。
 
-- 預設每 15 分鐘執行，可用 `CARE_OBSERVER_INTERVAL_SEC` 調整，最低 60 秒。
-- 啟動時先執行一次；單一執行鎖避免重疊。
-- 每次都寫入紀錄，狀態為 `stable`、`attention`、`insufficient_evidence`、`anomaly` 或 `failed`。
-- 正常、沒有警報時仍會留下「狀況穩定」紀錄。
-- 後端只提供白名單 SQLite 彙總，不讓模型執行任意 SQL。
-- 彙總姿勢、活動/靜止比例、信心、飲水、跌倒、coverage、skip 與模型使用量。
-- 只有指標超過門檻時才呼叫 L3 產生 narrative；AI 仍只能建議，Policy Gateway 才能授權通知。
-- UI 明示「AI 觀察不是醫療診斷」。
+### 修掉的缺陷（commit `67a5222`）
 
-## 新增 API
+1. **靜默失敗**。Dashboard 用 `Promise.allSettled` 逐面板降級，其他頁面都是 `void` 包單一呼叫且沒有 catch → unhandled rejection、畫面毫無反應。
+   - `/api/observer/run` 重疊時回 **409 `observer_busy`**（已實測重現），「立即分析」完全沒有回饋。
+   - Statistics 讀取失敗時顯示「Observer 尚未完成第一次分析」——把「問不到」講成「沒事發生」。
+   - Settings / Setup 後端不通時永遠停在「載入中…」。
+   - Policy rollback 失敗無提示 → 照護者以為切到別的版本。
+   - Cascade 測試失敗時，畫面留著**上一次成功**的 trace。
+   - 新增 `errorText()` / `ErrorBanner`（`components/ui.tsx`）統一處理。
+2. **Observer `failed` 被顯示成「需要注意」**——把基礎設施失敗當成住戶健康訊號。改為「分析未完成」。
+3. **「重新連線」是死按鈕**：只要來源在跑就 enabled，但它重送表單的 target，重整或用 CLI 啟動後 target 是空的 → `start()` 靜默 return。
+4. Snapshot poller 不論有沒有影格都每 2 秒跑；飲水進度條寫死 1500 ml（Settings 可改）。
+5. **`styles.css` 的 Google Fonts `@import` 阻塞首次繪製**。上一輪 handoff 說「無網路時安全退回」——不成立，離線時是等 DNS timeout 才顯示畫面。改為 index.html 的非阻塞 `<link>`。三個 webfont 都沒有漢字，所以中文一直是靠 stack 後面的字體在顯示，其中 3 條宣告根本沒有 fallback。改成 `--font-ui` / `--font-display` / `--font-mono`，每條都以真的 CJK 字體收尾（PingFang TC / Noto Sans TC / Microsoft JhengHei）。
+6. `<html lang>` 是 `en`，但 UI 全是繁體中文 → `zh-Hant`。
 
-| Method | Path | 用途 |
-|---|---|---|
-| GET | `/api/observer/status` | 排程狀態與最新 Observer 紀錄 |
-| GET | `/api/observer/records?limit=N` | 持續觀測紀錄 |
-| GET | `/api/statistics?days=7\|30\|90` | 每日彙總、Observer 狀態統計與近期觀測 |
-| POST | `/api/observer/run` | 手動立即執行一次，重疊時回 409 |
-| GET | `/api/source/snapshot` | Ring Buffer 最新 JPEG；沒有影格時回 404 |
+## Next（從這裡繼續）
 
-既有 `/api/source/start` 現在由 UI 實際使用 `rtsp`、`replay_scenario` 與 `replay_file` 三種模式。RTSP URI 不會由 `/api/status` 回傳，只回傳去除認證資訊的 host。
+1. **Gemini（L2）仍未量測** — 這台機器上沒有任何 Gemini key（secret store、環境變數、`gemini api test/.env` 都沒有）。拿到 key 後：
+   ```bash
+   cd v5 && bun run probe:gemini -- --key-file /path/to/key
+   ```
+   然後更新 `v5/docs/MEASURED_CAPABILITIES.md` 的「L2 · Gemini」段（目前標示 **Not yet measured**）。
+   特別注意 native audio：v5 01 明講「一定理解音訊」不可未經量測寫成 runtime 假設。
+   目前 `providers.l2.stub = true`、`active = "stub-l2"`，L2 latency 恆為 5 ms 就是 stub。
+2. **前端沒有跑過瀏覽器實測** — 這一輪只做到 typecheck、build 與 API 契約比對。playwright MCP 這個 session 沒掛上，`.playwright-mcp/` 是上一輪留下的。建議下一輪掛上後逐頁截圖，特別是 1150px / 760px 兩個斷點。
 
-## 資料庫
+## ⚠️ Blockers / 需要決定
 
-新增 migration：`v5/backend/store/migrations/002_observer_runs.sql`
+- **`v5/node_modules` 有 3119 個檔案被 commit 進 git。** `.gitignore` 只排除了 `v5/frontend/node_modules/`，漏掉 workspace root。這是上一輪就存在的問題，不是這輪造成的。修法是 `git rm -r --cached v5/node_modules` 並補 ignore 規則，但那是一個 3119 檔案的刪除 commit，會影響 `codex/longcare-gmi-m3-flow` 與 `feat/v5-three-layer-cascade` 兩條分支，所以**沒有動，等你決定**。
+- 這也是為什麼 `git status` 會看到兩個 untracked 的 `v5/node_modules/.bun/@phosphor-icons*`。
 
-`observer_runs` 保存分析區間、狀態、摘要、信心、資料完整度、deterministic/L3 模式、model call、彙總 metrics 與 anomaly codes；已建立 subject/time 與 status/time indexes。
-
-## 視覺與互動
-
-- 深藍黑底、低警報疲勞；警示色只用於真正需要注意的狀態。
-- L1 綠青、L2 藍、L3 紫，Policy 使用獨立授權節點。
-- Event Trace 改為 480px overlay drawer，不再壓縮 Dashboard。
-- 44px 級操作目標、鍵盤 focus、狀態同時使用文字與色彩。
-- 使用 Phosphor Icons，不用 emoji 或自製 SVG。
-- 1150px 與 760px 響應式重排。
-
-## 驗證
-
-```text
-bun run verify
-✅ Python compile check
-✅ 124 unit tests
-✅ frontend TypeScript typecheck
-✅ ffmpeg found
-
-bun run build
-✅ Vite production build
-```
-
-Windows 原先直接斷言 POSIX `0600` mode 會錯誤讀成 `0666`；測試已改為 Windows 驗證檔案存在、POSIX 環境維持嚴格 mode assertion。Secret API 的不回傳與 redaction 測試仍保留。
-
-## 已知限制與下一步
-
-1. Snapshot 是分析 Ring Buffer 的低頻 JPEG，不是 NVR，也不持續儲存影片。
-2. 身體狀況來源是現有 L2 姿勢、靜止、跌倒、飲水與 scene summary；不宣稱心率、血壓、體溫或疾病診斷。
-3. 真實 Gemini 能力仍需有效 Key 跑 `bun run probe:gemini`。
-4. Observer 現在以 deterministic 彙總為常態；只有越過門檻才花費 L3。
-5. 前端 Google Fonts 需要網路；無網路時會安全退回 system fonts。
-
-## 執行
+## Commands
 
 ```bash
 cd v5
-bun install
-bun run migrate
-bun start
-
-# 模擬情境
-bun start -- --source fall
-
-# 即時 RTSP
-bun start -- --rtsp "rtsp://..."
+xattr -dr com.apple.quarantine node_modules frontend/node_modules   # macOS 首次
+bun install && bun run migrate
+bun run verify                      # ✅ 124 tests + typecheck + ffmpeg
+bun run build                       # ✅ Vite production build
+CARE_PORT=8010 bun start -- --source fall
+bun run probe:minimax               # ✅ 8/8
+bun run probe:gemini                # ❌ 尚無 key
 ```
+
+## Working tree
+
+`67a5222` 已 commit。未追蹤：`GMIAPI.txt`（已 ignore）、`v5/node_modules/.bun/@phosphor-icons*`（見上方 blocker）。
+尚未 push — `origin/frontend` 還在 `ab5eec6`。
