@@ -29,6 +29,7 @@ v4 保留 v3 的事件、資料與安全契約，移除 Apple Silicon 專用假�
 12. [部署與硬體相容性](11_DEPLOYMENT_AND_OPERATIONS.md)
 13. [Telegram L3 通知](12_TELEGRAM_L3_NOTIFICATION.md)
 14. [前端設定、Provider 與模型管理](13_SETUP_AND_MODEL_MANAGEMENT.md)
+15. [Provider 能力與限制(GMI Cloud / MiniMax-M3)](14_PROVIDER_CONSTRAINTS.md)
 
 ## 統一模型介面
 
@@ -45,5 +46,7 @@ Domain job → Model Gateway → OpenAI-compatible endpoint
 - `ui_editable`：model/provider、loop、audio、threshold、retention、Observer、通知等。
 - `secret_write_only`：API key、RTSP password、Telegram token，可覆寫／清除但不回填。
 - `host_managed`：DB/media root、bind address、secret store、GPU driver；只顯示狀態與修改說明。
+
+交付分 P0/P1/P2 三階段,定義見 [00](00_SCOPE_AND_DEFINITION_OF_DONE.md)。P0 為 cloud-only,vision 輸入為短影片片段而非影格集合。
 
 規格衝突時依序採用 v4 → v3 → v2 → `docs/`。v3 中固定 Qwen、MiniMax、M4、MLX 或 local-only/cloud-only 的描述均由 v4 取代。

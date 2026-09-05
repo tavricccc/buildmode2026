@@ -44,4 +44,4 @@ React Dashboard ↔ FastAPI
 
 除 host bootstrap/security 外，不要求使用者手改 `.env`。環境變數只作初始預設或 emergency override。
 
-Vision concurrency 預設 1，最多一個 running 和一個 latest pending。Loop 初始 1 FPS、最多 8 frames、每 5 秒一個 job，皆可從前端調整；cloud 顯示 requests/hour，local 顯示 benchmark 與 resource pressure。
+Vision concurrency 預設 1，最多一個 running 和一個 latest pending。Loop 送出的是短影片片段而非影格集合：P0 為 5 秒片段 @ 2fps，基準心跳 15 秒、變化或 suspect 時 5 秒，皆可從前端調整（見 `03`）；cloud 顯示 requests/hour，local 顯示 benchmark 與 resource pressure。

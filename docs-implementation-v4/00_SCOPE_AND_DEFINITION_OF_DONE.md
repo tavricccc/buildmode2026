@@ -24,6 +24,18 @@ Vision、transcription、analysis 和可選 speech model 都由前端選擇、�
 - Secret 可由前端覆寫或清除，但 API 只回 configured metadata。
 - 設定先驗證再建立 config version；每次 model call 記錄 endpoint、model、prompt/schema 和 config version。
 
+## 階段分層
+
+v4 描述目標架構;交付分三階段,文件其餘章節以此界定範圍。
+
+| 階段 | 內容 |
+|---|---|
+| **P0** | cloud-only 部署。影片片段 → vision model → `VisionObservation` → 跌倒/喝水狀態機 → SQLite → REST/WebSocket → Dashboard。model ID 與 endpoint 由設定進入,呼叫走 Model Gateway。 |
+| **P1** | Telegram L3、健康與風險分析、Long-term Observer、獨立 ASR 管線、Setup/Settings 完整表單。 |
+| **P2** | 本地模型 catalog 安裝(下載、checksum、續傳)、AMD/NVIDIA/CPU runtime probe 與 supervisor、config version 與 rollback、多硬體驗收。 |
+
+P0 不要求完整的安裝/啟用流程,但 model ID、base URL、片段參數必須是設定值而非寫死常數——否則規格書描述的 capability slot 與實作不一致。
+
 ## 不做
 
 - MLX、Metal、Apple detector 或 Apple-only 必要依賴。

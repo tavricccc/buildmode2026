@@ -1,5 +1,7 @@
 # 13 · 前端設定、Provider 與模型管理
 
+> **階段**:本頁的 Local catalog 安裝流程屬 P2;Cloud provider 流程屬 P1。P0 僅需 model ID 與 endpoint 可由設定進入並經 Model Gateway 呼叫,實際 provider 限制見 [14](14_PROVIDER_CONSTRAINTS.md)。
+
 ## 統一安裝流程
 
 使用者在 `/setup/models` 選擇 capability：vision、transcription、analysis、可選 speech/embedding，再選來源：

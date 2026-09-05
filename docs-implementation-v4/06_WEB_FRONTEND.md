@@ -6,9 +6,9 @@ Dashboard 保留 v3 的 live/replay video、health、hydration、analysis、time
 
 1. Runtime：Python/Bun、FFmpeg、磁碟、camera/mic、AMD/NVIDIA/CPU capability。
 2. Model source：選擇本地 catalog 或新增 OpenAI-compatible cloud endpoint。
-3. Vision：選擇並安裝 model，執行 image + structured-output probe後啟用。
+3. Vision：選擇並安裝 model，執行影片輸入 + `json_object` probe 後啟用。
 4. ASR：選擇並安裝 model，執行 `/v1/audio/transcriptions` probe後啟用。
-5. Analysis：選擇並安裝 model，執行 structured-output probe後啟用。
+5. Analysis：選擇並安裝 model，執行 `json_object` probe 後啟用。
 6. 可選 TTS：安裝並測試 `/v1/audio/speech`，或保持 disabled。
 7. Camera/audio、loop、事件、飲水、Observer、retention、Telegram。
 8. Review：本地下載大小或 cloud data destination、請求頻率、變更摘要、secret 狀態。

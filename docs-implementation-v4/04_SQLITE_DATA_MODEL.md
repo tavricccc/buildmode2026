@@ -45,4 +45,6 @@ CREATE TABLE config_versions (
 );
 ```
 
+`adapter_mode` 的合法值與各 mode 封裝的差異定義於 [14 · Provider 能力與限制](14_PROVIDER_CONSTRAINTS.md)；P0 只需 `gmi` 一種。新增 provider 必須新增明示且受測的 mode，不得讓 domain code 分支。
+
 本地 artifact 只能引用 backend catalog 管理的 model-store ID，不能保存前端傳入的任意 path。Secret 放在獨立 secret store；settings、logs、model calls 不得含原值。刪除 endpoint/model 不可破壞舊 audit reference。
