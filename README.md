@@ -41,13 +41,13 @@ flowchart LR
 
 ## 模型選擇
 
-L2 與 L3 都是可切換的 provider slot。以下是目前建議與可用選項：
+L2 與 L3 是可切換的 provider slot，L1 則是選偵測器，兩者的設定路徑不同：
 
-| Slot | 目前建議 | 可切換選項 | 環境變數 |
+| Slot | 目前建議 | 可切換選項 | 怎麼切換 |
 | --- | --- | --- | --- |
-| L1 | 先用 `stub` 開發，部署時可改用 `motion` 或 `yolo11n` | `stub`、`motion`、`yolo11n` | `L1_DETECTOR` |
-| L2 | 雲端 Gemini 3.5 Flash Lite | `gemini`、`local_vllm` | `L2_PROVIDER` |
-| L3 | 雲端 MiniMax M3 | `minimax`、`local_vllm` | `L3_PROVIDER` |
+| L1 | 先用 `stub` 開發，部署時可改用 `motion` 或 `yolo11n` | `stub`、`motion`、`yolo11n` | 只能在 Settings 改（存進 SQLite 的 policy），沒有對應的環境變數 |
+| L2 | 雲端 Gemini 3.5 Flash Lite | `gemini`、`local_vllm` | `L2_PROVIDER` 或 Settings |
+| L3 | 雲端 MiniMax M3 | `minimax`、`local_vllm` | `L3_PROVIDER` 或 Settings |
 
 目前建議使用雲端 provider，是因為這組配置已有對應的實作與能力量測。全新 checkout 的 runtime 預設仍是本地 vLLM，讓沒有雲端金鑰的環境可以先啟動服務；要使用建議配置時，再設定 provider 與對應金鑰即可。
 
@@ -69,13 +69,13 @@ bun run migrate
 bun start
 ```
 
-服務預設在 <http://127.0.0.1:8200> 提供 API 與前端。開發時可以另外啟動 Vite：
+服務預設在 <http://127.0.0.1:8200> 提供 API 與前端。要改用 Vite 熱重載開發，先停掉 `bun start`，再跑：
 
 ```bash
 CARE_BACKEND=http://127.0.0.1:8200 bun run dev
 ```
 
-此時前端位於 <http://127.0.0.1:5173>，API 仍由 8200 port 提供。
+`bun run dev` 會同時啟動 backend 與 Vite，所以不要和 `bun start` 併用，兩個 backend 會搶 8200 port。前端這時位於 <http://127.0.0.1:5173>，API 仍由 8200 提供。`CARE_BACKEND` 一定要設：`frontend/vite.config.ts` 的預設值是 8000，忘了設就會 proxy 到本地 vLLM。
 
 ### 使用目前建議的雲端配置
 
@@ -97,29 +97,33 @@ bun start -- --stubs --source fall
 
 ## 使用介面
 
-前端是 React、Vite、TypeScript、原生 CSS 與 Phosphor Icons 組成的 Dashboard。主要畫面包括：
+前端是 React、Vite、TypeScript、原生 CSS 與 Phosphor Icons 組成的 Dashboard，左側導覽有五個分頁：
 
-- **Dashboard**：查看目前狀態、警示、事件與每日飲水摘要。
-- **Pipeline**：查看 L1 跳過、L2 呼叫、L3 升級與延遲等執行資訊。
-- **Timeline**：依時間查看觀察、狀態轉移與動作。
-- **Cascade Trace**：展開一次 pipeline run，查看 L1、L2、L3、state machine、Evidence 與 policy 結果。
-- **Setup / Settings**：檢查 Runtime、資料庫、L1、L2、L3 與來源狀態，選擇 provider，設定 secrets 與來源。
+- **照護總覽**：目前狀態、警示、事件與每日飲水摘要。
+- **即時影像**：選擇即時鏡頭（RTSP）、模擬情境或本機錄影並啟動，畫面顯示 Ring Buffer 中最新的取樣影格。
+- **趨勢與統計**：Observer 的定期觀察紀錄與彙總統計。
+- **初始設定**：檢查 Runtime、資料庫、L1、L2、L3 與來源是否就緒。
+- **系統設定**：選擇 provider、寫入 secrets、調整 policy 並回溯設定版本。
 
-Setup 是應用程式中的設定分頁；開啟前端時仍會先顯示 Dashboard，不會自動導向 `/setup`。來源畫面目前顯示 Ring Buffer 中最新的取樣影像，系統本身沒有完整錄影播放器。
+Pipeline、事件時間軸與 Cascade Trace 都是照護總覽頁裡的面板，不是獨立分頁。Pipeline 面板列出 L1 跳過、L2 呼叫、L3 升級與延遲；事件時間軸依時間排出事件，點一則會展開該次 pipeline run 的 L1、L2、L3、state machine、evidence 與 policy 結果。
+
+開啟前端時預設停在照護總覽，不會自動導向初始設定。即時影像顯示的是取樣影格，系統沒有錄影播放器。
 
 ## API 與資料
 
-服務使用 Python 標準函式庫提供 threaded HTTP API 與 WebSocket。常用端點包括：
+服務使用 Python 標準函式庫提供 threaded HTTP API 與 WebSocket。REST 路由一律掛在 `/api` 底下，沒有 `/health` 這類根路徑端點。常用端點：
 
 | 類別 | 端點 |
 | --- | --- |
-| 健康與設定 | `GET /health`、`GET /api/status`、`GET /api/setup/state` |
+| 狀態與設定 | `GET /api/status`、`GET /api/setup/state` |
 | Pipeline | `GET /api/pipeline/runs`、`GET /api/observations`、`GET /api/logs` |
 | 事件與行動 | `GET /api/events`、`GET /api/events/{id}`、`GET /api/actions` |
 | 飲水摘要 | `GET /api/hydration/summary` |
-| Provider 與 secrets | `/api/settings/*`、`/api/providers/*`、`/api/secrets/*` |
-| 來源與影像 | `/api/source/*`、`/api/media/*` |
+| Provider 與 secrets | `GET`／`PUT /api/settings`、`POST /api/settings/providers`、`POST /api/settings/rollback`、`POST /api/secrets` |
+| 來源與影像 | `POST /api/source/start`、`POST /api/source/stop`、`GET /api/source/snapshot`、`GET /api/replay/scenarios`、`GET /api/media/streams` |
 | 即時更新 | `WS /ws`、`WS /ws/media` |
+
+上表只涵蓋跌倒與飲水這條主線。backend 另外保留一組相容 Longcare 舊流程的端點：`/api/agent/*`、`/api/memory/*`、`/api/interaction/*`、`/api/health/*`、`/api/transcripts`、`/api/observer/*`、`/api/statistics`。這組端點直接呼叫本地 vLLM，不走 L2/L3 cascade，「趨勢與統計」分頁就建在上面。完整列表見 [API Reference](docs/api-reference.md)。
 
 資料預設寫入 `src/data`，可用 `CARE_DATA_DIR` 指定其他位置。每個實際執行的 L2 視窗都會產生對應 clip，存放在 `data/clips/`，並由 pipeline run 的 evidence reference 指向。現在尚未提供自動清理 clip 的背景工作，長時間執行時需要自行管理資料目錄。
 
