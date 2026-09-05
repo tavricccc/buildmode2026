@@ -1,5 +1,7 @@
 # 12 · Telegram L3 通知
 
+> **v3 amendment：** 通知只能接 Policy Gateway 的 attention/intervention decision。Unknown、低信心或單一 VLM candidate 不得直接變成 Telegram；recipient、payload level、責任人與 acknowledgement 都必須可回溯。
+
 ## 1. 定義
 
 L3 是通知照護者並追蹤是否有人接手。它不是 L4 emergency，不會自動撥打緊急服務。Telegram Bot 是首版唯一外部通知 channel。

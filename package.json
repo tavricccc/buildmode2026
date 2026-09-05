@@ -1,0 +1,19 @@
+{
+  "name": "care-agent-os",
+  "private": true,
+  "workspaces": ["frontend"],
+  "scripts": {
+    "start": "node scripts/start.mjs",
+    "dev": "concurrently -k \"python -m uvicorn backend.app:app --reload --port 8000\" \"npm --prefix frontend run dev\"",
+    "verify": "node scripts/verify.mjs",
+    "setup:backend": "python -m venv .venv",
+    "migrate": "python -m backend.migrate",
+    "frigate:config": "docker compose -f docker-compose.frigate.yml config",
+    "frigate:up": "docker compose -f docker-compose.frigate.yml up -d",
+    "frigate:down": "docker compose -f docker-compose.frigate.yml down",
+    "frigate:logs": "docker compose -f docker-compose.frigate.yml logs -f --tail=100"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

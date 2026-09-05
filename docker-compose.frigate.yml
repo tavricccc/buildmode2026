@@ -1,0 +1,35 @@
+services:
+  mqtt:
+    image: eclipse-mosquitto:2
+    container_name: care-agent-mqtt
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:1883:1883"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./data/mosquitto:/mosquitto/data
+      - ./data/mosquitto-log:/mosquitto/log
+
+  mediamtx:
+    image: bluenviron/mediamtx:1
+    container_name: care-agent-mediamtx
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8554:8554"
+
+  frigate:
+    image: ghcr.io/blakeblackshear/frigate:stable
+    container_name: care-agent-frigate
+    restart: unless-stopped
+    depends_on:
+      - mqtt
+      - mediamtx
+    shm_size: "256mb"
+    environment:
+      TZ: Asia/Taipei
+    ports:
+      - "127.0.0.1:5000:5000"
+      - "127.0.0.1:8555:8554"
+    volumes:
+      - ./frigate/config.yml:/config/config.yml:ro
+      - ./data/frigate:/media/frigate

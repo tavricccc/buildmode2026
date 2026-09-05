@@ -1,8 +1,10 @@
 # 03 · 跌倒與喝水視覺 Pipeline
 
+> **v3 amendment：** Local VLM 現在使用每秒 2 張、每 5 秒 10 張有序 frame，並可帶同窗口 5 秒 audio。跨 frame 結果先進既有 fall/hydration state machine；其他 sound/person/object 候選走 exception ledger，不得取代既有事件欄位。
+
 ## 1. Local VLM 輸出契約
 
-一次推論接收 1–8 張依序排列的 frame，輸出：
+一次 current inference 接收 10 張依序排列的 frame 與同窗口 audio，輸出視覺、音訊、情緒與事件候選。視窗數值可設定，但 P0 基線為 2 FPS × 5 秒：
 
 ```json
 {
@@ -16,11 +18,21 @@
   "drinking_motion": false,
   "confidence": 0.0,
   "supporting_frame_indexes": [0, 3, 7],
-  "uncertainty_reasons": []
+  "uncertainty_reasons": [],
+  "audio_present": true,
+  "audio_events": ["door_knock"],
+  "speaker_emotion": "unknown",
+  "audio_confidence": 0.0,
+  "audio_uncertainty_reasons": [],
+  "speech_detected": false,
+  "speech_transcript": "",
+  "transcript_confidence": 0.0,
+  "transcript_uncertainty_reasons": [],
+  "event_candidates": []
 }
 ```
 
-Pydantic 驗證失敗時保存 invalid model call，不得更新事件狀態。
+Pydantic 驗證失敗時保存 invalid model call，不得更新事件狀態。`event_candidates` 只能用於既有事件無法表達的家庭聲音、人物與非人物物件；候選的完整規則見 [02](02_EVENT_AGENT_AND_POLICY_CONTRACTS.md)。
 
 ## 2. 跌倒狀態機
 
@@ -77,12 +89,21 @@ MVP 不嘗試從任意容器精確辨識毫升數。每個 subject 設定 `estim
 
 ## 5. 抽幀與觸發
 
-- Replay 初始基線：1 FPS、8 秒 sliding window、每 2 秒最多一次 VLM job。
+- Current browser baseline：2 FPS、5 秒 window、10 frames + 5 秒 16 kHz mono audio；每完成一個窗口送一次 Nemotron Omni。
+- Browser MediaStream 是 continuous input，不是 screenshot 上傳；raw WebM/WAV 只在 bounded window 內處理，預設不落盤。
+- Change gate 會 deterministic 檢查 person appeared/left、新 memorable audio/candidate、fall/hydration state 與新 persisted event；同一 signature 不重複觸發 description。
 - 若已進入 `fall.suspect`，可暫時提高抽樣率；事件解除後恢復基線。
 - Local VLM queue 只保留最新有用窗口；過期普通工作可丟棄，但高風險 suspect window 不可被普通工作取代。
-- 每次 inference 保存 frame offsets，不必把每張 frame 永久存圖。
+- 每次 inference 保存 `window_id`、frame offsets、audio duration、model call 與 uncertainty metadata，不必把每張 frame 或原始音訊永久存圖／存檔。
 
-## 6. 最小測試影片
+## 6. Current multimodal 限制
+
+- Omni 目前產出窗口級 `audio_events`、`speaker_emotion` 與 uncertainty；這不等於逐字 transcript。
+- 若清楚偵測到人聲，Omni 可同窗口產出 `speech_transcript`；只有非空 transcript 才寫入 `transcripts`，並設定 retention TTL。
+- Silero VAD、Whisper、住戶語音意圖與 Active Inquiry 的回答記憶屬後續 audio interaction stage。
+- 缺少音訊、瀏覽器未授權或 audio decode 失敗時，仍可做 visual observation，並將 `audio_present=false` 或缺失原因明確寫入結果。
+
+## 7. 最小測試影片
 
 | 類型 | 正例 | 主要負例 |
 |---|---|---|

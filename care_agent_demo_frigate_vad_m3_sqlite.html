@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Care Agent Demo Architecture — Frigate + MiniMax M3</title>
+<title>Care Agent Architecture — Historical Frigate/MiniMax Prototype</title>
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -26,6 +26,15 @@ body{
   background:var(--bg);
   color:var(--ink);
   font-family:"Noto Sans TC",system-ui,sans-serif;
+}
+.legacy-banner{
+  margin:0 0 24px;
+  padding:14px 18px;
+  border:1px solid #d39b2c;
+  border-radius:12px;
+  background:#fff7df;
+  color:#6b4b00;
+  line-height:1.7;
 }
 main{
   width:min(1440px,96vw);
@@ -217,9 +226,12 @@ pre{
 </head>
 <body>
 <main>
-  <h1>Care Agent Demo — Frigate + MiniMax M3</h1>
+  <h1>Care Agent Architecture — Historical Prototype</h1>
+  <div class="legacy-banner">
+    這份互動圖保留作為歷史架構討論，不是目前 runtime contract。現行主路徑是 HTTPS browser camera/microphone MediaStream → WSS → 2 FPS × 5 秒（10 frames + audio）→ local Nemotron Omni vLLM → SQLite / Dashboard；Frigate、RTSP、VAD、Whisper 與 MiniMax 為可選或後續階段。請以 <code>SPEC.md</code> 與 <code>docs/</code> 文件為準。
+  </div>
   <div class="sub">
-    最終 Demo 架構：Frigate 接手本地影像基礎設施，只負責 24/7 camera ingest、motion / object activity、tracking、recording、snapshot / clip 與事件輸出；麥克風 24/7 開著，Silero VAD 只在有人說話時啟動 Whisper Large V3。只要 Frigate 產生值得處理的 candidate event，就把事件畫面 + 最近 10–15 秒 transcript + Fake Health + State 一起送給 MiniMax M3。M3 負責真正的多模態理解、Agent 決策、記憶與 Tool Calling。
+    歷史版本以 Frigate + MiniMax M3 說明「事件觸發高階理解」的概念；其中的服務拓撲、模型責任與輸入來源已由 current Ambient Care 規格取代。
   </div>
 
   <section class="diagram">

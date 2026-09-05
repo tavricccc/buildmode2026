@@ -1,5 +1,7 @@
 # 04 · SQLite 資料模型與查詢
 
+> **v3 amendment：** `events` 仍是 fall/hydration canonical ledger；新增資料盡量進 `attributes_json`。無法用既有事件表達的 sound/person/object/scene 才進 `recognition_events`，並保留同樣的 provenance、window、confidence、model call 與 dedup 語意。
+
 ## 1. 初始化
 
 ```sql
@@ -60,6 +62,23 @@ CREATE TABLE events (
   updated_at TEXT NOT NULL
 );
 
+CREATE TABLE recognition_events (
+  id TEXT PRIMARY KEY,
+  subject_id TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  domain TEXT NOT NULL CHECK(domain IN ('sound','person','object','scene')),
+  label TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'observed',
+  occurred_at TEXT NOT NULL,
+  confidence REAL NOT NULL CHECK(confidence >= 0 AND confidence <= 1),
+  attributes_json TEXT NOT NULL DEFAULT '{}',
+  window_id TEXT NOT NULL,
+  model_call_id TEXT REFERENCES model_calls(id),
+  dedup_key TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
 CREATE TABLE event_evidence (
   event_id TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
   evidence_id TEXT NOT NULL REFERENCES evidence(id) ON DELETE RESTRICT,
@@ -104,6 +123,66 @@ CREATE TABLE analyses (
   model_call_id TEXT REFERENCES model_calls(id),
   config_version TEXT NOT NULL,
   created_at TEXT NOT NULL
+);
+
+CREATE TABLE agent_runs (
+  id TEXT PRIMARY KEY,
+  subject_id TEXT NOT NULL,
+  agent_name TEXT NOT NULL,
+  trigger_type TEXT NOT NULL,
+  trigger_id TEXT NOT NULL,
+  window_id TEXT,
+  status TEXT NOT NULL,
+  decision TEXT NOT NULL,
+  attention_level TEXT NOT NULL,
+  risk_level TEXT NOT NULL,
+  confidence REAL NOT NULL,
+  input_json TEXT NOT NULL,
+  analysis_json TEXT,
+  policy_json TEXT NOT NULL DEFAULT '{}',
+  model_call_id TEXT REFERENCES model_calls(id),
+  error_code TEXT,
+  latency_ms INTEGER,
+  config_version TEXT NOT NULL,
+  started_at TEXT NOT NULL,
+  completed_at TEXT,
+  created_at TEXT NOT NULL,
+  dedup_key TEXT NOT NULL UNIQUE
+);
+
+CREATE TABLE agent_run_events (
+  id TEXT PRIMARY KEY,
+  agent_run_id TEXT NOT NULL,
+  subject_id TEXT NOT NULL,
+  stage TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  message TEXT NOT NULL,
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  sequence INTEGER NOT NULL,
+  occurred_at TEXT NOT NULL
+);
+
+CREATE TABLE agent_notes (
+  id TEXT PRIMARY KEY,
+  subject_id TEXT NOT NULL,
+  layer TEXT NOT NULL CHECK(layer IN ('decision','abstraction','research')),
+  note_type TEXT NOT NULL,
+  title TEXT NOT NULL,
+  content_json TEXT NOT NULL,
+  source_agent TEXT NOT NULL,
+  source_run_id TEXT,
+  source_window_id TEXT,
+  parent_note_id TEXT,
+  target_layers_json TEXT NOT NULL DEFAULT '[]',
+  status TEXT NOT NULL DEFAULT 'active',
+  confidence REAL NOT NULL,
+  importance REAL NOT NULL DEFAULT 0.5,
+  privacy_level TEXT NOT NULL DEFAULT 'local',
+  requires_review INTEGER NOT NULL DEFAULT 0,
+  expires_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  dedup_key TEXT NOT NULL UNIQUE
 );
 
 CREATE TABLE actions (
@@ -226,6 +305,16 @@ CREATE TABLE notification_deliveries (
 CREATE INDEX idx_events_subject_type_time
   ON events(subject_id, event_type, occurred_at);
 CREATE INDEX idx_events_status_time ON events(status, occurred_at);
+CREATE INDEX idx_recognition_events_subject_time
+  ON recognition_events(subject_id, occurred_at);
+CREATE INDEX idx_recognition_events_domain_time
+  ON recognition_events(subject_id, domain, occurred_at);
+CREATE INDEX idx_agent_runs_subject_time ON agent_runs(subject_id, created_at);
+CREATE INDEX idx_agent_runs_status_time ON agent_runs(status, created_at);
+CREATE INDEX idx_agent_run_events_run_sequence ON agent_run_events(agent_run_id, sequence);
+CREATE INDEX idx_agent_run_events_subject_time ON agent_run_events(subject_id, occurred_at);
+CREATE INDEX idx_agent_notes_subject_layer_time ON agent_notes(subject_id, layer, created_at);
+CREATE INDEX idx_agent_notes_expiry ON agent_notes(status, expires_at);
 CREATE INDEX idx_hydration_subject_time
   ON hydration_sessions(subject_id, ended_at);
 CREATE INDEX idx_health_subject_metric_time
@@ -254,3 +343,13 @@ MiniMax 不取得 SQL 字串工具，只能呼叫參數化函式：
 - `get_health_series_summary(subject_id, metrics, start, end)`
 
 `get_hydration_summary` 至少回傳 confirmed session count、estimated total ml、daily target、完成比例、最後飲水時間及資料 coverage。這使 AI 讀固定大小摘要，避免 token 隨事件數線性增加。
+
+## 5. v3 實作對照
+
+- `events`：目前 canonical 的 `fall`／`hydration`；欄位不足時先擴充 `attributes_json`。
+- `recognition_events`：目前已用於 sound/person/object/scene 例外候選，包含 `window_id`、`model_call_id`、confidence、dedup 與 `attributes_json`。
+- multimodal attributes 至少可保存 `audio_present`、`audio_events`、`speaker_emotion`、`audio_confidence`、`audio_uncertainty_reasons`、`frame_count`、`window_seconds` 與 source status。
+- `evidence`／`model_calls`／`app_logs`／recognition logs 共同形成 provenance；raw video、raw WebM 與 raw WAV 不屬於預設永久資料。
+- World State、Inquiry、privacy aggregation 的專用表仍是下一階段 migration；在此之前不得把尚未存在的欄位寫成已完成能力。
+- `agent_runs` 是目前 Main Agent 的 audit ledger；它保存 judgment 與 deterministic policy，不代表 action 已執行。
+- `agent_run_events` 保存每輪的 stage trace；`agent_notes` 提供 decision／abstraction／research 三層小型記憶文件，Research note 可透過 `target_layers_json` 提出注意事項，但必須 review 才能影響決策。

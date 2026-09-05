@@ -1,5 +1,7 @@
 # 07 · MiniMax 健康與風險分析
 
+> **v3 amendment：** MiniMax 只處理固定大小 health/event aggregate 與 caregiver context；local Nemotron 負責 current multimodal observation。任何 cloud analysis 都必須經 Privacy Aggregator，不取得完整生活 raw stream。
+
 ## 1. 呼叫邊界
 
 MiniMax-M3 負責整合健康快照、事件摘要與時間窗統計，輸出結構化觀察、風險候選與建議。它不直接查 SQLite、不持有通知工具、不修改 threshold，也不把輸出當作醫療診斷。

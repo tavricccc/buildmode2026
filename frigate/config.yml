@@ -1,0 +1,52 @@
+mqtt:
+  enabled: true
+  host: mqtt
+  port: 1883
+  topic_prefix: frigate
+  client_id: care-agent-frigate
+
+detectors:
+  cpu1:
+    type: cpu
+
+go2rtc:
+  streams:
+    browser_camera: rtsp://host.docker.internal:8554/browser-camera
+
+record:
+  enabled: true
+  retain:
+    days: 7
+    mode: motion
+  events:
+    retain:
+      default: 7
+
+cameras:
+  browser_camera:
+    enabled: true
+    ffmpeg:
+      inputs:
+        - path: rtsp://127.0.0.1:8554/browser_camera
+          input_args: preset-rtsp-restream
+          roles:
+            - detect
+            - record
+    detect:
+      enabled: true
+      width: 1280
+      height: 720
+      fps: 5
+    objects:
+      track:
+        - person
+    zones:
+      living:
+        coordinates: 0,0,1280,0,1280,720,0,720
+        objects:
+          - person
+
+birdseye:
+  enabled: false
+
+version: 0.16-0

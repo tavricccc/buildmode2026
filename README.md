@@ -1,28 +1,79 @@
-# AI 長照 Agent OS
+# Ambient Care Agent OS
 
-本 repository 是「AI 長照 Agent OS」的架構設計與黑客松原型。系統以 Frigate NVR 作為低成本、低延遲的初始事件感知與 trigger，再以多模態理解、個人化照護脈絡、風險治理與長期觀察形成可審計的照護閉環。
+> 它不是「看著老人」的 AI，而是在有限資訊下知道什麼值得注意、什麼不知道、什麼時候該問、什麼時候該保持安靜的照護 Agent。
+
+本 repository 是一個 local-first、privacy-aware、可審計的 Ambient Care Agent 原型。Camera、microphone、IoT、手機與 wearable 都只是稀疏感測器；產品核心是把它們轉成 Event Ledger、World State、Uncertainty、Hypothesis 與受政策治理的行動。
+
+## 目前實作路徑
+
+目前先跳過 Frigate；流程模型已切換到 GMI Cloud 的 `MiniMaxAI/MiniMax-M3`，本機 Nemotron Omni vLLM 保留為可切回的影像模型：
+
+```text
+HTTPS browser MediaStream (camera + microphone)
+  → continuous WebM over WSS /ws/media
+  → backend in-memory sampler
+  → 2 FPS × 5 seconds = 10 ordered images + 5 seconds 16 kHz mono audio
+  → GMI Cloud MiniMaxAI/MiniMax-M3（有變化窗口；已獲使用者同意）
+  → L0 local change gate（每 5 秒只輸出有／無）
+  → 有變化才進 L1 structured Observation / event_candidates
+  → temporal posture tracker（跨窗口確認起身／坐下）
+  → existing fall/hydration state machine or exceptional recognition_events
+  → SQLite Event Ledger
+  → WSS /ws
+  → Main Agent（同一 Omni、可並行、bounded concurrency）
+  → deterministic attention / risk policy
+  → persistent event timeline / Agent rounds / Known / Unknown / Next action
+```
+
+Frigate、MQTT 與 RTSP adapter 仍保留，等需要時再接回；它們不是目前 VLM 開發的必要條件。GMI key 從 `GMIAPI.txt` 讀入記憶體，該檔案已列入 git ignore。
 
 ## 文件入口
 
-完整 Markdown 開發文件請從 [docs/README.md](docs/README.md) 開始，建議依序閱讀：
+請先讀 [docs/README.md](docs/README.md)，再讀 [SPEC.md](SPEC.md)。完整執行契約與部署驗收在 [docs-implementation-v2/README.md](docs-implementation-v2/README.md)。
 
 1. [執行摘要](docs/00_EXECUTIVE_OVERVIEW.md)
 2. [系統架構](docs/01_SYSTEM_ARCHITECTURE.md)
-3. [事件管線](docs/02_EVENT_PIPELINE.md)
+3. [事件 Pipeline](docs/02_EVENT_PIPELINE.md)
 4. [Agent 架構](docs/03_AGENT_ARCHITECTURE.md)
-5. [記憶體與資料模型](docs/04_MEMORY_AND_DATA_MODEL.md)
-6. [風險與介入](docs/05_RISK_AND_INTERVENTION.md)
-7. [長期觀察](docs/06_LONG_TERM_OBSERVER.md)
-8. [模型路由與 Runtime](docs/07_MODEL_ROUTING_AND_RUNTIME.md)
-9. [健康脈絡整合](docs/08_HEALTH_CONTEXT_INTEGRATION.md)
-10. [部署與安全](docs/09_DEPLOYMENT_AND_SECURITY.md)
+5. [Memory 與資料模型](docs/04_MEMORY_AND_DATA_MODEL.md)
+6. [Risk 與 Intervention](docs/05_RISK_AND_INTERVENTION.md)
+7. [Long-term Observer](docs/06_LONG_TERM_OBSERVER.md)
+8. [Model Routing 與 Runtime](docs/07_MODEL_ROUTING_AND_RUNTIME.md)
+9. [Health Context](docs/08_HEALTH_CONTEXT_INTEGRATION.md)
+10. [Deployment 與 Security](docs/09_DEPLOYMENT_AND_SECURITY.md)
 11. [MVP 與 Roadmap](docs/10_MVP_AND_ROADMAP.md)
+12. [Agent Memory 與 Research layer](docs/11_AGENT_MEMORY_AND_RESEARCH.md)
 
-現有的互動式原型位於 [care_agent_demo_frigate_vad_m3_sqlite.html](care_agent_demo_frigate_vad_m3_sqlite.html)；既有 `deliverables/` 為先前產出的參考稿與渲染圖，本次整理不覆蓋或刪除。
+## 安全與產品邊界
 
-## 重要安全邊界
+- Model output 永遠先是 Observation 或 Hypothesis，不直接是 Fact、診斷或行動。
+- `fall`、`hydration` 優先使用既有事件欄位與 state machine；只有家庭聲音、人物活動、非人物物件等例外才建立 `recognition_events`。
+- `UNKNOWN` 是合法且重要的結果；不可用最後觀察位置冒充目前位置。
+- Default Silent；詢問、提醒、警告都要經過 attention／interruption policy。
+- 原始影像與音訊只在本機短暫保留；獲授權的有變化窗口會送至 GMI Cloud MiniMax M3，SQLite 保存必要 metadata、hash、confidence、窗口與 provenance，不保存 raw stream 或 API key。
+- 目前不做診斷、治療、自動通報或 L4 emergency executor。
+- Caregiver 預設收到 privacy-aggregated summary，不是完整生活紀錄。
+- Main Agent 會保存 facts、跨 frame 時序、existing-first mapping、Unknown/Hypothesis、attention score、policy gates 與 next action；模型建議不等於已執行 action。
 
-- Agent 產出的 Observation、Interpretation、Risk、Hypothesis 與 Fact 分層保存，保留來源、版本、時間與信心。
-- Watchlist Agent 可以提出觀察候選，但不能直接建立或修改緊急規則。
-- L4 Emergency Protocol 必須通過 deterministic policy、預先授權、條件確認與完整審計；單靠 LLM 不得啟動緊急服務。
-- 本系統是照護輔助與事件治理架構，不宣稱診斷、治療或取代專業照護。
+## 啟動
+
+需求：Python 3.10+、Node.js 18+、GMI Cloud API key（`GMIAPI.txt`）；本機 vLLM `nemotron_omni` 可選。`.env` 預設使用 HTTPS、Care Agent `8002`：
+
+```powershell
+# D:\Longcare
+npm start
+```
+
+前端：[https://192.168.50.140:5173](https://192.168.50.140:5173)
+
+第一次使用自簽憑證時，請信任 [certs/lan.crt](certs/lan.crt)，再允許 camera／microphone 權限。前端串流後，VLM panel 應顯示 `10 frames / 5s`，並顯示 `audio`、`sound`、`emotion`。
+
+## 驗證
+
+```powershell
+npm run verify
+npm --prefix frontend run typecheck
+npm --prefix frontend run build
+```
+
+Frigate compose 只在需要時使用：`npm run frigate:config`、`npm run frigate:up`。目前主流程不依賴 Frigate。

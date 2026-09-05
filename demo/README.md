@@ -1,69 +1,57 @@
-# Care Agent 舞台 Demo 簡化版
+# Ambient Care Agent 舞台 Demo
 
-交付時間：2026-09-06 10:00（Asia/Taipei）
+這個目錄描述可控的舞台流程。完整產品與技術規格見 [../SPEC.md](../SPEC.md)，實作契約見 [../docs-implementation-v2/README.md](../docs-implementation-v2/README.md)。Demo 不假裝是全天候 surveillance，也不把模型自由文字當成事實。
 
-本目錄定義舞台縮小版。完整書審架構位於 ../docs-implementation-v2/。簡化版沿用完整架構的 Event、SQLite、REST、WebSocket 與 Agent contracts，不建立第二套不相容程式。
+## 舞台展示鏈
 
-使用相同頂層啟動命令：
-
-    bun start
-
-在前端 Setup Wizard 選擇 Demo mode、Qwen3-VL-8B、MiniMax 與選用的 Telegram Bot；模型下載與設定均由前端觸發 backend job。
-
-## 展示鏈
-
-    預錄跌倒／喝水影片，以即時速度播放
-      → 現場 Qwen3-VL-8B 4-bit 推論
-      → 跌倒／喝水 state machine
-      → SQLite
-      → WebSocket Dashboard
-      → Fake Health + 事件 SQL 聚合
-      → MiniMax-M3 健康／風險分析
-      → Dashboard alert
+```text
+Browser camera + microphone
+  → continuous MediaStream
+  → 2 FPS / 5 秒 / 10 frames + audio
+  → local Nemotron Omni VLM
+  → Known / Unknown / Hypothesis + event candidate
+  → fall/hydration state machine or exception ledger
+  → Active Inquiry / Silent policy
+  → Memory / Caregiver aggregate / Dashboard
+```
 
 ## 必做
 
-- ReplaySource load、play、pause、reset。
-- 跌倒與喝水各一支正例影片。
-- 本地 Qwen3-VL-8B 現場推論；4B 僅作明示 fallback。
-- 每筆 confirmed event 寫 SQLite。
-- 今日喝水次數、估算 ml、目標完成率。
-- Fake Health scenario。
-- MiniMax 分析 1h／6h／24h／7d 可選窗口。
-- Dashboard 顯示影片、health、hydration、events、analysis、logs 與 alert。
-- MiniMax failure 顯示 degraded，主流程不停止。
+- HTTPS camera/microphone permission 與 live preview。
+- VLM live panel 顯示 frame window、audio、sound、emotion、confidence。
+- 既有 `fall`、`hydration` 事件；例外聲音、人物、物件事件使用 generic event contract。
+- Unknown、uncertainty、coverage 與 model latency 可見。
+- Event Ledger 可回查 evidence、window、model、版本與 dedup。
+- Active Inquiry 至少一個「資訊不足但值得問」的可控示例。
+- Default Silent，不把每個 sensor event 都交給模型。
+- Caregiver view 只展示 aggregate、baseline 與 finding，不展示 raw camera。
 
-## 可以簡化
+## 可控 fallback
 
-- 不啟動 Frigate，ReplaySource 直接產生與 Frigate adapter 相同的 contract。
-- 不啟動 microphone、VAD、Whisper。
-- Notify Tool 預設在 Dashboard 建立 alert；已設定 Telegram Bot 時可展示真實 L3 通知與 acknowledgement。
-- Long-term Observer 必須實際執行；可用 seed historical records 加速產生 7／30 日資料，但 aggregation、baseline、finding 與 SQLite 寫入不能預先寫死。
-- 不做 RTSP 斷線恢復展示。
+現場可用 `Demo Event Injector` 注入 typed event，例如 `fridge_open`、`fridge_closed`、`person_entered`、`door_knock` 或 `fall`；後續 correlation、World State、policy、memory 與 dashboard 仍走正式程式。Injected event 必須在 UI 標示 `demo_injected`，不得冒充真實 sensor。
 
 ## 不可假裝
 
-- 預錄影片可以，但推論結果不能預先寫死。
-- 使用 fallback model 時 UI 必須顯示實際模型。
-- 飲水 ml 是設定容量估算，不是視覺精確測量。
+- Browser stream 是 continuous media，不是 screenshot polling。
+- `audio_present` 只代表 audio track 已提供；audio event 仍要有模型證據。
+- `fall` 不能由單張 lying 確認；`hydration` 只有完成 session 才計數。
+- VLM unavailable 時顯示 degraded，不能把 Unknown 寫成正常。
 - Fake Health 必須標示 simulated。
-- 舞台未啟動的完整元件要標成停用，不能顯示 healthy。
+- 系統不做診斷、治療或 L4 emergency executor。
 
 ## 舞台流程
 
-1. 開啟 Dashboard 並確認 backend、DB、Qwen、MiniMax healthy。
-2. Reset run。
-3. 播放跌倒影片，展示 suspect → confirmed → 未恢復 → alert。
-4. Reset run。
-5. 播放喝水影片，展示 completed session → SQLite count → hydration progress。
-6. 切換 health scenario，選 24h，呼叫 MiniMax。
-7. 對 seed historical records 實際執行 Long-term Observer，再到後台展示 7／30 日趨勢、coverage 與 finding。
-8. 展示 MiniMax 使用 SQL aggregate，而不是重傳全部影片。
+1. 啟動本機 `nemotron_omni` 與 Care Agent，開啟 HTTPS Dashboard。
+2. 允許 camera/mic，確認 2 FPS、5 秒、10 frames 與 audio window。
+3. 展示人物離開視野後 `current_location=UNKNOWN`，不硬猜。
+4. 展示冰箱開關／購物袋等事件被合併成 situation；物品看不清時建立 information gap。
+5. 在可打擾條件下詢問住戶，將回答寫成 resident-confirmed memory。
+6. 展示 `fall`／`hydration` 仍使用既有 state machine，例外聲音與物件事件使用 generic ledger。
+7. 切換 caregiver view，展示 privacy aggregation、baseline 與 finding。
 
-## 完成判準
+## 驗收
 
-- 同一流程連續跑兩次不重複計數。
-- Backend commit 後 2 秒內更新 Dashboard。
-- 模型 timeout、invalid JSON 與 MiniMax unavailable 都有可見錯誤狀態。
-- 所有事件、分析與 action 可從 SQLite 查回。
-- 有一份錄屏 fallback，但現場首選仍為真實推論。
+- 同一 stream/window 重送不重複事件或 action。
+- VLM timeout、invalid JSON、缺 audio/frame、WSS 重連與 reset 都有可見狀態。
+- 每筆 event 有 Known/Unknown/Hypothesis 邊界與 provenance。
+- Demo 可在沒有 Frigate 的情況下完成；Frigate 只作未來 adapter。

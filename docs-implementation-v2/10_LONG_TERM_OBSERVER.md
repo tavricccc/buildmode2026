@@ -1,8 +1,10 @@
 # 10 · Long-term Observer
 
+> **v3 amendment：** Observer 不只是事件統計，也要讀 World State 的 coverage、Unknown、個人 baseline 與 privacy-aggregated events；finding 是待觀察假設，不能變成診斷或直接通知。
+
 ## 1. 功能
 
-Long-term Observer 是必須實作的背景 logical agent，定期讀取 SQLite 中已確認的事件與健康摘要，建立後台可查的日／週趨勢與 finding。它不處理即時跌倒、不直接通知，也不輸出疾病名稱。
+Long-term Observer 是背景 logical agent 的目標形態；目前已有基本 seed/run 與 finding 介面，完整的 coverage、個人 baseline、privacy aggregation 與可靠排程仍屬後續 gate。它定期讀取 SQLite 中已確認的事件與健康摘要，建立後台可查的日／週趨勢與 finding；不處理即時跌倒、不直接通知，也不輸出疾病名稱。
 
 首版分析：
 

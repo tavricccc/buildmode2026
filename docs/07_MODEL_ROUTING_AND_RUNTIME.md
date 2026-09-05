@@ -1,59 +1,57 @@
 # 07 · Model Routing 與 Runtime
 
-## 1. 目的
+## 1. 共享模型、分離能力
 
-動態路由的目標是讓普通事件保持低延遲、低成本與本地處理；只有風險、關聯性或不確定性足夠高時，才使用較昂貴的多模態或強模型。路由是可審計的系統決策，不是由 LLM 自由選擇工具。
+流程模型可依 provider 路由。當前 development profile 使用 GMI Cloud `MiniMaxAI/MiniMax-M3`；本機 Nemotron Omni vLLM 保留為可切回路由。差異在 prompt、context、tools、permission 與 output schema，不在複製三個 agent。
+
+目前影像／音訊路徑：
+
+```text
+L0 change gate：2 FPS × 5 秒窗口，只輸出有／無
+→ 有變化才送 10 ordered frames
++ 5 秒 16 kHz mono audio
+→ GMI MiniMax M3 或本機 nemotron_omni /v1/chat/completions
+→ structured observation
+```
 
 ## 2. 路由等級
 
-| Route | 使用時機 | 執行內容 | 失敗／低信心 |
-|---|---|---|---|
-| T0 Archive | 明顯正常、無 watchlist 命中 | 保存最小事件索引，延後抽樣 | 背景抽樣或人工標註 |
-| T1 Local Light | 一般事件 | 本地 ASR、音效分類、規則、小模型 | 升級 T2 |
-| T2 Local Multimodal | 模態需要交叉驗證、watchlist 命中 | 本地 VLM + ASR + Audio，縮短窗口 | 升級 T3 或 L1/L2 |
-| T3 Strong Fast Path | 高風險、強衝突、本地結果低信心 | 強模型、完整事件包、最小照護摘要 | 人工確認與保守介入 |
+| Route | 用途 | 預設動作 |
+|---|---|---|
+| T0 Sensor | 收到 raw sensor metadata | 不叫 LLM |
+| T1 Local rule | 去重、cooldown、event correlation、coverage | SQLite/local state |
+| T2 Multimodal | 影像/音訊跨模態、重要或不確定 situation | GMI MiniMax M3（目前）／Nemotron（可切回） |
+| T3 Interaction | 已經過 attention policy 的 Ask/Remind | Resident Interaction prompt |
+| T4 Caregiver | 日／週 privacy aggregate、baseline finding | Caregiver prompt |
 
-## 3. Router 輸入與決策
+## 3. 不應呼叫模型的情況
 
-Router 至少評估：`urgency`、`uncertainty`、`watchlist_match`、`evidence_quality`、`modality_conflict`、`subject_context_relevance`、`deadline`、`device_health`、`queue_load` 與 `cost_budget`。
+每個 `motion`、`person_present`、VAD transition 或一般 sensor event 不應單獨叫模型。先合併成 situation；只有 ambiguous、important、information-gap value 足夠時才升級。`SILENT` 與 local-only 都是合法結果。
 
-建議用可解釋的 reason codes 產生路由：例如 `high_urgency`、`low_local_confidence`、`impact_floor_combination`、`missing_audio`、`watchlist_match`。不使用不可追蹤的單一黑盒分數作為唯一升級原因。
+## 4. Runtime 約束
 
-路由決策必須保存：候選摘要、輸入特徵、route、reason codes、模型 ID/version、policy/runtime version、開始／結束時間、是否升級、成本／token、結果與 fallback。
+- Omni request 以 `VLLM_MAX_CONCURRENCY` bounded semaphore 控制，預設可並行 2 個 request；observation 與 Main Agent 共用同一上限。
+- media sampler 以 `VLLM_MAX_PENDING_WINDOWS` 限制尚未完成的窗口 task，超出時明確記錄 skipped/backpressure，不假裝完成分析。
+- 2 FPS、5 秒、10 frames；window stride 預設 5 秒。
+- vLLM 使用本機 `nemotron_omni`、FP8 KV cache、已驗證的模型啟動參數；不使用 CPU offload。
+- 本機路由的音訊只以短暫 WAV local URI 供單次 request，完成即刪除；GMI 路由改用 request 內 data URL，不在本機落地保存。
+- GMI Cloud 路由只在使用者同意後啟用；API key 從 `GMIAPI.txt` 讀入記憶體，不進前端、SQLite 或 logs。
+- 原始 prompt、raw response、完整 audio/video 不進 logs。
 
-## 4. Runtime 佇列
+## 5. Main Agent 輸出與判斷
 
-| Queue | 優先級 | 工作 | 資源 |
-|---|---|---|---|
-| realtime-critical | 最高 | L2–L4 候選、衝突、高風險 | 保留 CPU/GPU 配額 |
-| realtime-normal | 中 | T1/T2 普通事件 | 平行數上限 |
-| caregiver-response | 高 | 等待回應、timeout、delivery retry | 不依賴模型可用性 |
-| background | 低 | Observer、embedding、摘要、壓縮 | 可取消、夜間／閒置 |
-| dead-letter | 人工處理 | 無法解析、schema 失敗、重試耗盡 | 僅人工或修復工作流 |
+Main Agent 使用同一 Omni endpoint，但 purpose、prompt、schema 與 audit record 與 observation 分離。它輸出 facts、跨 frame 時序、existing-first event assessment、hypothesis、unknown、uncertainty、risk、attention、proposed action 與 next action；不輸出 hidden chain-of-thought。
 
-所有 queue 都需有最大並行數、deadline、retry/backoff、circuit breaker、取消與 dead-letter 行為。背景工作不可阻塞即時與通知 queue。
+模型輸出後進 `MainAgentPolicy`：先檢查 evidence/confidence，再計算可重現的 attention score，最後套 critical overrides 與 fail-closed。所有 `ask`／`dashboard_alert` 都只是 policy proposal；未來接 Resident Interaction 或 Notify 前仍需 consent、recipient、cooldown 與 idempotency gate。
 
-## 5. 模型輸出規約
+## 6. 觀察輸出
 
-模型只能輸出版本化 JSON schema；至少包含 claim、evidence_refs、confidence、uncertainty、data_quality、provenance 與 model_version。Schema 驗證失敗、evidence 不存在、confidence 不在合法範圍或 output 內容超出 agent scope 時，結果標記 invalid，不得直接進 Risk。
+Model 只能輸出 typed `Observation`：visual posture/transition、audio events/emotion、confidence、supporting indexes、uncertainty 與 exceptional `event_candidates`。`fall`／`hydration` 仍交給既有 state machine；未知欄位保留 unknown。
 
-## 6. 本地優先與強模型邊界
+## 7. 降級
 
-- 原始影片／音訊預設在本地處理；外部強模型只收到必要 clip、轉錄、特徵與最小 context snapshot。
-- 脱敏或 pseudonymization 在出站前完成；外部傳輸要有 consent scope 與 audit。
-- 強模型不可取得通知工具、政策寫入工具或直接修改 Medical Context 的權限。
-- 強模型結果仍需與本地結果、證據引用與 Policy Gateway 分開保存。
+GMI／vLLM unavailable、timeout、schema invalid 時，保留 sensor metadata、最近可靠 Observation 與 local rule 結果，Main Agent run 標記 failed，policy 固定為 `insufficient_data → silent`，並明確標記 `degraded=true`。不可把缺失資料解讀成正常，也不可因模型失敗自動升級 L4。
 
-## 7. 降級策略
+## 8. 驗收
 
-模型服務不可用時，依序考慮：規則與最近可靠 Observation、縮短窗口重試、L1 Observe、L2 check-in、人工隊列。降級輸出必須明確寫出 `degraded=true` 與原因，不得假裝正常完成。
-
-## 8. Runtime 驗收
-
-- 可用固定 replay dataset 重放事件，得到相同 dedup、路由與 policy inputs。
-- T0/T1 不會在沒有升級理由時呼叫 T3。
-- 高風險訊號出現時可搶占背景工作；背景工作恢復後不重複寫入結果。
-- 所有模型 latency、error、cost、confidence calibration 與 route outcome 可查詢。
-
-事件契約見 [02_EVENT_PIPELINE.md](02_EVENT_PIPELINE.md)，安全限制見 [09_DEPLOYMENT_AND_SECURITY.md](09_DEPLOYMENT_AND_SECURITY.md)。
-
+每個 route 保存 model/prompt/schema/config version、input hash、latency、status、retry 與 fallback。測試需覆蓋 multimodal valid/invalid、Main Agent judgment schema、policy gates、timeout、missing audio、10-frame limit、parallel queue/backpressure、dedup 與 model reconnect。

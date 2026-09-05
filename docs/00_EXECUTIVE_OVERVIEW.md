@@ -2,57 +2,42 @@
 
 ## 一句話定義
 
-AI 長照 Agent OS 是一個本地優先、事件驅動、可審計的照護輔助系統：Frigate NVR 先產生低成本事件候選，ASR、Video VLM 與 Audio Event Classifier 再做多模態理解，專責 Agent 分別處理觀察、風險、介入、個人化 watchlist 與長期趨勢。
+**Ambient Care Agent OS 在有限感知下建立生活脈絡，並知道何時值得注意、何時資訊不足、何時應該詢問或保持安靜。**
 
-## 設計結論
+它不是「看著老人」的 AI，也不是把所有 camera/audio 原始資料交給一個萬能 Agent。Camera、microphone、IoT、手機與 wearable 都是稀疏 sensors；核心價值在 Event Ledger、World State、Uncertainty、Memory 與治理後的 intervention。
 
-系統不採用「事件發生後交給一個萬能 Agent」的模式，而採用以下閉環：
+## 核心問題
 
-```text
-感知 → 事件候選 → 多模態理解 → Event Ledger
-     → 風險評估 → 政策閘門 → 介入 → 結果回寫
-     → 長期觀察 → baseline / hypothesis → watchlist 更新
-```
+單一感測器通常只知道局部現象：人離開鏡頭不代表離開家、冰箱關閉不代表知道拿了什麼、沒有聲音不代表沒有事情發生。因此系統必須能保存 `UNKNOWN`，並將「資訊缺口」變成可評估的 Active Inquiry，而不是幻覺式補全。
 
-這個拆分讓計算成本、模型責任、醫療脈絡與安全行動彼此可控，也能在模型失效時退回規則、人工確認或僅記錄。
+## 三個邏輯 Agent
+
+1. **Context Sentinel**：整理目前 Known、Unknown、Hypothesis、confidence 與值得注意的變化。
+2. **Resident Interaction Agent**：以 Default Silent 為原則，在值得知道且可打擾時詢問、提醒或短暫對話。
+3. **Caregiver Agent**：只讀 privacy-aggregated facts、trend 與 findings，產生可追溯的照護摘要。
+
+三者共用同一個 Event/Memory 核心與 deterministic Policy；不拆成三個獨立模型服務。現階段三個 Agent 可共用本機 Nemotron vLLM，但 prompt、context、tools 與權限必須分開。
 
 ## 範圍
 
-本設計涵蓋：
+- 單一住戶、單一場域、local-first。
+- Browser camera/microphone continuous MediaStream；目前以本機 Nemotron Omni vLLM 做 2 FPS、5 秒、10-frame + audio window。
+- 既有 `fall`、`hydration` 事件優先沿用；家庭聲音、人物活動、非人物物件作為有證據的例外 `recognition_events`。
+- Event correlation、World State、Event/Semantic/Scheduled Memory、Active Inquiry、privacy aggregation、health snapshot 與長期 baseline。
+- Frigate、MQTT、IoT、wearable 為可插拔 adapters，不是 current VLM path 的必要條件。
 
-- Frigate NVR 事件 trigger 與影片/音訊證據索引。
-- ASR／人聲理解、Video VLM、Audio Event Classification 的平行分流與匯合。
-- Multimodal Event Bundle、Event Understanding、Risk、Intervention。
-- Care Context / Watchlist Agent 與病史、FHIR、HealthKit、穿戴式、照護者設定的整合。
-- Long-term Observer Agent 的閒置／夜間 baseline、trend、frequency、sequence、pattern 分析。
-- Raw Evidence、Sensor Event、Observation、Interpretation、Risk Assessment、Intervention、Hypothesis、Baseline、Watchlist、Medical Context 的資料分層。
-- T0–T3 動態模型路由、GPU/CPU 排程、版本與成本審計。
-- L0–L4 介入狀態機與 L4 deterministic safety gate。
+## 不做的承諾
 
-## 不在範圍內的承諾
+- 不做醫療診斷、治療建議或自動判定失能等級。
+- 不在浴室、臥室部署鏡頭，不在對話窗外自動啟動逐字 ASR。
+- 不把單張影像、單次聲音或模型自由文字直接變成確定事實。
+- 不自動聯繫社工、政府或緊急服務；L4 executor 不在本版。
+- 不把照護者預設暴露到 Level 3 raw video/audio/transcript。
 
-本系統不是診斷工具，也不是在沒有場域政策、預先授權與確認閘門的情況下自動呼叫緊急服務的系統。模型推論可以產生建議、證據摘要與不確定性，但不能自行把假設升格為病史事實，也不能修改緊急行為門檻。
+## 成功判準
 
-## 核心架構
+一次可重現的 Demo 應能展示：事件進入 → 脈絡整理 → Known/Unknown/Hypothesis → 需要時詢問 → 回答寫入 Memory → 依時間產生提醒 → 照護者只看到摘要與證據索引。每一步都能追溯來源、時間、信心、版本與政策。
 
-資料與控制流如下：
+## current implementation status
 
-1. Frigate NVR 從攝影機、麥克風與整合裝置產生低成本事件候選。
-2. Router 將候選分流給 ASR／人聲理解、Video VLM 與 Audio Event Classifier。
-3. Assembler 依事件 ID、時間窗、裝置與 subject 匯合成 Multimodal Event Bundle。
-4. Event Understanding Agent 產生 Observation 與 Interpretation，寫入 Event Ledger。
-5. Risk Agent 評估風險與不確定性，Policy Gateway 再決定允許的介入範圍。
-6. Intervention Agent 執行 L0–L4，並將回應、超時、取消與接手結果回寫。
-7. Long-term Observer Agent 讀取 Ledger、健康脈絡與基線；Memory/Consolidation Agent 保存結果，Watchlist Agent 產生可審核的觀察策略。
-
-## 最重要的安全決策
-
-1. Risk Agent 與 Intervention Agent 分離；Risk 不可直接通知或求助。
-2. Watchlist 是觀察策略，不是緊急政策；Agent-suggested watch item 預設只能進入待審核狀態。
-3. L4 必須同時滿足 deterministic policy、明確預先授權、證據品質、確認／超時條件與完整審計。
-4. 每一筆模型輸出都保留 source、timestamp、model/policy version、confidence、provenance 與 data quality。
-5. 事件與外部健康資料採最小必要 context，避免把完整病史或全部影音暴露給每個模型。
-
-## 導入順序
-
-先用單一場域、少量事件類型做可觀測的 L0–L2 Demo，再加入 L3 照護者確認流程，最後才在經過場域政策與安全驗證後評估 L4。實作里程碑詳見 [10_MVP_AND_ROADMAP.md](10_MVP_AND_ROADMAP.md)。
+目前已完成 browser multimodal stream、Nemotron image/audio request、structured observation、fall/hydration state machine、exception event candidates、SQLite、WSS dashboard 與基本 Observer。下一個主要工作是 Context Sentinel/Active Inquiry、Policy/Intervention 與受限 Resident Interaction；Gate 2b 的 Silero/Whisper、完整 Agent tools 與 Gate 3 的 E2E 仍待完成。
