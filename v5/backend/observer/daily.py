@@ -11,11 +11,14 @@ aggregates already are.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from ..domain.enums import EscalationTrigger
 from ..domain.l3_contract import EvidenceBundle
 from ..domain.timeutil import day_key
+from ..domain.timeutil import now_ms
+from ..jsonio import JsonExtractionError, extract_json
 
 #: Relative change against baseline that justifies spending an L3 call.
 DEFAULT_CHANGE_THRESHOLD = 0.30
@@ -46,6 +49,7 @@ def compute_day(ctx: Any, day: str) -> dict[str, Any]:
     fall_count = falls[0]["n"] if falls else 0
 
     windows = counters.get("windows", 0)
+    body = _body_observations(ctx, day)
     payload = {
         "day": day,
         "hydration_ml": hydration.get("total_ml", 0),
@@ -60,8 +64,64 @@ def compute_day(ctx: Any, day: str) -> dict[str, Any]:
         # healthy L1 means real saving; with an unhealthy L1 it means blind spots.
         "coverage_ratio": round(counters.get("l2_calls", 0) / windows, 4) if windows else 0.0,
         "skip_ratio": round(counters.get("skipped", 0) / windows, 4) if windows else 0.0,
+        **body,
     }
     return payload
+
+
+def _body_observations(ctx: Any, day: str) -> dict[str, Any]:
+    """Summarise validated L2 observations already stored in SQLite.
+
+    The model never receives database access. We parse the redacted, bounded
+    observation payloads and expose only an allow-listed aggregate.
+    """
+    rows = ctx.db.query(
+        """SELECT response_text FROM model_calls
+           WHERE layer='l2_gemini' AND status IN ('ok','repaired')
+             AND substr(created_at, 1, 10)=? AND response_text IS NOT NULL
+           ORDER BY created_at DESC LIMIT 2048""",
+        (day,),
+    )
+    observations: list[dict[str, Any]] = []
+    for row in rows:
+        try:
+            payload = extract_json(str(row["response_text"]))
+        except (JsonExtractionError, json.JSONDecodeError, TypeError, ValueError):
+            continue
+        if isinstance(payload, dict):
+            observations.append(payload)
+
+    posture_counts = {key: 0 for key in ("standing", "sitting", "lying", "crouching", "unknown")}
+    motionless = 0
+    active = 0
+    confidences: list[float] = []
+    for item in observations:
+        fall = item.get("fall") if isinstance(item.get("fall"), dict) else {}
+        posture = str(fall.get("posture", "unknown"))
+        posture_counts[posture if posture in posture_counts else "unknown"] += 1
+        is_motionless = bool(fall.get("motionless", False))
+        motionless += int(is_motionless)
+        active += int(bool(item.get("person_visible")) and not is_motionless)
+        try:
+            confidences.append(float(item.get("confidence", 0)))
+        except (TypeError, ValueError):
+            pass
+
+    latest = observations[0] if observations else {}
+    latest_fall = latest.get("fall") if isinstance(latest.get("fall"), dict) else {}
+    total = len(observations)
+    return {
+        "observation_count": total,
+        "posture_counts": posture_counts,
+        "current_posture": str(latest_fall.get("posture", "unknown")),
+        "current_motionless": bool(latest_fall.get("motionless", False)),
+        "current_scene_summary": str(latest.get("scene_summary", ""))[:240],
+        "current_confidence": round(float(latest.get("confidence", 0) or 0), 3),
+        "motionless_ratio": round(motionless / total, 4) if total else 0.0,
+        "activity_ratio": round(active / total, 4) if total else 0.0,
+        "observation_confidence_avg": round(sum(confidences) / len(confidences), 3)
+        if confidences else 0.0,
+    }
 
 
 def baseline(ctx: Any, day: str, window_days: int) -> dict[str, float]:
@@ -83,6 +143,7 @@ def _relative_change(current: float, base: float) -> float:
 
 def run_observer(ctx: Any, day: str | None = None,
                  threshold: float = DEFAULT_CHANGE_THRESHOLD) -> dict[str, Any]:
+    started_at_ms = now_ms()
     target = day or day_key()
     summary = compute_day(ctx, target)
     ctx.repos.upsert_daily_summary(target, ctx.config.subject_id, summary)
@@ -113,8 +174,36 @@ def run_observer(ctx: Any, day: str | None = None,
     if changes and ctx.l3 is not None:
         narrative = _narrate(ctx, target, summary, week, month, changes)
 
-    return {"day": target, "summary": summary, "baseline_7d": week, "baseline_30d": month,
-            "changes": changes, "findings": findings, "narrative": narrative}
+    windows = int(summary.get("windows", 0) or 0)
+    observations = int(summary.get("observation_count", 0) or 0)
+    completeness = min(1.0, observations / max(1, int(summary.get("l2_calls", 0) or 0)))
+    confidence = float(summary.get("current_confidence", 0) or 0)
+    if windows == 0 or observations == 0:
+        status, headline = "insufficient_evidence", "目前資料不足，無法形成身體狀況判讀"
+    elif int(summary.get("fall_events", 0) or 0) > 0:
+        status, headline = "anomaly", "觀察期間出現跌倒相關事件"
+    elif changes:
+        status, headline = "attention", "部分指標偏離個人近期基準"
+    else:
+        status, headline = "stable", "目前狀況穩定，未發現新的異常訊號"
+
+    detail = (
+        f"姿勢={summary.get('current_posture', 'unknown')} · "
+        f"活動比例={float(summary.get('activity_ratio', 0)):.0%} · "
+        f"飲水={float(summary.get('hydration_ml', 0)):.0f} ml · "
+        f"分析 {observations} 筆結構化觀察"
+    )
+    call_id = narrative.get("call_id") if narrative and narrative.get("ok") else None
+    observer_run_id = ctx.repos.save_observer_run(
+        ctx.config.subject_id, started_at_ms, now_ms(), status, headline, detail,
+        confidence, completeness, "l3_narrative" if call_id else "deterministic",
+        call_id, summary, list(changes),
+    )
+
+    return {"day": target, "observer_run_id": observer_run_id, "status": status,
+            "headline": headline, "summary": summary, "baseline_7d": week,
+            "baseline_30d": month, "changes": changes, "findings": findings,
+            "narrative": narrative}
 
 
 def _narrate(ctx: Any, day: str, summary: dict[str, Any], week: dict[str, float],
@@ -139,4 +228,4 @@ def _narrate(ctx: Any, day: str, summary: dict[str, Any], week: dict[str, float]
         detail=result.analysis.recommendation, severity="info",
         call_id=result.call.call_id, payload=result.analysis.to_dict(),
     )
-    return {"ok": True, **result.analysis.to_dict()}
+    return {"ok": True, "call_id": result.call.call_id, **result.analysis.to_dict()}

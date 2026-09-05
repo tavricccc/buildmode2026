@@ -103,6 +103,24 @@ class TestReadEndpoints(ApiTestCase):
         self.assertEqual(status, 400)
         self.assertEqual(payload["error"]["code"], "bad_outcome")
 
+    def test_observer_records_stable_and_no_alert_passes(self):
+        self.ctx.observer.run_now()
+        status, payload = self.call("GET", "/api/observer/status")
+        self.assertEqual(status, 200)
+        self.assertIn(payload["latest"]["status"], {
+            "stable", "attention", "insufficient_evidence", "anomaly",
+        })
+        status, records = self.call("GET", "/api/observer/records?limit=5")
+        self.assertEqual(status, 200)
+        self.assertTrue(records["records"])
+
+    def test_statistics_exposes_daily_and_observer_series(self):
+        status, payload = self.call("GET", "/api/statistics?days=7")
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["days"], 7)
+        self.assertIn("observer_status_counts", payload)
+        self.assertIn("recent_observations", payload)
+
     def test_non_api_paths_fall_back_to_the_dashboard_page(self):
         with urllib.request.urlopen(self.base + "/dashboard", timeout=10) as response:
             response.read()

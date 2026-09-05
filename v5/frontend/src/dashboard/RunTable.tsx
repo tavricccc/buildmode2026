@@ -12,15 +12,15 @@ export function RunTable({ runs, onSelectEvent }: {
   onSelectEvent: (eventId: string) => void;
 }) {
   if (runs.length === 0) {
-    return <Card title="Pipeline windows"><Empty>No windows yet. Start a source to begin.</Empty></Card>;
+    return <Card title="Pipeline Runs"><Empty>尚無分析視窗，請先啟動影像來源。</Empty></Card>;
   }
   return (
-    <Card title="Pipeline windows" aside={<span className="muted mono">{runs.length} most recent</span>}>
+    <Card title="Pipeline Runs" aside={<span className="muted mono">最近 {runs.length} 筆</span>}>
       <div className="scroll">
         <table>
           <thead>
             <tr>
-              <th>Time</th><th>L1</th><th>L2</th><th>L3</th><th>Reason</th><th>Latency</th>
+              <th>時間</th><th>L1</th><th>L2</th><th>L3</th><th>原因</th><th>延遲</th>
             </tr>
           </thead>
           <tbody>

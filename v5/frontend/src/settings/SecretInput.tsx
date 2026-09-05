@@ -27,7 +27,7 @@ export function SecretInput({ label, secretKey, state, onSaved }: {
     try {
       await api.saveSecret(secretKey, next);
       setValue("");
-      setMessage(next ? "Saved." : "Cleared.");
+      setMessage(next ? "已儲存。" : "已清除。");
       onSaved();
     } catch (exc) {
       setMessage((exc as Error).message);
@@ -41,21 +41,21 @@ export function SecretInput({ label, secretKey, state, onSaved }: {
       <span>
         {label}{" "}
         {state?.configured
-          ? <Badge tone="ok">configured · {state.source} · {state.length} chars</Badge>
-          : <Badge tone="warn">not set</Badge>}
+          ? <Badge tone="ok">已設定 · {state.source} · {state.length} 字元</Badge>
+          : <Badge tone="warn">未設定</Badge>}
       </span>
       <div className="row">
         <input
           type="password"
           value={value}
           autoComplete="off"
-          placeholder={state?.configured ? "replace the stored value" : "paste the key"}
+          placeholder={state?.configured ? "輸入新值以取代目前 Secret" : "貼上 API Key"}
           onChange={(event) => setValue(event.target.value)}
           style={{ flex: 1 }}
         />
-        <button className="action" disabled={busy || !value} onClick={() => void save(value)}>Save</button>
+        <button className="action" disabled={busy || !value} onClick={() => void save(value)}>儲存</button>
         {state?.configured && state.source === "store" && (
-          <button className="action" disabled={busy} onClick={() => void save("")}>Clear</button>
+          <button className="action" disabled={busy} onClick={() => void save("")}>清除</button>
         )}
       </div>
       {message && <span className="muted" style={{ fontSize: 12 }}>{message}</span>}

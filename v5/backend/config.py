@@ -67,6 +67,9 @@ class AppConfig:
     clips_dir: Path = field(init=False)
     secret_path: Path = field(init=False)
     subject_id: str = field(default_factory=lambda: _env("CARE_SUBJECT_ID", "subject-1"))
+    observer_interval_sec: int = field(
+        default_factory=lambda: _env_int("CARE_OBSERVER_INTERVAL_SEC", 900)
+    )
     #: Gemini's documented inline_data ceiling; larger media needs Files API.
     inline_limit_bytes: int = 20 * 1024 * 1024
     static_dir: Path = field(default_factory=lambda: REPO_ROOT / "frontend" / "dist")

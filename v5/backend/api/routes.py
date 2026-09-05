@@ -16,13 +16,12 @@ import time
 from typing import Any, Callable
 
 from ..domain.enums import L2Outcome
-from ..domain.timeutil import day_key, now_ms
+from ..domain.timeutil import now_ms
 from ..l1.detector import DETECTOR_REGISTRY, build_detector
 from ..l2.gemini_client import GeminiClient, GeminiError
 from ..l3.minimax_client import MiniMaxClient, MiniMaxError
 from ..media import ffmpeg
 from ..media.replay_source import ScriptedSource
-from ..observer.daily import run_observer
 from ..secretstore import SECRET_KEYS
 
 
@@ -53,7 +52,7 @@ class Request:
             return default
 
 
-Handler = Callable[[Any, Request], "tuple[int, dict[str, Any]]"]
+Handler = Callable[[Any, Request], "tuple[int, Any] | tuple[int, Any, str]"]
 ROUTES: list[tuple[str, re.Pattern[str], Handler]] = []
 
 
@@ -208,9 +207,39 @@ def get_findings(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
                  "summaries": ctx.repos.daily_summaries(min(request.q_int("days", 14), 90))}
 
 
+@route("GET", "/api/observer/status")
+def get_observer_status(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    records = ctx.repos.list_observer_runs(ctx.config.subject_id, 1)
+    return 200, {"scheduler": ctx.observer.status(),
+                 "latest": records[0] if records else None}
+
+
+@route("GET", "/api/observer/records")
+def get_observer_records(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    limit = min(request.q_int("limit", 50), 200)
+    return 200, {"records": ctx.repos.list_observer_runs(ctx.config.subject_id, limit)}
+
+
+@route("GET", "/api/statistics")
+def get_statistics(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    days = max(1, min(request.q_int("days", 30), 90))
+    since_ms = now_ms() - days * 86_400_000
+    return 200, {
+        "days": days,
+        "summaries": ctx.repos.daily_summaries(days),
+        "observer_status_counts": ctx.repos.observer_status_counts(
+            ctx.config.subject_id, since_ms),
+        "recent_observations": ctx.repos.list_observer_runs(
+            ctx.config.subject_id, min(days * 8, 200)),
+    }
+
+
 @route("POST", "/api/observer/run")
 def post_observer(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
-    return 200, run_observer(ctx, day=request.body.get("day") or day_key())
+    result = ctx.observer.run_now()
+    if result is None:
+        raise ApiError(409, "observer_busy", "observer is already running")
+    return 200, result
 
 
 # ---------------------------------------------------------------------
@@ -452,3 +481,11 @@ def post_source_stop(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
     ctx.stop_source()
     ctx.cascade.stop()
     return 200, {"stopped": True}
+
+
+@route("GET", "/api/source/snapshot")
+def get_source_snapshot(ctx: Any, request: Request) -> tuple[int, Any, str]:
+    frames = ctx.frames.buffer.latest(1)
+    if not frames:
+        raise ApiError(404, "no_frame", "no source frame is available yet")
+    return 200, frames[0].jpeg, "image/jpeg"

@@ -1,73 +1,97 @@
-# HANDOFF — Care Agent v5 實作(2026-09-05)
+# HANDOFF — Care Agent v5 Frontend Reimagine（2026-09-05）
 
-_Branch: `feat/v5-three-layer-cascade`(base `origin/main` @ `fb065cd`)· 尚未 push_
+Branch: `frontend`
 
-## 這個分支做了什麼
+Base: `origin/main` @ `ceea44a`
 
-依 `docs-implementation-v5/` 從頭實作 v5 的三層 cascade。**全新 `v5/` 目錄，沒有從舊分支挑任何檔案**(使用者指示「全部重寫」)。
+Design source: Google Stitch project `Care Agent v5 · Frontend Reimagine`
 
-`v4/` 骨架與舊分支的扁平 `backend/` 都原封不動保留,沒有動到。
+## 本次交付
 
-## 交付狀態
+以 Stitch「Calm Vigilance」方向完整重構 `v5/frontend`，並補上前端所需的真實 Observer、統計與影像 Snapshot 後端能力。不是靜態 mock；畫面仍接既有 REST、WebSocket、SQLite、L1/L2/L3 與 Policy Gateway。
 
-`bun run verify` → **122 tests OK** + frontend typecheck 乾淨 + ffmpeg found。
+### 資訊架構
 
-| 層 | 狀態 |
-|---|---|
-| L1 person gate | ✅ 三種 detector(stub / motion / yolo11n),hysteresis、stale、fail-open 全部有測試 |
-| L2 Gemini | ✅ 原生 REST(inline_data + Files API + ACTIVE poll)、一次 repair、offline stub |
-| L3 MiniMax | ✅ OpenAI-compatible、frames wire format、degraded text-only、失敗不阻塞 |
-| 狀態機 | ✅ fall / hydration 純函式 |
-| Policy Gateway | ✅ 模型只能建議,不能指定通道或收件人 |
-| SQLite | ✅ 含 v5 新增的 `pipeline_runs` |
-| REST + WebSocket | ✅ 純標準庫,自己實作 RFC 6455 |
-| Dashboard / Setup / Settings | ✅ React+TS,三層 panel、cascade trace、write-only secret |
-| Telegram | ✅ allowlist、opaque single-use token、acknowledged / false_alarm / failed |
-| Observer | ✅ 日彙總 + 7/30 日 baseline,只在超過門檻才花 L3,且只送 aggregate |
-| Capability probes | ✅ Gemini 與 MiniMax 各一支 |
+- **照護總覽**：住戶安全狀態、來源狀態、AI 身體狀況、L1→L2→L3→Policy 連續管線、事件、飲水、健康、Pipeline Runs、Policy 決策與日誌。
+- **即時影像**：RTSP、內建 Replay Scenario、本機錄影三種來源；開始、停止、重新連線；顯示低頻分析 Snapshot 與來源健康指標。
+- **趨勢與統計**：7/30/90 日區間、飲水、跌倒、L2/L3 使用量、每日活動/飲水趨勢、AI 狀態與完整 Observer 紀錄。
+- **初始設定**：環境、L1、L2、L3 與端到端 Cascade Test，繁體中文化並明確區分 offline stub 與真模型。
+- **系統設定**：Write-only Secrets、Providers、Policy 群組、版本與 Rollback，繁體中文化。
 
-## 實測(對真實 provider)
+## 持續型 AI Observer
 
-**MiniMax M3 / GMI Cloud:probe 8/8 全過。** 細節見 `v5/docs/MEASURED_CAPABILITIES.md`。
+新增 `observer_runs` 稽核表與 `ObserverScheduler`：
 
-關鍵兩點:
-- **影格真的進到模型** —— prompt tokens 帶影格 1,594 vs 純文字 584(delta 1,010),外加 text part 的 canary 被正確回述,證明影片與文字在同一個 request 裡都活著。
-- **真跑一次 fall replay 時,M3 主動反駁了 stub L2** —— `supports_l2=false`、confidence 0.2,正確指出 fixture 的影格是空白的,還推測「L1/L2 看到的畫面與送到 L3 的影格可能不一致」。這正是 escalation 層存在的理由。
-- 過程中遇到一次真實 `rate_limited`,pipeline 照常運作(v5 00 item 9 得到真實驗證)。
+- 預設每 15 分鐘執行，可用 `CARE_OBSERVER_INTERVAL_SEC` 調整，最低 60 秒。
+- 啟動時先執行一次；單一執行鎖避免重疊。
+- 每次都寫入紀錄，狀態為 `stable`、`attention`、`insufficient_evidence`、`anomaly` 或 `failed`。
+- 正常、沒有警報時仍會留下「狀況穩定」紀錄。
+- 後端只提供白名單 SQLite 彙總，不讓模型執行任意 SQL。
+- 彙總姿勢、活動/靜止比例、信心、飲水、跌倒、coverage、skip 與模型使用量。
+- 只有指標超過門檻時才呼叫 L3 產生 narrative；AI 仍只能建議，Policy Gateway 才能授權通知。
+- UI 明示「AI 觀察不是醫療診斷」。
 
-**Gemini 尚未實測** —— 本機沒有 Gemini key。`bun run probe:gemini -- --key-file <path>` 就能跑。v5 01 明講音訊能力不可未測即假設,probe 裡有一項專門用 440 Hz 測試音去問。
+## 新增 API
 
-## 怎麼跑
+| Method | Path | 用途 |
+|---|---|---|
+| GET | `/api/observer/status` | 排程狀態與最新 Observer 紀錄 |
+| GET | `/api/observer/records?limit=N` | 持續觀測紀錄 |
+| GET | `/api/statistics?days=7\|30\|90` | 每日彙總、Observer 狀態統計與近期觀測 |
+| POST | `/api/observer/run` | 手動立即執行一次，重疊時回 409 |
+| GET | `/api/source/snapshot` | Ring Buffer 最新 JPEG；沒有影格時回 404 |
+
+既有 `/api/source/start` 現在由 UI 實際使用 `rtsp`、`replay_scenario` 與 `replay_file` 三種模式。RTSP URI 不會由 `/api/status` 回傳，只回傳去除認證資訊的 host。
+
+## 資料庫
+
+新增 migration：`v5/backend/store/migrations/002_observer_runs.sql`
+
+`observer_runs` 保存分析區間、狀態、摘要、信心、資料完整度、deterministic/L3 模式、model call、彙總 metrics 與 anomaly codes；已建立 subject/time 與 status/time indexes。
+
+## 視覺與互動
+
+- 深藍黑底、低警報疲勞；警示色只用於真正需要注意的狀態。
+- L1 綠青、L2 藍、L3 紫，Policy 使用獨立授權節點。
+- Event Trace 改為 480px overlay drawer，不再壓縮 Dashboard。
+- 44px 級操作目標、鍵盤 focus、狀態同時使用文字與色彩。
+- 使用 Phosphor Icons，不用 emoji 或自製 SVG。
+- 1150px 與 760px 響應式重排。
+
+## 驗證
+
+```text
+bun run verify
+✅ Python compile check
+✅ 124 unit tests
+✅ frontend TypeScript typecheck
+✅ ffmpeg found
+
+bun run build
+✅ Vite production build
+```
+
+Windows 原先直接斷言 POSIX `0600` mode 會錯誤讀成 `0666`；測試已改為 Windows 驗證檔案存在、POSIX 環境維持嚴格 mode assertion。Secret API 的不回傳與 redaction 測試仍保留。
+
+## 已知限制與下一步
+
+1. Snapshot 是分析 Ring Buffer 的低頻 JPEG，不是 NVR，也不持續儲存影片。
+2. 身體狀況來源是現有 L2 姿勢、靜止、跌倒、飲水與 scene summary；不宣稱心率、血壓、體溫或疾病診斷。
+3. 真實 Gemini 能力仍需有效 Key 跑 `bun run probe:gemini`。
+4. Observer 現在以 deterministic 彙總為常態；只有越過門檻才花費 L3。
+5. 前端 Google Fonts 需要網路；無網路時會安全退回 system fonts。
+
+## 執行
 
 ```bash
 cd v5
-bun install && bun run migrate && bun start
-# 需要 Python 3.11+ / bun / ffmpeg。不需要 pip install、不需要 venv、不下載任何模型。
-bun start -- --source fall     # 或 empty_room / hydration / l1_false_negative
-bun run verify
+bun install
+bun run migrate
+bun start
+
+# 模擬情境
+bun start -- --source fall
+
+# 即時 RTSP
+bun start -- --rtsp "rtsp://..."
 ```
-
-沒有 API key 時,兩個 model slot 自動退回 offline stub —— stub 複製的是 provider 的**契約**不是品質,所以 schema 驗證、repair、狀態機、escalation、稽核全部照跑。
-
-## 開發過程中被測試抓出來的三個真 bug
-
-1. **gate 冷啟動預設「無人」** —— 第一筆健康 reading 就能授權 skip,完全繞過離開遲滯。改成冷啟動假設「有人」。
-2. **每個 HTTP 連線洩漏一個 SQLite handle** —— ThreadingHTTPServer 一連線一 thread,而 Database 一 thread 一連線。
-3. **`shutdown()` 沒有關掉 listening socket** —— 會讓立即重啟撞 EADDRINUSE。
-
-另外跑起來才發現:source 停掉後 gate 讀數變 stale → fail-open → L2 對空 buffer 開工,原本被記成 L2 失敗,會讓 Dashboard 把「來源斷線」顯示成「模型有問題」。已改成不記錄該窗口,改由 source starvation 回報。
-
-## Next
-
-1. **拿 Gemini key 跑 `bun run probe:gemini`**,把結果補進 `v5/docs/MEASURED_CAPABILITIES.md`。這是目前唯一未實測的 provider 假設。
-2. **決定要不要 push** `feat/v5-three-layer-cascade`(目前只在本機)。
-3. **LICENSE 與 repo 根 README** 仍缺(書審「開源品質」佔 15%,`origin/main` 的新提案 README 自己點名了這個缺口)。選哪個 license 是你的決定,我沒有代選。
-4. `03` 的狀態機數值仍是建議值:確認 2 段、confidence 0.5、confirmed 後 60 秒、喝水固定容量。目前全部在 `v5/backend/domain/policy.py` 一處,且可從 Settings 改並 rollback。
-5. YOLO11n detector 需要 `onnxruntime` 與權重,Setup 目前不會自動抓。
-6. 音訊/ASR 路徑:transcript 的儲存與 TTL 都在了,但沒有接上 ASR engine。
-
-## 注意
-
-- GMI API key 在 repo 根 `GMIAPI.txt`,已被 `.gitignore` 忽略,**勿印出內容**。
-- M3 免費期到 **2026-09-06**(書審當天),之後計費。
-- `v5/data/` 的 sqlite、clips、secrets.json 都已進 `.gitignore`。

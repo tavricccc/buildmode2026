@@ -32,6 +32,7 @@ from .media.frames import FrameWindow
 from .media.replay_source import ReplaySource, ScriptedSource
 from .media.rtsp_source import RtspSource
 from .notify.telegram import TelegramNotifier
+from .observer.service import ObserverScheduler
 from .store import Database, Repositories, migrate
 
 
@@ -62,8 +63,10 @@ class AppContext:
         self.l3 = self._build_l3()
         self.notifier = self._build_notifier()
         self.cascade = self._build_cascade()
+        self.observer = ObserverScheduler(self, self.config.observer_interval_sec)
         if self.notifier is not None:
             self.notifier.start_polling()
+        self.observer.start()
 
     # -- configuration ---------------------------------------------------
 
@@ -227,6 +230,7 @@ class AppContext:
 
     def shutdown(self) -> None:
         self.stop_source()
+        self.observer.stop()
         if self.notifier is not None:
             self.notifier.stop_polling()
         self.cascade.stop()
@@ -243,6 +247,7 @@ class AppContext:
             "source": self.source.health() if self.source else {"running": False},
             "cascade": self.cascade.status(),
             "realtime": self.broadcaster.metrics(),
+            "observer": self.observer.status(),
             "providers": {
                 "l2": {**self.l2_config.describe(self.secrets),
                        "active": getattr(self.l2.backend, "model", None),

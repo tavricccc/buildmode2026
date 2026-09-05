@@ -1,6 +1,7 @@
 import type {
   CareAction, CareEvent, CascadeTestResult, EventDetail, PipelineRun,
-  RunStats, SettingsPayload, SetupState, Status,
+  ObserverRecord, ObserverSchedulerStatus, RunStats, SettingsPayload, SetupState,
+  StatisticsPayload, Status,
 } from "../types/api";
 
 export class ApiError extends Error {
@@ -38,6 +39,9 @@ export const api = {
   health: () => call<{ samples: { metric: string; value: number; unit: string; source: string; observed_at_ms: number }[] }>("/api/health/current"),
   logs: (limit = 60) => call<{ logs: { log_id: string; level: string; source: string; message: string; created_at: string }[] }>(`/api/logs?limit=${limit}`),
   observerFindings: () => call<{ findings: { finding_id: string; kind: string; headline: string; detail: string; severity: string; day_key: string }[]; summaries: unknown[] }>("/api/observer/findings"),
+  observerStatus: () => call<{ scheduler: ObserverSchedulerStatus; latest: ObserverRecord | null }>("/api/observer/status"),
+  observerRecords: (limit = 50) => call<{ records: ObserverRecord[] }>(`/api/observer/records?limit=${limit}`),
+  statistics: (days = 30) => call<StatisticsPayload>(`/api/statistics?days=${days}`),
 
   settings: () => call<SettingsPayload>("/api/settings"),
   saveSettings: (policy: unknown, note: string) =>
@@ -55,4 +59,5 @@ export const api = {
   startSource: (kind: string, target: string) => post<unknown>("/api/source/start", { kind, target }),
   stopSource: () => post<unknown>("/api/source/stop"),
   runObserver: () => post<unknown>("/api/observer/run"),
+  sourceSnapshotUrl: () => `/api/source/snapshot?t=${Date.now()}`,
 };

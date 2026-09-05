@@ -23,7 +23,7 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
   const load = useCallback(async () => setState(await api.setupState()), []);
   useEffect(() => { void load(); }, [load]);
 
-  if (!state) return <Card title="Setup"><Empty>Loading…</Empty></Card>;
+  if (!state) return <Card title="初始設定"><Empty>載入中…</Empty></Card>;
 
   const probe = async (name: string, fn: () => Promise<unknown>) => {
     setBusy(name);
@@ -44,19 +44,19 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
     if (typeof result === "string") return <Badge tone="bad">{result}</Badge>;
     if (!result.ok) return <Badge tone="bad">{result.code}: {result.message}</Badge>;
     return <Badge tone={result.model_available === false ? "warn" : "ok"}>
-      {result.model_available === false ? "reachable, but the configured model is not listed" : "reachable"}
+      {result.model_available === false ? "服務可連線，但找不到指定模型" : "連線正常"}
     </Badge>;
   };
 
   return (
     <div className="stack">
-      <Card title="Setup" aside={state.complete
-        ? <Badge tone="ok">ready</Badge>
-        : <Badge tone="warn">incomplete</Badge>}>
+      <header className="page-heading"><div><span className="eyebrow">Setup Wizard</span><h1>初始設定</h1><p>逐層確認環境、模型與完整 Cascade，不以單一綠燈代替端到端驗證。</p></div></header>
+      <Card title="設定進度" aside={state.complete
+        ? <Badge tone="ok">已就緒</Badge>
+        : <Badge tone="warn">尚未完成</Badge>}>
         <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
-          The backend starts before any of this is configured, and nothing on this page downloads a
-          model until you ask it to. Unconfigured model slots fall back to the offline stubs, so the
-          cascade can be exercised end to end before a single key exists.
+          即使尚未設定模型，後端仍可啟動。未設定的模型槽會使用 offline stub 驗證資料契約，
+          但不代表真實模型能力；任何模型下載都必須由你主動觸發。
         </p>
         <div className="steps">
           {state.steps.map((step) => (
@@ -71,31 +71,31 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
         </div>
       </Card>
 
-      <Card title="Probe each layer" aside={<span className="muted" style={{ fontSize: 12 }}>
-        auth and reachability only — cheap, and safe to repeat
+      <Card title="逐層連線測試" aside={<span className="muted" style={{ fontSize: 12 }}>
+        僅測試驗證與可用性，可安全重複
       </span>}>
         <div className="stack">
           <div className="row">
             <button className="action" disabled={busy !== null}
-                    onClick={() => void probe("l1", () => api.testPersonGate())}>Test L1 detector</button>
+                    onClick={() => void probe("l1", () => api.testPersonGate())}>測試 L1 detector</button>
             {renderProbe("l1")}
-            {typeof probes["l1"] === "object" && <Badge tone="ok">detector answered</Badge>}
+            {typeof probes["l1"] === "object" && <Badge tone="ok">Detector 已回應</Badge>}
           </div>
           <div className="row">
             <button className="action" disabled={busy !== null}
-                    onClick={() => void probe("l2", () => api.testGemini())}>Test L2 Gemini</button>
+                    onClick={() => void probe("l2", () => api.testGemini())}>測試 L2 Gemini</button>
             {renderProbe("l2")}
           </div>
           <div className="row">
             <button className="action" disabled={busy !== null}
-                    onClick={() => void probe("l3", () => api.testMinimax())}>Test L3 MiniMax</button>
+                    onClick={() => void probe("l3", () => api.testMinimax())}>測試 L3 MiniMax</button>
             {renderProbe("l3")}
           </div>
         </div>
       </Card>
 
-      <Card title="End-to-end cascade test" aside={<span className="muted" style={{ fontSize: 12 }}>
-        one real window through all three layers
+      <Card title="端到端 Cascade 測試" aside={<span className="muted" style={{ fontSize: 12 }}>
+        讓一個真實分析視窗通過全部三層
       </span>}>
         <div className="row" style={{ marginBottom: cascade ? ".9rem" : 0 }}>
           {state.scenarios.map((scenario) => (
@@ -105,7 +105,7 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
                       try { setCascade(await api.cascadeTest(scenario)); }
                       finally { setBusy(null); }
                     })()}>
-              Run “{scenario}”
+              執行「{scenario}」
             </button>
           ))}
         </div>
@@ -127,7 +127,7 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
       </Card>
 
       <div className="row">
-        <button className="action primary" onClick={onDone}>Go to the Dashboard →</button>
+        <button className="action primary" onClick={onDone}>前往照護總覽 →</button>
       </div>
     </div>
   );

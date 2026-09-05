@@ -22,20 +22,20 @@ export function CascadeTrace({ eventId, onClose }: { eventId: string; onClose: (
     return () => { cancelled = true; };
   }, [eventId]);
 
-  if (error) return <Card title="Cascade trace"><p className="banner bad">{error}</p></Card>;
-  if (!detail) return <Card title="Cascade trace"><Empty>Loading…</Empty></Card>;
+  if (error) return <Card title="Cascade Trace"><p className="banner bad">{error}</p></Card>;
+  if (!detail) return <Card title="Cascade Trace"><Empty>載入中…</Empty></Card>;
 
   const { event, runs, model_calls, analyses, actions } = detail;
 
   return (
     <Card
-      title={`Cascade trace · ${event.event_type}`}
-      aside={<button className="action" onClick={onClose}>Close</button>}
+      title={`Cascade Trace · ${event.event_type}`}
+      aside={<button className="action" onClick={onClose}>關閉</button>}
     >
       <div className="row" style={{ marginBottom: ".9rem" }}>
         <Badge tone={event.event_type === "fall" ? "bad" : "ok"}>{event.status}</Badge>
         <span className="muted mono">{clock(event.occurred_at_ms)} → {clock(event.updated_at_ms)}</span>
-        <span className="muted">confidence {event.confidence.toFixed(2)}</span>
+        <span className="muted">信心 {event.confidence.toFixed(2)}</span>
       </div>
 
       <div className="stack">
@@ -74,9 +74,9 @@ export function CascadeTrace({ eventId, onClose }: { eventId: string; onClose: (
 
       {analyses.length > 0 && (
         <>
-          <h2 style={{ marginTop: "1.2rem" }}>Deep analyses</h2>
+          <h2 style={{ marginTop: "1.2rem" }}>L3 深度分析</h2>
           <table>
-            <thead><tr><th>Trigger</th><th>Risk</th><th>Recommendation</th><th>Evidence</th></tr></thead>
+            <thead><tr><th>觸發</th><th>風險</th><th>建議</th><th>證據</th></tr></thead>
             <tbody>
               {analyses.map((analysis) => (
                 <tr key={analysis.analysis_id}>
@@ -84,8 +84,8 @@ export function CascadeTrace({ eventId, onClose }: { eventId: string; onClose: (
                   <td><Badge tone={riskTone(analysis.risk_level)}>{analysis.risk_level ?? "—"}</Badge></td>
                   <td>{analysis.recommendation ?? "—"}</td>
                   <td>{analysis.degraded
-                    ? <Badge tone="warn">text only — no footage</Badge>
-                    : <Badge tone="ok">clip attached</Badge>}</td>
+                    ? <Badge tone="warn">僅文字，無影像</Badge>
+                    : <Badge tone="ok">已附證據片段</Badge>}</td>
                 </tr>
               ))}
             </tbody>
@@ -95,9 +95,9 @@ export function CascadeTrace({ eventId, onClose }: { eventId: string; onClose: (
 
       {actions.length > 0 && (
         <>
-          <h2 style={{ marginTop: "1.2rem" }}>Policy decisions</h2>
+          <h2 style={{ marginTop: "1.2rem" }}>Policy 決策</h2>
           <table>
-            <thead><tr><th>Action</th><th>Rule</th><th>Reason</th><th>Suppressed</th></tr></thead>
+            <thead><tr><th>動作</th><th>規則</th><th>原因</th><th>抑制</th></tr></thead>
             <tbody>
               {actions.map((action) => (
                 <tr key={action.action_id}>
@@ -114,9 +114,9 @@ export function CascadeTrace({ eventId, onClose }: { eventId: string; onClose: (
 
       {model_calls.length > 0 && (
         <>
-          <h2 style={{ marginTop: "1.2rem" }}>Model calls</h2>
+          <h2 style={{ marginTop: "1.2rem" }}>模型呼叫</h2>
           <table>
-            <thead><tr><th>Layer</th><th>Model</th><th>Status</th><th>Attempts</th><th>Latency</th><th>Tokens</th></tr></thead>
+            <thead><tr><th>層級</th><th>模型</th><th>狀態</th><th>嘗試</th><th>延遲</th><th>Tokens</th></tr></thead>
             <tbody>
               {model_calls.map((call) => (
                 <tr key={call.call_id}>

@@ -122,7 +122,11 @@ export interface Status {
   uptime_ms: number;
   subject_id: string;
   config_version: string;
-  source: { running?: boolean; kind?: string; frames_emitted?: number; scenario?: string };
+  source: {
+    running?: boolean; kind?: string; frames_emitted?: number; scenario?: string;
+    source_id?: string; reconnects?: number; last_frame_age_ms?: number | null;
+    error?: string | null; uri_host?: string;
+  };
   cascade: {
     windows_seen: number;
     starved_since_ms: number | null;
@@ -138,11 +142,66 @@ export interface Status {
     events: Record<string, { status: string; event_id: string | null; observations: number }>;
   };
   realtime: { clients: number; sequence: number; sent: number; dropped: number };
+  observer: ObserverSchedulerStatus;
   providers: Record<"l2" | "l3", {
     name: string; model: string; base_url: string; api_style: string;
     key_configured: boolean; active: string | null; stub: boolean;
   }>;
   secrets: Record<string, { configured: boolean; source: string; length: number }>;
+}
+
+export type ObserverState = "stable" | "attention" | "insufficient_evidence" | "anomaly" | "failed";
+
+export interface ObserverSchedulerStatus {
+  running: boolean;
+  interval_sec: number;
+  last_started_at_ms: number | null;
+  last_completed_at_ms: number | null;
+  next_run_at_ms: number | null;
+  last_error: string | null;
+}
+
+export interface ObserverRecord {
+  observer_run_id: string;
+  subject_id: string;
+  window_started_at_ms: number;
+  window_ended_at_ms: number;
+  status: ObserverState;
+  headline: string;
+  detail: string;
+  confidence: number;
+  data_completeness: number;
+  mode: "deterministic" | "l3_narrative";
+  call_id: string | null;
+  metrics: {
+    hydration_ml?: number; hydration_sessions?: number; fall_events?: number;
+    windows?: number; coverage_ratio?: number; skip_ratio?: number;
+    activity_ratio?: number; motionless_ratio?: number; observation_count?: number;
+    current_posture?: string; current_motionless?: boolean;
+    current_scene_summary?: string; current_confidence?: number;
+    posture_counts?: Record<string, number>;
+  };
+  anomaly_codes: string[];
+  created_at: string;
+}
+
+export interface DailySummary {
+  day_key: string;
+  hydration_ml: number;
+  hydration_sessions: number;
+  fall_events: number;
+  l2_calls: number;
+  l2_skipped: number;
+  l3_calls: number;
+  coverage_ratio: number;
+  payload: ObserverRecord["metrics"] & { l2_failures?: number };
+}
+
+export interface StatisticsPayload {
+  days: number;
+  summaries: DailySummary[];
+  observer_status_counts: Partial<Record<ObserverState, number>>;
+  recent_observations: ObserverRecord[];
 }
 
 export interface SetupStep {

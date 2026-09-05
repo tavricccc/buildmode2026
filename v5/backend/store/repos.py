@@ -432,8 +432,14 @@ class Repositories:
         )
 
     def daily_summaries(self, limit: int = 30) -> list[dict[str, Any]]:
-        return [_row(r) for r in self.db.query(
+        rows = [_row(r) for r in self.db.query(
             "SELECT * FROM daily_summaries ORDER BY day_key DESC LIMIT ?", (limit,))]
+        for row in rows:
+            try:
+                row["payload"] = json.loads(row.pop("payload_json") or "{}")
+            except json.JSONDecodeError:
+                row["payload"] = {}
+        return rows
 
     def save_finding(self, subject_id: str, day: str, kind: str, headline: str,
                      detail: str, severity: str, call_id: str | None,
@@ -452,6 +458,48 @@ class Repositories:
     def list_findings(self, limit: int = 30) -> list[dict[str, Any]]:
         return [_row(r) for r in self.db.query(
             "SELECT * FROM observer_findings ORDER BY created_at DESC LIMIT ?", (limit,))]
+
+    def save_observer_run(self, subject_id: str, window_started_at_ms: int,
+                          window_ended_at_ms: int, status: str, headline: str,
+                          detail: str, confidence: float, data_completeness: float,
+                          mode: str, call_id: str | None, metrics: dict[str, Any],
+                          anomaly_codes: list[str]) -> str:
+        run_id = new_id("obs")
+        self.db.execute(
+            """INSERT INTO observer_runs
+               (observer_run_id, subject_id, window_started_at_ms, window_ended_at_ms,
+                status, headline, detail, confidence, data_completeness, mode, call_id,
+                metrics_json, anomaly_codes_json, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (run_id, subject_id, window_started_at_ms, window_ended_at_ms, status,
+             headline, detail, max(0.0, min(1.0, confidence)),
+             max(0.0, min(1.0, data_completeness)), mode, call_id,
+             _json(metrics), _json(anomaly_codes), iso()),
+        )
+        return run_id
+
+    def list_observer_runs(self, subject_id: str, limit: int = 50) -> list[dict[str, Any]]:
+        rows = [_row(r) for r in self.db.query(
+            "SELECT * FROM observer_runs WHERE subject_id=? "
+            "ORDER BY window_ended_at_ms DESC LIMIT ?", (subject_id, limit))]
+        for row in rows:
+            for source, target, fallback in (
+                ("metrics_json", "metrics", {}),
+                ("anomaly_codes_json", "anomaly_codes", []),
+            ):
+                try:
+                    row[target] = json.loads(row.pop(source) or _json(fallback))
+                except json.JSONDecodeError:
+                    row[target] = fallback
+        return rows
+
+    def observer_status_counts(self, subject_id: str, since_ms: int) -> dict[str, int]:
+        rows = self.db.query(
+            "SELECT status, COUNT(*) AS n FROM observer_runs "
+            "WHERE subject_id=? AND window_ended_at_ms>=? GROUP BY status",
+            (subject_id, since_ms),
+        )
+        return {str(row["status"]): int(row["n"]) for row in rows}
 
     # -- config ----------------------------------------------------------
 

@@ -143,8 +143,13 @@ class CareRequestHandler(BaseHTTPRequestHandler):
                     body=self._body() if method in {"POST", "PUT"} else {},
                     params=match.groupdict(),
                 )
-                status, payload = handler(self.ctx, request)
-                self._send(status, payload)
+                result = handler(self.ctx, request)
+                if len(result) == 3:
+                    status, payload, content_type = result
+                    self._send(status, payload, content_type)
+                else:
+                    status, payload = result
+                    self._send(status, payload)
                 return
 
             if method == "GET" and not path.startswith("/api"):

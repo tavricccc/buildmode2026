@@ -5,11 +5,11 @@ export function EventTimeline({ events, onSelect }: {
   events: CareEvent[]; onSelect: (id: string) => void;
 }) {
   return (
-    <Card title="Events">
-      {events.length === 0 ? <Empty>No events recorded.</Empty> : (
+    <Card title="事件時間軸" aside={<span className="muted">點擊事件查看完整 Trace</span>}>
+      {events.length === 0 ? <Empty>尚未記錄事件。</Empty> : (
         <div className="scroll">
           <table>
-            <thead><tr><th>Time</th><th>Type</th><th>Status</th><th>Conf.</th></tr></thead>
+            <thead><tr><th>時間</th><th>事件</th><th>狀態</th><th>信心</th></tr></thead>
             <tbody>
               {events.map((event) => (
                 <tr key={event.event_id} className="clickable" onClick={() => onSelect(event.event_id)}>
@@ -34,19 +34,19 @@ export function EventTimeline({ events, onSelect }: {
 export function HydrationPanel({ summary }: {
   summary: { sessions: number; total_ml: number; target_ml: number; progress: number } | null;
 }) {
-  if (!summary) return <Card title="Hydration"><Empty>Loading…</Empty></Card>;
+  if (!summary) return <Card title="今日飲水"><Empty>載入中…</Empty></Card>;
   const percent = Math.min(100, Math.round(summary.progress * 100));
   return (
-    <Card title="Hydration today">
+    <Card title="今日飲水">
       <div className="row" style={{ justifyContent: "space-between", marginBottom: ".4rem" }}>
         <span style={{ fontSize: "1.35rem", fontWeight: 600 }}>
           {Math.round(summary.total_ml)}<span className="muted" style={{ fontSize: ".8rem" }}> / {summary.target_ml} ml</span>
         </span>
-        <span className="muted">{summary.sessions} session{summary.sessions === 1 ? "" : "s"}</span>
+        <span className="muted">{summary.sessions} 次完成紀錄</span>
       </div>
       <div className="bar"><i style={{ width: `${percent}%` }} /></div>
       <p className="muted" style={{ margin: ".5rem 0 0", fontSize: 12 }}>
-        Only completed sessions are counted; a repeat inside the cooldown window is not a second drink.
+        僅計算已完成的飲水；Cooldown 內重複片段不會再次累計。
       </p>
     </Card>
   );
@@ -89,11 +89,11 @@ export function SourcePanel({ status, onStart, onStop, scenarios, busy }: {
 
 export function ActionsPanel({ actions }: { actions: CareAction[] }) {
   return (
-    <Card title="Policy decisions">
-      {actions.length === 0 ? <Empty>Nothing has met a policy rule yet.</Empty> : (
+    <Card title="Policy 決策">
+      {actions.length === 0 ? <Empty>目前沒有符合規則的動作。</Empty> : (
         <div className="scroll">
           <table>
-            <thead><tr><th>Time</th><th>Action</th><th>Rule</th><th>Note</th></tr></thead>
+            <thead><tr><th>時間</th><th>動作</th><th>規則</th><th>說明</th></tr></thead>
             <tbody>
               {actions.map((action) => (
                 <tr key={action.action_id}>
@@ -117,8 +117,8 @@ export function HealthPanel({ samples, findings }: {
   findings: { finding_id: string; headline: string; detail: string; severity: string }[];
 }) {
   return (
-    <Card title="Health & observer">
-      {samples.length === 0 && findings.length === 0 && <Empty>No health samples or findings yet.</Empty>}
+    <Card title="健康與 Observer">
+      {samples.length === 0 && findings.length === 0 && <Empty>尚無健康量測或趨勢發現。</Empty>}
       {samples.length > 0 && (
         <div className="stat-row" style={{ marginBottom: findings.length ? "1rem" : 0 }}>
           {samples.map((sample) => (
@@ -144,8 +144,8 @@ export function LogPanel({ logs }: {
   logs: { log_id: string; level: string; source: string; message: string; created_at: string }[];
 }) {
   return (
-    <Card title="Logs">
-      {logs.length === 0 ? <Empty>Quiet.</Empty> : (
+    <Card title="系統日誌">
+      {logs.length === 0 ? <Empty>目前沒有新的系統訊息。</Empty> : (
         <div className="scroll">
           <table>
             <tbody>
