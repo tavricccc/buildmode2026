@@ -1,12 +1,19 @@
 """Bounded per-layer work queue (v5 01 §Failure behavior).
 
-"L2/L3 queue 有明確的 running/pending 上限；高風險工作優先."
+"L2/L3 queue 預設各 1 running + 1 pending；高風險 pending 受保護."
 
-Depth one is the whole idea. A camera produces windows faster than a
-cloud model can answer them, so an unbounded queue does not buy
-throughput — it buys latency, and stale answers about a scene that has
-already changed. Keeping the newest pending window and dropping the one
-it replaced means the model always answers about *now*.
+Depth one is still the default, and it is the whole idea for a metered
+slot. A camera produces windows faster than a cloud model can answer
+them, so an unbounded queue does not buy throughput — it buys latency,
+and stale answers about a scene that has already changed. Keeping the
+newest pending window and dropping the one it replaced means the model
+always answers about *now*.
+
+The bounds are parameters rather than constants only because a local
+vLLM changes the arithmetic: there a window costs GPU time already paid
+for, so answering several at once is free where it would otherwise be
+both slow and billed. The orchestrator raises the limits for that slot
+alone; everything else gets the depth this docstring describes.
 
 The one exception is the protection rule: a high-risk pending job (a
 fall being tracked) is never displaced by a routine one. Dropping a

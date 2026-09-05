@@ -140,10 +140,20 @@ class Cascade:
         self.notifier = notifier
 
         self.policy_gateway = PolicyGateway(policy.notification)
+        # v5 01 §Failure behavior: "L2/L3 queue 預設各 1 running + 1 pending".
+        # cadence.max_parallel_observations is documented as the *local vLLM*
+        # fan-out and defaults to VLLM_MAX_CONCURRENCY — a window there costs
+        # GPU time already paid for. Handing the same 12/48 to a metered slot
+        # means twelve concurrent billed calls and a queue 48 windows deep,
+        # which is exactly the staleness the depth-one design exists to stop:
+        # the model would be answering about a scene that has already moved
+        # on, and charging for it. So the fan-out applies only where it was
+        # measured, and every other slot keeps the spec's depth.
+        local_l2 = getattr(l2_service, "provider", "") == "local_vllm"
         self.l2_queue = LayerQueue(
             "l2", on_drop=self._on_drop,
-            max_running=max(1, int(policy.cadence.max_parallel_observations)),
-            max_pending=max(1, int(policy.cadence.observation_queue_capacity)),
+            max_running=max(1, int(policy.cadence.max_parallel_observations)) if local_l2 else 1,
+            max_pending=max(1, int(policy.cadence.observation_queue_capacity)) if local_l2 else 1,
         )
         self.l3_queue = LayerQueue("l3", on_drop=self._on_drop, max_running=1, max_pending=8)
 
