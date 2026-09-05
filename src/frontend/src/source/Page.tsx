@@ -2,11 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowClockwise, Play, Stop, VideoCamera } from "@phosphor-icons/react";
 import { api } from "../api/client";
 import { Badge, Card, Empty, ErrorBanner, errorText, ms } from "../components/ui";
-import type { BrowserMediaHealth, Status } from "../types/api";
+import type { BrowserMediaHealth, BrowserUploadHealth, Status } from "../types/api";
 
 type Scenario = { id: string; name: string; description: string };
 type SourceMode = "browser_camera" | "browser_upload" | "rtsp" | "replay_scenario" | "replay_file";
-type BrowserState = "idle" | "requesting" | "connecting" | "streaming" | "error";
+type BrowserState = "idle" | "requesting" | "connecting" | "streaming" | "processing" | "error";
+type MediaEventPayload = (BrowserMediaHealth | BrowserUploadHealth) & { error_code?: string };
 
 const BROWSER_CAMERA_ID = "browser-camera";
 const CAMERA_WIDTH = 854;
@@ -39,6 +40,8 @@ export function SourcePage({ status }: { status: Status | null }) {
   const [mode, setMode] = useState<SourceMode>("browser_camera");
   const [target, setTarget] = useState("");
   const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadStartSec, setUploadStartSec] = useState(0);
+  const [uploadDuration, setUploadDuration] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -59,8 +62,28 @@ export function SourcePage({ status }: { status: Status | null }) {
   const running = source?.running ?? false;
   const completed = source?.lifecycle === "completed";
   const failed = source?.lifecycle === "failed";
-  const browserActive = ["requesting", "connecting", "streaming"].includes(browserState);
+  const browserActive = ["requesting", "connecting", "streaming", "processing"].includes(browserState);
   const active = running || browserActive;
+
+  useEffect(() => {
+    setUploadDuration(null);
+    if (!uploadFile) return;
+    const url = URL.createObjectURL(uploadFile);
+    const probe = document.createElement("video");
+    probe.preload = "metadata";
+    probe.onloadedmetadata = () => {
+      if (Number.isFinite(probe.duration)) {
+        setUploadDuration(probe.duration);
+        setUploadStartSec((current) => Math.min(current, Math.max(0, Math.floor(probe.duration - 1))));
+      }
+    };
+    probe.src = url;
+    return () => {
+      probe.removeAttribute("src");
+      probe.load();
+      URL.revokeObjectURL(url);
+    };
+  }, [uploadFile]);
 
   useEffect(() => {
     void api.scenarios().then((data) => setScenarios(data.scenarios)).catch(() => undefined);
@@ -182,7 +205,7 @@ export function SourcePage({ status }: { status: Status | null }) {
         socket.onmessage = (event) => {
           if (typeof event.data !== "string") return;
           try {
-            const payload = JSON.parse(event.data) as { type?: string; payload?: BrowserMediaHealth & { error_code?: string } };
+            const payload = JSON.parse(event.data) as { type?: string; payload?: MediaEventPayload };
             if ((payload.type === "media.stream.ready" || payload.type === "media.stream.progress") && payload.payload && "camera_id" in payload.payload) setBrowserHealth(payload.payload);
             if (payload.type === "media.stream.failed") {
               setError(`後端無法接收瀏覽器串流（${payload.payload?.error_code ?? "unknown"}）。`);
@@ -223,12 +246,14 @@ export function SourcePage({ status }: { status: Status | null }) {
     const file = uploadFile;
     if (!file) { setError("請先選擇要上傳的影片。"); return; }
     if (!file.type.startsWith("video/")) { setError("請選擇影片檔案。"); return; }
+    if (!Number.isFinite(uploadStartSec) || uploadStartSec < 0) { setError("影片起始時間必須是 0 秒以上。"); return; }
+    if (uploadDuration !== null && uploadStartSec >= uploadDuration) { setError("影片起始時間必須小於影片長度。"); return; }
     setBusy(true); setMessage(null); setError(null); setBrowserHealth(null); setSentChunks(0); setUploadProgress(0);
     intentionalCloseRef.current = false;
     reconnectAttemptRef.current = 0;
     setBrowserState("connecting");
     const mediaType = file.type || "video/webm";
-    const socket = new WebSocket(`${mediaSocketUrl(mediaType, "browser-upload", "demo_upload")}&filename=${encodeURIComponent(file.name)}`);
+    const socket = new WebSocket(`${mediaSocketUrl(mediaType, "browser-upload", "demo_upload")}&filename=${encodeURIComponent(file.name)}&start_sec=${encodeURIComponent(String(uploadStartSec))}`);
     socket.binaryType = "arraybuffer";
     socketRef.current = socket;
     socket.onopen = async () => {
@@ -245,7 +270,7 @@ export function SourcePage({ status }: { status: Status | null }) {
           setUploadProgress(Math.round((Math.min(offset + chunkSize, file.size) / file.size) * 100));
         }
         setBrowserState("streaming");
-        setMessage("影片已送完，後端正依影片時間模擬即時資料並完成分析…");
+        setMessage("影片已上傳，後端正在壓成 480p，完成後會依影片內時長慢速送入相同分析管線…");
         socket.send(JSON.stringify({ type: "media.upload.complete" }));
       } catch (exc) {
         if (!intentionalCloseRef.current) {
@@ -257,7 +282,11 @@ export function SourcePage({ status }: { status: Status | null }) {
     socket.onmessage = (event) => {
       if (typeof event.data !== "string") return;
       try {
-        const payload = JSON.parse(event.data) as { type?: string; payload?: BrowserMediaHealth & { error_code?: string } };
+        const payload = JSON.parse(event.data) as { type?: string; payload?: MediaEventPayload };
+        if (payload.type === "media.stream.processing") {
+          setBrowserState("processing");
+          setMessage("影片已壓成 480p，正在依影片內時長排隊分析；不會瞬間灌入請求。 ");
+        }
         if ((payload.type === "media.stream.ready" || payload.type === "media.stream.progress") && payload.payload && "camera_id" in payload.payload) setBrowserHealth(payload.payload);
         if (payload.type === "media.stream.completed") {
           intentionalCloseRef.current = true;
@@ -303,7 +332,7 @@ export function SourcePage({ status }: { status: Status | null }) {
     finally { setBusy(false); }
   };
 
-  const statusLabel = browserState === "streaming" ? "串流中" : browserState === "requesting" ? "等待權限" : browserState === "connecting" ? "連線中" : browserState === "error" ? "串流錯誤" : completed ? "錄影播放完成" : failed ? "來源失敗" : active ? "分析中" : "未啟動";
+  const statusLabel = browserState === "streaming" ? "串流中" : browserState === "processing" ? "壓縮與排隊分析中" : browserState === "requesting" ? "等待權限" : browserState === "connecting" ? "連線中" : browserState === "error" ? "串流錯誤" : completed ? "錄影播放完成" : failed ? "來源失敗" : active ? "分析中" : "未啟動";
   const statusTone = browserState === "error" || failed ? "bad" : active ? "ok" : "muted";
 
   return (
@@ -340,13 +369,14 @@ export function SourcePage({ status }: { status: Status | null }) {
             <button aria-selected={mode === "replay_file"} onClick={() => selectMode("replay_file")}>本機錄影</button>
           </div>
           {mode === "browser_camera" && <div className="camera-help"><b>從目前瀏覽器分享攝影機（480p）</b><span>影像與麥克風會以每秒一段的 WebM 傳到本機後端；影像會限制在 854×480 以控制 L2 視覺 token。</span><small>請使用 HTTPS 或 localhost，第一次啟動時瀏覽器會詢問攝影機與麥克風權限。</small></div>}
-          {mode === "browser_upload" && <div className="camera-help"><b>上傳影片並模擬即時資料</b><span>影片會由瀏覽器分段送到本機後端，之後按影片採樣時間排隊進入 FFmpeg、FrameWindow、L1、L2、L3 與 Policy；不會把所有影格瞬間灌入。</span><small>支援瀏覽器可讀取的影片格式；大型檔案會以 512 KB 小塊傳送並套用背壓。</small></div>}
-          {mode === "browser_upload" && <label className="field"><span>選擇影片</span><input type="file" accept="video/*" onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)} />{uploadFile && <small className="file-selection">{uploadFile.name} · {fileSize(uploadFile.size)}</small>}</label>}
+          {mode === "browser_upload" && <div className="camera-help"><b>上傳影片並依影片時間慢速分析</b><span>影片會先在本機後端保存並壓成 480p，再以影片內的時間節奏送入與瀏覽器攝影機相同的 FrameWindow、L1、L2、L3 與 Policy 流程；不會把所有影格瞬間灌入 queue。</span><small>原始上傳檔只作為轉檔暫存；完成後保留 `uploads/*-480p.mp4` 分析檔與 SQLite 稽核資料。</small></div>}
+          {mode === "browser_upload" && <label className="field"><span>選擇影片</span><input type="file" accept="video/*" onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)} />{uploadFile && <small className="file-selection">{uploadFile.name} · {fileSize(uploadFile.size)}{uploadDuration !== null ? ` · 長度 ${Math.floor(uploadDuration / 60)}:${String(Math.floor(uploadDuration % 60)).padStart(2, "0")}` : ""}</small>}</label>}
+          {mode === "browser_upload" && <label className="field"><span>分析起始時間（秒）</span><input type="number" min={0} max={uploadDuration !== null ? Math.max(0, Math.floor(uploadDuration - 1)) : undefined} step={1} value={uploadStartSec} onChange={(event) => setUploadStartSec(Math.max(0, Number(event.target.value) || 0))} /><small className="file-selection">會先裁切到這個起點，再輸出 480p；未填影片長度時，後端仍會做最終驗證。</small></label>}
           {mode === "rtsp" && <label className="field"><span>RTSP 位址</span><input type="password" value={target} onChange={(e) => setTarget(e.target.value)} placeholder="rtsp://攝影機位址（不會回傳至瀏覽器）" /></label>}
           {mode === "replay_file" && <label className="field"><span>主機上的影片路徑</span><input value={target} onChange={(e) => setTarget(e.target.value)} placeholder="C:\\care-data\\sample.mp4" /></label>}
           {mode === "replay_scenario" && <div className="scenario-list">{scenarios.length === 0 ? <Empty>沒有可用的模擬情境。</Empty> : scenarios.map((scenario) => <button key={scenario.id} onClick={() => setTarget(scenario.id)} aria-pressed={target === scenario.id}><b>{scenario.name}</b><span>{scenario.description || "驗證完整 Cascade 行為"}</span></button>)}</div>}
           <div className="button-row">
-            {mode === "browser_camera" ? <button className="action primary" disabled={busy || browserActive} onClick={() => void startBrowserCamera()}><VideoCamera size={17} weight="fill" />啟動瀏覽器攝影機</button> : mode === "browser_upload" ? <button className="action primary" disabled={busy || browserActive || !uploadFile} onClick={() => void startBrowserUpload()}><Play size={17} weight="fill" />上傳並開始分析</button> : <button className="action primary" disabled={busy || !target} onClick={() => void start(mode, target)}><Play size={17} weight="fill" />開始分析</button>}
+            {mode === "browser_camera" ? <button className="action primary" disabled={busy || browserActive} onClick={() => void startBrowserCamera()}><VideoCamera size={17} weight="fill" />啟動瀏覽器攝影機</button> : mode === "browser_upload" ? <button className="action primary" disabled={busy || browserActive || !uploadFile} onClick={() => void startBrowserUpload()}><Play size={17} weight="fill" />上傳、壓成 480p 並分析</button> : <button className="action primary" disabled={busy || !target} onClick={() => void start(mode, target)}><Play size={17} weight="fill" />開始分析</button>}
             <button className="action" disabled={busy || !active} onClick={() => void stop()}><Stop size={17} weight="fill" />停止</button>
             <button className="action ghost" disabled={busy || browserActive || !running || !target} title={running && !target ? "重新連線需要先在上方指定來源" : undefined} onClick={() => void start(mode, target)}><ArrowClockwise size={17} />重新連線</button>
           </div>

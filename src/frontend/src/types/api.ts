@@ -209,6 +209,21 @@ export interface BrowserMediaHealth {
   started_at_ms: number;
 }
 
+export interface BrowserUploadHealth {
+  source_id: string;
+  kind: "browser_upload";
+  filename: string;
+  state: "uploading" | "uploaded" | "processing" | "completed" | "failed";
+  start_sec: number;
+  bytes_received: number;
+  chunks_received: number;
+  compressed_path: string | null;
+  compressed_bytes: number;
+  source: Status["source"] | null;
+  error: string | null;
+  started_at_ms: number;
+}
+
 export interface InteractionMessage { message_id: string; role: "user" | "assistant"; text: string; intent: string; created_at: string; }
 export interface MemoryRecord { memory_id: string; memory_type: string; title: string; content: string; confidence: number; status: "pending" | "confirmed" | "invalidated"; requires_confirmation: number; created_at: string; updated_at: string; }
 export interface AgentRun { agent_run_id: string; agent_name: string; trigger_type: string; status: string; input_context: Record<string, unknown>; output: Record<string, unknown>; error_code: string | null; latency_ms: number | null; created_at: string; completed_at: string | null; }

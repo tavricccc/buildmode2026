@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import re
 import socket
 import threading
 import time
@@ -28,10 +29,12 @@ from urllib.parse import parse_qs, urlparse
 from ..care_logging import CareLogger
 from ..domain.timeutil import iso
 from .routes import ROUTES, ApiError, Request
-from ..media.browser_source import BrowserMediaSession
+from ..media import ffmpeg
+from ..media.browser_source import BrowserMediaSession, BrowserUploadSession
 from .ws import OP_BINARY, OP_CLOSE, OP_PING, OP_PONG, OP_TEXT, accept_key, encode_frame, read_frame
 
 MAX_BODY_BYTES = 8 * 1024 * 1024
+MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024
 
 
 class CareHTTPServer(ThreadingHTTPServer):
@@ -300,7 +303,132 @@ class CareRequestHandler(BaseHTTPRequestHandler):
         query = parse_qs(parsed.query)
         camera_id = (query.get("camera_id") or ["browser-camera"])[0][:100]
         media_type = (query.get("media_type") or ["video/webm"])[0][:80]
+        mode = (query.get("mode") or [""])[0][:40]
         session_id = f"media-{uuid.uuid4().hex[:16]}"
+
+        if mode == "demo_upload":
+            raw_filename = (query.get("filename") or ["upload-video"])[0]
+            filename = re.sub(r"[^A-Za-z0-9._-]+", "_", Path(raw_filename).name)[:120] or "upload-video"
+            try:
+                start_sec = max(0.0, float((query.get("start_sec") or ["0"])[0]))
+            except (TypeError, ValueError):
+                start_sec = -1.0
+            upload_id = f"upload-{uuid.uuid4().hex[:16]}"
+            upload_dir = self.ctx.config.data_dir / "uploads"
+            incoming_path = upload_dir / "incoming" / f"{upload_id}.bin"
+            compressed_path = upload_dir / f"{upload_id}-480p.mp4"
+            try:
+                upload = BrowserUploadSession(incoming_path, filename, start_sec)
+            except (OSError, ValueError) as exc:
+                try:
+                    sock.sendall(encode_frame(json.dumps({
+                        "type": "media.stream.failed",
+                        "payload": {"error_code": type(exc).__name__},
+                    }).encode("utf-8")))
+                except OSError:
+                    pass
+                self.close_connection = True
+                return
+            self.ctx.browser_sessions[session_id] = upload
+            try:
+                sock.sendall(encode_frame(json.dumps({
+                    "type": "media.stream.ready", "payload": upload.health(),
+                }).encode("utf-8")))
+                sock.settimeout(300)
+                while True:
+                    frame = read_frame(sock)
+                    if frame is None:
+                        break
+                    opcode, payload = frame
+                    if opcode == OP_CLOSE:
+                        break
+                    if opcode == OP_PING:
+                        sock.sendall(encode_frame(payload, OP_PONG))
+                    elif opcode == OP_BINARY:
+                        if len(payload) > MAX_BODY_BYTES:
+                            upload.mark_failed("upload_chunk_too_large")
+                            break
+                        if upload.bytes_received + len(payload) > MAX_UPLOAD_BYTES:
+                            upload.mark_failed("upload_too_large")
+                            break
+                        upload.receive(payload)
+                        if upload.chunks_received % 4 == 0:
+                            sock.sendall(encode_frame(json.dumps({
+                                "type": "media.stream.progress", "payload": upload.health(),
+                            }).encode("utf-8")))
+                    elif opcode == OP_TEXT:
+                        try:
+                            msg = json.loads(payload.decode("utf-8", errors="replace"))
+                        except Exception:
+                            msg = {}
+                        if msg.get("type") != "media.upload.complete":
+                            continue
+                        if start_sec < 0:
+                            upload.mark_failed("invalid_start_sec")
+                            break
+                        try:
+                            upload.finish()
+                            sock.sendall(encode_frame(json.dumps({
+                                "type": "media.stream.processing", "payload": upload.health(),
+                            }).encode("utf-8")))
+                            ffmpeg.transcode_to_480p(
+                                upload.path, compressed_path,
+                                start_sec=start_sec, height=480,
+                            )
+                            upload.mark_processing(str(compressed_path))
+                            sock.sendall(encode_frame(json.dumps({
+                                "type": "media.stream.progress", "payload": upload.health(),
+                            }).encode("utf-8")))
+                            self.ctx.start_source(
+                                "replay_file", str(compressed_path),
+                                width=854, target_height=480, realtime=True,
+                            )
+                            source = self.ctx.source
+                            next_progress = 0.0
+                            while source is not None:
+                                source_health = source.health()
+                                now = time.monotonic()
+                                if now >= next_progress:
+                                    sock.sendall(encode_frame(json.dumps({
+                                        "type": "media.stream.progress",
+                                        "payload": {"upload": upload.health(), "source": source_health},
+                                    }).encode("utf-8")))
+                                    next_progress = now + 1.0
+                                if source_health.get("lifecycle") in {"completed", "failed", "stopped"}:
+                                    break
+                                time.sleep(0.2)
+                            final_source = source.health() if source is not None else {}
+                            if final_source.get("lifecycle") == "failed":
+                                raise RuntimeError(str(final_source.get("error") or "replay_failed"))
+                            upload.mark_completed(final_source)
+                            sock.sendall(encode_frame(json.dumps({
+                                "type": "media.stream.completed",
+                                "payload": upload.health(),
+                            }).encode("utf-8")))
+                        except Exception as exc:  # noqa: BLE001 - report upload failure to UI
+                            error_text = f"{type(exc).__name__}: {exc}"
+                            upload.mark_failed(error_text)
+                            CareLogger.get().error("upload", "video upload processing failed", {
+                                "filename": upload.filename,
+                                "start_sec": upload.start_sec,
+                                "error": error_text,
+                            })
+                            try:
+                                sock.sendall(encode_frame(json.dumps({
+                                    "type": "media.stream.failed",
+                                    "payload": upload.health(),
+                                }).encode("utf-8")))
+                            except OSError:
+                                pass
+                        break
+            except OSError:
+                pass
+            finally:
+                self.ctx.browser_sessions.pop(session_id, None)
+                upload.close()
+                self.close_connection = True
+            return
+
         try:
             session = BrowserMediaSession(
                 camera_id, media_type, self.ctx.cascade.ingest,

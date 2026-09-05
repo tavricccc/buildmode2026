@@ -29,6 +29,7 @@ source → L1 person gate → L2 observation → state machines → L3 review �
 | Operator Console | `operations` 頁、`pipeline_steps`、`/api/pipeline/active`、`pipeline.step` | pipeline 狀態可由 SQLite/WebSocket 驗證 |
 | Debug isolation | `--debug`、獨立 data dir、simulation runs、debug routes | Production 不註冊 debug routes；不把 debug DB 匯入 production |
 | Replay EOF | source lifecycle `completed`／`failed` | 正常 EOF 不建立新的分析 window；FFmpeg 非零結束才是 failure |
+| Video upload replay | upload WebSocket → `uploads/*-480p.mp4` → `ReplaySource(realtime=True)` | 起始秒數在本機裁切；完成後以影片內時長節奏進入同一條 Cascade |
 | Provider failure contract | L2/L3 都回傳一致的 failure outcome | contract 可測，不等於本地模型一定有正確影像或音訊理解 |
 
 ## feature 功能保留
@@ -38,6 +39,8 @@ source → L1 person gate → L2 observation → state machines → L3 review �
 - `resident interaction` 是可回覆的 interaction driver；background understanding 只提供 advisory insight。
 - `care-system.log` 與 SQLite `app_logs` 同時保留有界系統紀錄。
 - `reset history` 只清 runtime history，不清設定版本、schema migrations 或 secrets。
+
+影片上傳不是另一條推論流程：WebSocket 只負責分片接收，轉檔完成後由 `AppContext.start_source("replay_file", ...)` 啟動與 RTSP／本機 replay 相同的 FrameWindow、L1、L2、L3、Policy、SQLite 與 WebSocket 路徑。`ReplaySource(realtime=True)` 以影片內 FPS 等待，不將整部影片瞬間灌進 queue；壓縮後檔案會留在 `src/data/uploads/`，原始分片只作轉檔暫存。
 
 ## local vLLM 的驗證分層
 

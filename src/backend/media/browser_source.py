@@ -6,6 +6,7 @@ import subprocess
 import threading
 import time
 from collections import deque
+from pathlib import Path
 from typing import Any, Callable
 
 from ..domain.timeutil import now_ms
@@ -167,4 +168,83 @@ class BrowserMediaSession:
         self._stop.set()
         for thread in self._threads:
             thread.join(timeout=2)
+        return self.health()
+
+
+class BrowserUploadSession:
+    """Collect one browser upload before replaying it through the real source."""
+
+    def __init__(self, path: str | Path, filename: str, start_sec: float = 0.0) -> None:
+        self.path = Path(path)
+        self.filename = filename
+        self.start_sec = start_sec
+        self.started_at_ms = now_ms()
+        self.bytes_received = 0
+        self.chunks_received = 0
+        self.compressed_path: str | None = None
+        self.compressed_bytes = 0
+        self.source: dict[str, Any] | None = None
+        self.error: str | None = None
+        self.state = "uploading"
+        self._lock = threading.Lock()
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._file = self.path.open("wb")
+
+    def receive(self, chunk: bytes) -> None:
+        if not chunk or self.state != "uploading":
+            return
+        with self._lock:
+            self._file.write(chunk)
+            self._file.flush()
+            self.bytes_received += len(chunk)
+            self.chunks_received += 1
+
+    def finish(self) -> None:
+        with self._lock:
+            if self.state != "uploading":
+                return
+            self._file.close()
+            self.state = "uploaded"
+
+    def mark_processing(self, compressed_path: str) -> None:
+        self.compressed_path = compressed_path
+        try:
+            self.compressed_bytes = Path(compressed_path).stat().st_size
+        except OSError:
+            self.compressed_bytes = 0
+        self.state = "processing"
+
+    def mark_completed(self, source: dict[str, Any]) -> None:
+        self.source = source
+        self.state = "completed"
+
+    def mark_failed(self, error: str) -> None:
+        self.error = error[:600]
+        self.state = "failed"
+
+    def health(self) -> dict[str, Any]:
+        return {
+            "source_id": f"upload-{self.path.stem}",
+            "kind": "browser_upload",
+            "filename": self.filename,
+            "state": self.state,
+            "start_sec": self.start_sec,
+            "bytes_received": self.bytes_received,
+            "chunks_received": self.chunks_received,
+            "compressed_path": Path(self.compressed_path).name if self.compressed_path else None,
+            "compressed_bytes": self.compressed_bytes,
+            "source": self.source,
+            "error": self.error,
+            "started_at_ms": self.started_at_ms,
+        }
+
+    def close(self, *, remove_incoming: bool = True) -> dict[str, Any]:
+        with self._lock:
+            if not self._file.closed:
+                self._file.close()
+        if remove_incoming:
+            try:
+                self.path.unlink(missing_ok=True)
+            except OSError:
+                pass
         return self.health()

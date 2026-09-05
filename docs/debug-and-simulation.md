@@ -101,6 +101,10 @@ FFmpeg exit code 0 代表 `completed`。播放完成後：
 
 非零 exit code 才是 `failed`。後端保留有限長度的 FFmpeg stderr，經遮蔽後提供診斷；正常 EOF 不寫成 error。
 
+## 瀏覽器影片上傳
+
+上傳影片使用 `/ws/media?mode=demo_upload&start_sec=<秒數>`。後端先把分片寫入 `data/uploads/incoming/`，完成後以 FFmpeg 精確裁切起點、轉成 H.264 480p（若有音訊則轉成 mono 16 kHz AAC），再以 `ReplaySource(realtime=true)` 送入正式 Cascade。上傳檔案不會直接把原始 bytes 當成另一種模型輸入；它只是取得與瀏覽器攝影機相同的 `FramePacket`／來源介面。
+
 ## 驗收條件
 
 1. Debug 與 Production 使用不同 SQLite、clips 與 logs。

@@ -201,6 +201,10 @@ Care Agent 後端提供標準 REST API 與 WebSocket 即時資料流（預設監
 - WebSocket `pipeline.step`：推送每個分析步驟的等待、執行、略過、降級、成功與失敗狀態。
 - Debug mode 提供 `GET /api/debug/scenarios`、`POST /api/debug/history/generate`、`POST /api/debug/scenarios/trigger`、`POST /api/debug/stream/start`、`POST /api/debug/stream/stop`；Production 對這些路由回傳 404。
 
+### `WS /ws/media?mode=demo_upload&start_sec=<seconds>`
+
+瀏覽器影片上傳使用 WebSocket binary frames 分片傳送，之後送出 `{"type":"media.upload.complete"}`。後端會先保存在 `data/uploads/incoming/`，以指定起始秒數裁切並輸出 `*-480p.mp4`，再由 `ReplaySource(realtime=true)` 依影片內時長進入與瀏覽器攝影機相同的 `FrameWindow → L1 → L2 → L3 → Policy → SQLite/WebSocket` 流程。上傳期間會推送 `media.stream.ready`、`media.stream.progress`、`media.stream.processing`、`media.stream.completed` 或 `media.stream.failed`。
+
 ## 8. 住民互動、社工紀錄與稽核
 
 - `GET/POST /api/interaction/*`：住民互動與背景 understanding；背景推論不得直接對住民發話。

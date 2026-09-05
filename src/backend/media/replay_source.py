@@ -178,6 +178,7 @@ class ReplaySource:
         loop: bool = False,
         on_terminal: Callable[[str, str | None], None] | None = None,
         realtime: bool = False,
+        target_height: int | None = None,
     ) -> None:
         self.path = str(path)
         self.source_id = source_id
@@ -185,6 +186,7 @@ class ReplaySource:
         self.width = width
         self.loop = loop
         self.realtime = realtime
+        self.target_height = target_height
         self._proc: subprocess.Popen[bytes] | None = None
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
@@ -225,7 +227,8 @@ class ReplaySource:
         self._thread.start()
 
     def _pump(self, sink: FrameSink) -> tuple[int, str | None]:
-        args = ffmpeg.decode_command(self.path, self.fps, self.width)
+        args = ffmpeg.decode_command(self.path, self.fps, self.width,
+                                     target_height=self.target_height)
         self._proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         assert self._proc.stdout is not None
         seq = 0
@@ -288,4 +291,5 @@ class ReplaySource:
             "error": self._error,
             "path": self.path,
             "realtime": self.realtime,
+            "target_height": self.target_height,
         }
