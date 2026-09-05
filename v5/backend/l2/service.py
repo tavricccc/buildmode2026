@@ -28,6 +28,7 @@ from ..domain.model_call import ModelCall
 from ..domain.observation import GeminiObservation
 from ..domain.schema import SchemaError
 from ..jsonio import JsonExtractionError, extract_json
+from ..providers import ProviderError
 from .gemini_client import GeminiClient, GeminiError, GeminiResponse
 from .prompt import SYSTEM_INSTRUCTION, observation_prompt, repair_prompt
 
@@ -109,13 +110,13 @@ class L2Service:
                         parts.extend(frame_builder(frames, clip.mime_type))
                 else:
                     parts.append(self.backend.media_part(clip.path, clip.mime_type, cleanup))
-        except (GeminiError, OSError) as exc:
+        except (ProviderError, OSError) as exc:
             return self._fail(call, "media_upload_failed", str(exc), 0)
 
         started = time.perf_counter()
         try:
             response = self.backend.generate(parts, system_instruction=SYSTEM_INSTRUCTION)
-        except GeminiError as exc:
+        except ProviderError as exc:
             return self._fail(call, exc.code, exc.message, int((time.perf_counter() - started) * 1000))
         finally:
             self._cleanup(cleanup)
@@ -141,7 +142,7 @@ class L2Service:
         repair_parts = [self.backend.text_part(repair_prompt(response.text, error))]
         try:
             repaired = self.backend.generate(repair_parts, system_instruction=SYSTEM_INSTRUCTION)
-        except GeminiError as exc:
+        except ProviderError as exc:
             return self._fail(call, exc.code, f"repair failed: {exc.message}", call.latency_ms)
 
         call.latency_ms += repaired.latency_ms

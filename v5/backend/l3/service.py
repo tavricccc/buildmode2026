@@ -25,6 +25,7 @@ from ..domain.l3_contract import DeeperAnalysis, EvidenceBundle
 from ..domain.model_call import ModelCall
 from ..domain.schema import SchemaError
 from ..jsonio import JsonExtractionError, extract_json
+from ..providers import ProviderError
 from .minimax_client import MiniMaxError
 from .prompt import SYSTEM_INSTRUCTION, analysis_prompt, repair_prompt
 
@@ -83,7 +84,7 @@ class L3Service:
         if not degraded:
             try:
                 parts.extend(self.backend.video_parts(frames, clip_url))
-            except MiniMaxError as exc:
+            except ProviderError as exc:
                 degraded = True
                 call.error_message = f"video encode failed, degraded to text: {exc.message}"
 
@@ -92,7 +93,7 @@ class L3Service:
         started = time.perf_counter()
         try:
             response = self.backend.analyse(parts, system_instruction=SYSTEM_INSTRUCTION)
-        except MiniMaxError as exc:
+        except ProviderError as exc:
             return self._fail(call, exc.code, exc.message, int((time.perf_counter() - started) * 1000))
         except Exception as exc:  # noqa: BLE001 - L3 must never propagate
             return self._fail(call, "unexpected_error", str(exc), int((time.perf_counter() - started) * 1000))
@@ -117,7 +118,7 @@ class L3Service:
                 [self.backend.text_part(repair_prompt(response.text, error))],
                 system_instruction=SYSTEM_INSTRUCTION,
             )
-        except MiniMaxError as exc:
+        except ProviderError as exc:
             return self._fail(call, exc.code, f"repair failed: {exc.message}", call.latency_ms)
 
         call.latency_ms += repaired.latency_ms

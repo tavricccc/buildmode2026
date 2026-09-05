@@ -36,6 +36,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Any
+from ..providers import ProviderError
 
 USER_AGENT = "care-agent-v5/1.0 (+https://github.com/futuremode/care-agent)"
 
@@ -43,12 +44,8 @@ WIRE_FORMAT_FRAMES = "frames"
 WIRE_FORMAT_VIDEO_URL = "video_url"
 
 
-class MiniMaxError(RuntimeError):
-    def __init__(self, code: str, message: str, status: int | None = None) -> None:
-        super().__init__(f"{code}: {message}")
-        self.code = code
-        self.message = message
-        self.status = status
+class MiniMaxError(ProviderError):
+    """A MiniMax call failed."""
 
 
 @dataclass

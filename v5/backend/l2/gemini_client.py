@@ -28,18 +28,13 @@ import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from ..providers import ProviderError
 
 USER_AGENT = "care-agent-v5/1.0 (+https://github.com/futuremode/care-agent)"
 
 
-class GeminiError(RuntimeError):
-    """A Gemini call failed. ``code`` is stable enough to branch on."""
-
-    def __init__(self, code: str, message: str, status: int | None = None) -> None:
-        super().__init__(f"{code}: {message}")
-        self.code = code
-        self.message = message
-        self.status = status
+class GeminiError(ProviderError):
+    """A Gemini call failed."""
 
 
 @dataclass

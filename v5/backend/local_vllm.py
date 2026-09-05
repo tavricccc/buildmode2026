@@ -18,17 +18,14 @@ from io import BytesIO
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from .providers import ProviderError
 
 
 USER_AGENT = "care-agent-v5/local-vllm"
 
 
-class LocalVllmError(RuntimeError):
-    def __init__(self, code: str, message: str, status: int | None = None) -> None:
-        super().__init__(f"{code}: {message}")
-        self.code = code
-        self.message = message
-        self.status = status
+class LocalVllmError(ProviderError):
+    """A local vLLM call failed."""
 
 
 @dataclass
