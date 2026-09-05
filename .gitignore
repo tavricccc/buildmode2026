@@ -18,3 +18,11 @@ data/captures/
 *.wav
 *.mp3
 
+
+# v5 runtime data (database, clips, secrets) — never committed
+v5/data/care.sqlite3*
+v5/data/clips/*
+v5/data/secrets.json
+v5/data/models/
+v5/frontend/dist/
+v5/frontend/node_modules/

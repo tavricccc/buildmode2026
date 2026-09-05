@@ -10,7 +10,7 @@ identity, the JSON column boundary, and the daily rollups.
 from __future__ import annotations
 
 import json
-from typing import Any, Iterable
+from typing import Any
 
 from ..domain.enums import EventStatus, EventType
 from ..domain.ids import new_id
@@ -125,8 +125,11 @@ class Repositories:
             clause = "WHERE l2_outcome = ?"
             params.append(l2_outcome)
         rows = self.db.query(
+            # Ordered by when the window *closed*: a skipped window is
+            # stamped at the decision instant while a processed one starts
+            # a full span earlier, so ordering by the start interleaves them.
             f"SELECT * FROM pipeline_runs {clause} "
-            "ORDER BY window_started_at_ms DESC LIMIT ? OFFSET ?",
+            "ORDER BY window_ended_at_ms DESC, created_at DESC LIMIT ? OFFSET ?",
             (*params, limit, offset),
         )
         return [self._decode_run(_row(r)) for r in rows]

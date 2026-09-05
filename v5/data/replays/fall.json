@@ -1,0 +1,13 @@
+{
+  "name": "Fall with slow recovery",
+  "description": "Empty room, resident enters and stands, falls and stays motionless on the floor, then gets up. Exercises suspect -> confirmed -> recovering -> resolved and the L1 bypass.",
+  "loop": false,
+  "segments": [
+    {"duration_sec": 8,  "person": false},
+    {"duration_sec": 8,  "person": true,  "posture": "standing", "summary": "resident walks in"},
+    {"duration_sec": 4,  "person": true,  "posture": "crouching", "transition": "down", "confidence": 0.6, "summary": "losing balance"},
+    {"duration_sec": 20, "person": true,  "posture": "lying", "near_floor": true, "motionless": true, "summary": "on the floor, not moving"},
+    {"duration_sec": 8,  "person": true,  "posture": "sitting", "transition": "up", "summary": "pushing themselves up"},
+    {"duration_sec": 8,  "person": true,  "posture": "standing", "summary": "back on their feet"}
+  ]
+}

@@ -148,6 +148,8 @@ class Cascade:
         self._last_escalation_ms: dict[str, int] = {}
         self._escalations_today = 0
         self._escalation_day = day_key()
+        self._starved_since_ms = 0
+        self._starved_logged = False
         self.windows_seen = 0
 
     # -- lifecycle -------------------------------------------------------
@@ -246,6 +248,16 @@ class Cascade:
             if self._stop.is_set():
                 return
             at = now_ms()
+
+            # No footage means there is no window to audit. Recording one
+            # would inflate the L2 failure count with what is really a
+            # source outage, so the source's own health reports that
+            # instead (v5 03 Dashboard shows the two separately).
+            if not self.frames.window(int(self.policy.cadence.window_seconds * 1000), at, 1):
+                self._note_starved(at)
+                continue
+            self._starved_since_ms = 0
+
             decision = self.decide_window(at)
             if not decision.should_call_l2:
                 if decision.reason and not decision.reason.endswith("not_due"):
@@ -261,6 +273,20 @@ class Cascade:
             accepted, reason = self.l2_queue.offer(job)
             if not accepted:
                 self.repos.log("debug", "cascade", f"L2 job not queued: {reason}")
+
+    def _note_starved(self, at: int) -> None:
+        """Log once per outage that the buffer has no frames to look at."""
+        if not self._starved_since_ms:
+            self._starved_since_ms = at
+            self._starved_logged = False
+            return
+        if not self._starved_logged and (at - self._starved_since_ms) >= 10_000:
+            self._starved_logged = True
+            self.repos.log(
+                "warn", "cascade",
+                "no frames in the ring buffer; the source has stopped producing",
+                {"starved_ms": at - self._starved_since_ms},
+            )
 
     def _record_skip(self, at: int, decision: WindowDecision) -> None:
         """Persist a skipped window so the audit trail has no holes."""
@@ -721,6 +747,7 @@ class Cascade:
             "subject_id": self.subject_id,
             "config_version": self.policy.version,
             "windows_seen": self.windows_seen,
+            "starved_since_ms": self._starved_since_ms or None,
             "frames": self.frames.metrics(),
             "l1": {
                 "detector": detector_health,

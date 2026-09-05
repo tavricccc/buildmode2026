@@ -1,0 +1,253 @@
+"""Standard-library HTTP + WebSocket server (v5 03, v5 04).
+
+``ThreadingHTTPServer`` rather than an ASGI stack, for the reason given
+throughout v5: a reviewer clones the repo and runs it, on Windows/WSL,
+macOS or Linux, without a wheel build or a virtualenv step. The cost is
+that routing and the WebSocket upgrade are written out here; the benefit
+is that ``bun start`` has no Python dependency to fail on.
+
+The upgrade path hijacks the connection: ``BaseHTTPRequestHandler`` has
+no notion of a protocol switch, so the 101 response is written to the
+raw socket and the handler then loops on client frames until close.
+"""
+
+from __future__ import annotations
+
+import json
+import mimetypes
+import socket
+import threading
+import traceback
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from typing import Any
+from urllib.parse import parse_qs, urlparse
+
+from ..domain.timeutil import iso
+from .routes import ROUTES, ApiError, Request
+from .ws import OP_CLOSE, OP_PING, OP_PONG, accept_key, encode_frame, read_frame
+
+MAX_BODY_BYTES = 8 * 1024 * 1024
+
+
+class CareHTTPServer(ThreadingHTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+    def __init__(self, address: tuple[str, int], ctx: Any) -> None:
+        self.ctx = ctx
+        super().__init__(address, CareRequestHandler)
+
+
+class CareRequestHandler(BaseHTTPRequestHandler):
+    server_version = "CareAgent/5.0"
+    protocol_version = "HTTP/1.1"
+
+    # -- plumbing --------------------------------------------------------
+
+    @property
+    def ctx(self) -> Any:
+        return self.server.ctx  # type: ignore[attr-defined]
+
+    def log_message(self, fmt: str, *args: Any) -> None:
+        # The default logger writes to stderr on every request, which buries
+        # the pipeline's own logs. Errors still surface via log_error.
+        return
+
+    def log_error(self, fmt: str, *args: Any) -> None:
+        try:
+            self.ctx.repos.log("warn", "http", fmt % args)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _send(self, status: int, payload: Any, content_type: str = "application/json") -> None:
+        body = (json.dumps(payload, default=str).encode("utf-8")
+                if content_type == "application/json" else payload)
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        # The Dashboard is served from Vite on another port during dev.
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
+
+    def _body(self) -> dict[str, Any]:
+        length = int(self.headers.get("Content-Length") or 0)
+        if length <= 0:
+            return {}
+        if length > MAX_BODY_BYTES:
+            raise ApiError(413, "payload_too_large", f"body exceeds {MAX_BODY_BYTES} bytes")
+        raw = self.rfile.read(length)
+        if not raw.strip():
+            return {}
+        try:
+            parsed = json.loads(raw.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise ApiError(400, "bad_json", str(exc)) from None
+        if not isinstance(parsed, dict):
+            raise ApiError(400, "bad_json", "body must be a JSON object")
+        return parsed
+
+    # -- verbs -----------------------------------------------------------
+
+    def do_OPTIONS(self) -> None:  # noqa: N802
+        self._send(204, b"", "text/plain")
+
+    def do_GET(self) -> None:  # noqa: N802
+        parsed = urlparse(self.path)
+        if parsed.path == "/ws":
+            self._handle_websocket()
+            return
+        self._dispatch("GET", parsed)
+
+    def do_POST(self) -> None:  # noqa: N802
+        self._dispatch("POST", urlparse(self.path))
+
+    def do_PUT(self) -> None:  # noqa: N802
+        self._dispatch("PUT", urlparse(self.path))
+
+    def do_DELETE(self) -> None:  # noqa: N802
+        self._dispatch("DELETE", urlparse(self.path))
+
+    # -- dispatch --------------------------------------------------------
+
+    def _dispatch(self, method: str, parsed: Any) -> None:
+        path = parsed.path.rstrip("/") or "/"
+        try:
+            for route_method, pattern, handler in ROUTES:
+                if route_method != method:
+                    continue
+                match = pattern.match(path)
+                if match is None:
+                    continue
+                request = Request(
+                    method=method,
+                    path=path,
+                    query=parse_qs(parsed.query),
+                    body=self._body() if method in {"POST", "PUT"} else {},
+                    params=match.groupdict(),
+                )
+                status, payload = handler(self.ctx, request)
+                self._send(status, payload)
+                return
+
+            if method == "GET" and not path.startswith("/api"):
+                self._serve_static(path)
+                return
+            self._send(404, {"error": {"code": "not_found", "message": f"no route for {method} {path}"}})
+        except ApiError as exc:
+            self._send(exc.status, {"error": {"code": exc.code, "message": exc.message}})
+        except BrokenPipeError:
+            pass
+        except Exception as exc:  # noqa: BLE001
+            detail = self.ctx.secrets.redact(f"{type(exc).__name__}: {exc}")
+            self.log_error("unhandled: %s", traceback.format_exc(limit=4))
+            self._send(500, {"error": {"code": "internal_error", "message": detail,
+                                       "at": iso()}})
+
+    # -- static ----------------------------------------------------------
+
+    def _serve_static(self, path: str) -> None:
+        """Serve the built Dashboard; fall back to index.html for SPA routes."""
+        root: Path = self.ctx.config.static_dir
+        if not root.exists():
+            self._send(200, _PLACEHOLDER_PAGE.encode("utf-8"), "text/html; charset=utf-8")
+            return
+
+        relative = path.lstrip("/") or "index.html"
+        candidate = (root / relative).resolve()
+        try:
+            candidate.relative_to(root.resolve())
+        except ValueError:
+            # Path traversal attempt; do not confirm what exists.
+            self._send(404, {"error": {"code": "not_found", "message": "not found"}})
+            return
+        if not candidate.is_file():
+            candidate = root / "index.html"
+        if not candidate.is_file():
+            self._send(404, {"error": {"code": "not_found", "message": "not found"}})
+            return
+
+        content_type = mimetypes.guess_type(candidate.name)[0] or "application/octet-stream"
+        if content_type.startswith("text/"):
+            content_type += "; charset=utf-8"
+        self._send(200, candidate.read_bytes(), content_type)
+
+    # -- websocket -------------------------------------------------------
+
+    def _handle_websocket(self) -> None:
+        key = self.headers.get("Sec-WebSocket-Key")
+        upgrade = (self.headers.get("Upgrade") or "").lower()
+        if not key or upgrade != "websocket":
+            self._send(400, {"error": {"code": "bad_upgrade", "message": "not a websocket handshake"}})
+            return
+
+        response = (
+            "HTTP/1.1 101 Switching Protocols\r\n"
+            "Upgrade: websocket\r\n"
+            "Connection: Upgrade\r\n"
+            f"Sec-WebSocket-Accept: {accept_key(key)}\r\n\r\n"
+        )
+        sock: socket.socket = self.connection
+        try:
+            sock.sendall(response.encode("ascii"))
+        except OSError:
+            return
+
+        broadcaster = self.ctx.broadcaster
+        broadcaster.add(sock)
+
+        # Replay what this client missed so a reconnect does not need a
+        # full REST resync for recent activity (v5 03).
+        try:
+            after = int(self.headers.get("Sec-WebSocket-Protocol") or 0)
+        except ValueError:
+            after = 0
+        for message in broadcaster.backlog(after):
+            try:
+                sock.sendall(encode_frame(json.dumps(message, default=str).encode("utf-8")))
+            except OSError:
+                break
+
+        try:
+            sock.settimeout(300)
+            while True:
+                frame = read_frame(sock)
+                if frame is None:
+                    break
+                opcode, payload = frame
+                if opcode == OP_CLOSE:
+                    break
+                if opcode == OP_PING:
+                    sock.sendall(encode_frame(payload, OP_PONG))
+        except OSError:
+            pass
+        finally:
+            broadcaster.remove(sock)
+            self.close_connection = True
+
+
+_PLACEHOLDER_PAGE = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Care Agent v5</title>
+<style>body{font:15px/1.6 ui-sans-serif,system-ui,sans-serif;margin:0;padding:3rem;
+background:#0f1115;color:#e6e8ee}code{background:#1b1f28;padding:.15rem .4rem;border-radius:4px}
+a{color:#8ab4ff}</style></head><body>
+<h1>Care Agent v5 — backend is running</h1>
+<p>The Dashboard bundle has not been built yet.</p>
+<p>Development: <code>cd v5/frontend &amp;&amp; bun install &amp;&amp; bun run dev</code>, then open
+<a href="http://localhost:5173">http://localhost:5173</a>.</p>
+<p>Production bundle: <code>bun run build</code> in <code>v5/frontend</code>.</p>
+<p>The API is live regardless — try <a href="/api/status">/api/status</a>
+or <a href="/api/setup/state">/api/setup/state</a>.</p>
+</body></html>"""
+
+
+def serve(ctx: Any) -> CareHTTPServer:
+    server = CareHTTPServer((ctx.config.host, ctx.config.port), ctx)
+    thread = threading.Thread(target=server.serve_forever, name="http", daemon=True)
+    thread.start()
+    return server

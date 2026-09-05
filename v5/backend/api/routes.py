@@ -1,0 +1,454 @@
+"""REST route table (v5 03 §API).
+
+Handlers take ``(ctx, request)`` and return ``(status, payload)``. Two
+rules hold across all of them:
+
+* No handler ever returns a secret. Only ``SecretStore.describe()``
+  crosses this boundary (v5 04 §Secrets).
+* Anything that changes behaviour writes a config version first, so the
+  Dashboard's rollback list is complete by construction.
+"""
+
+from __future__ import annotations
+
+import re
+import time
+from typing import Any, Callable
+
+from ..domain.enums import L2Outcome
+from ..domain.timeutil import day_key, now_ms
+from ..l1.detector import DETECTOR_REGISTRY, build_detector
+from ..l2.gemini_client import GeminiClient, GeminiError
+from ..l3.minimax_client import MiniMaxClient, MiniMaxError
+from ..media import ffmpeg
+from ..media.replay_source import ScriptedSource
+from ..observer.daily import run_observer
+from ..secretstore import SECRET_KEYS
+
+
+class ApiError(Exception):
+    def __init__(self, status: int, code: str, message: str) -> None:
+        super().__init__(message)
+        self.status = status
+        self.code = code
+        self.message = message
+
+
+class Request:
+    def __init__(self, method: str, path: str, query: dict[str, list[str]],
+                 body: dict[str, Any], params: dict[str, str]) -> None:
+        self.method = method
+        self.path = path
+        self.query = query
+        self.body = body
+        self.params = params
+
+    def q(self, name: str, default: str = "") -> str:
+        return self.query.get(name, [default])[0]
+
+    def q_int(self, name: str, default: int) -> int:
+        try:
+            return int(self.q(name, str(default)))
+        except ValueError:
+            return default
+
+
+Handler = Callable[[Any, Request], "tuple[int, dict[str, Any]]"]
+ROUTES: list[tuple[str, re.Pattern[str], Handler]] = []
+
+
+def route(method: str, pattern: str) -> Callable[[Handler], Handler]:
+    compiled = re.compile("^" + re.sub(r"\{(\w+)\}", r"(?P<\1>[^/]+)", pattern) + "$")
+
+    def register(handler: Handler) -> Handler:
+        ROUTES.append((method, compiled, handler))
+        return handler
+
+    return register
+
+
+# ---------------------------------------------------------------------
+# Status and telemetry
+# ---------------------------------------------------------------------
+
+
+@route("GET", "/api/status")
+def get_status(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    return 200, ctx.status()
+
+
+@route("GET", "/api/pipeline/runs")
+def get_runs(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    """The v5 audit view: every window, whatever happened to it."""
+    outcome = request.q("l2_outcome") or None
+    if outcome and outcome not in {o.value for o in L2Outcome}:
+        raise ApiError(400, "bad_outcome", f"unknown l2_outcome {outcome!r}")
+    limit = min(request.q_int("limit", 50), 500)
+    runs = ctx.repos.list_runs(limit=limit, offset=request.q_int("offset", 0), l2_outcome=outcome)
+    window_ms = request.q_int("stats_window_sec", 3600) * 1000
+    return 200, {"runs": runs, "stats": ctx.repos.run_stats(now_ms() - window_ms)}
+
+
+@route("GET", "/api/logs")
+def get_logs(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    return 200, {"logs": ctx.repos.recent_logs(min(request.q_int("limit", 100), 500),
+                                               request.q("level") or None)}
+
+
+# ---------------------------------------------------------------------
+# Events
+# ---------------------------------------------------------------------
+
+
+@route("GET", "/api/events")
+def get_events(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    return 200, {"events": ctx.repos.list_events(
+        limit=min(request.q_int("limit", 50), 200),
+        event_type=request.q("type") or None,
+        status=request.q("status") or None,
+    )}
+
+
+@route("GET", "/api/events/{event_id}")
+def get_event(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    """One event plus its full cascade trace (v5 03 §Dashboard)."""
+    event = ctx.repos.get_event(request.params["event_id"])
+    if event is None:
+        raise ApiError(404, "not_found", "no such event")
+    runs = ctx.repos.runs_for_event(event["event_id"])
+    calls: list[dict[str, Any]] = []
+    for run in runs:
+        for column in ("l2_call_id", "l3_call_id"):
+            call_id = run.get(column)
+            if call_id:
+                row = ctx.db.query_one("SELECT * FROM model_calls WHERE call_id=?", (call_id,))
+                if row is not None:
+                    calls.append(dict(row))
+    analyses = [dict(r) for r in ctx.db.query(
+        "SELECT * FROM analyses WHERE event_id=? ORDER BY created_at", (event["event_id"],))]
+    actions = [dict(r) for r in ctx.db.query(
+        "SELECT * FROM actions WHERE event_id=? ORDER BY created_at", (event["event_id"],))]
+    return 200, {"event": event, "runs": runs, "model_calls": calls,
+                 "analyses": analyses, "actions": actions}
+
+
+@route("GET", "/api/hydration/summary")
+def get_hydration(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    summary = ctx.repos.hydration_summary(request.q("day") or None)
+    summary["target_ml"] = ctx.policy.hydration.daily_target_ml
+    total = summary.get("total_ml", 0) or 0
+    summary["progress"] = round(total / summary["target_ml"], 3) if summary["target_ml"] else 0.0
+    return 200, summary
+
+
+@route("GET", "/api/actions")
+def get_actions(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    return 200, {"actions": ctx.repos.list_actions(min(request.q_int("limit", 50), 200))}
+
+
+# ---------------------------------------------------------------------
+# Health and transcripts
+# ---------------------------------------------------------------------
+
+
+@route("GET", "/api/health/current")
+def get_health(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    return 200, {"samples": ctx.repos.latest_health(ctx.config.subject_id)}
+
+
+@route("POST", "/api/health/sample")
+def post_health(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    """Fake-health injection retained from v4 (v5 00 §必做)."""
+    metric = str(request.body.get("metric", "")).strip()
+    if not metric:
+        raise ApiError(400, "bad_request", "metric is required")
+    try:
+        value = float(request.body.get("value"))
+    except (TypeError, ValueError):
+        raise ApiError(400, "bad_request", "value must be a number") from None
+    sample_id = ctx.repos.save_health_sample(
+        ctx.config.subject_id, metric, value,
+        str(request.body.get("unit", "")), str(request.body.get("source", "fake")),
+        int(request.body.get("observed_at_ms", now_ms())),
+    )
+    return 201, {"sample_id": sample_id}
+
+
+@route("GET", "/api/transcripts")
+def get_transcripts(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    since = request.q_int("since_ms", now_ms() - 600_000)
+    ctx.repos.sweep_transcripts()
+    return 200, {"since_ms": since,
+                 "text": ctx.repos.recent_transcript(ctx.config.subject_id, since)}
+
+
+@route("POST", "/api/transcripts")
+def post_transcript(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    text = str(request.body.get("text", "")).strip()
+    if not text:
+        raise ApiError(400, "bad_request", "text is required")
+    ended = int(request.body.get("ended_at_ms", now_ms()))
+    transcript_id = ctx.repos.save_transcript(
+        ctx.config.subject_id, text,
+        int(request.body.get("started_at_ms", ended - 5000)), ended,
+        float(request.body.get("confidence", 0.0)),
+        int(request.body.get("ttl_sec", 3600)),
+    )
+    return 201, {"transcript_id": transcript_id}
+
+
+# ---------------------------------------------------------------------
+# Observer
+# ---------------------------------------------------------------------
+
+
+@route("GET", "/api/observer/findings")
+def get_findings(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    return 200, {"findings": ctx.repos.list_findings(min(request.q_int("limit", 30), 100)),
+                 "summaries": ctx.repos.daily_summaries(min(request.q_int("days", 14), 90))}
+
+
+@route("POST", "/api/observer/run")
+def post_observer(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    return 200, run_observer(ctx, day=request.body.get("day") or day_key())
+
+
+# ---------------------------------------------------------------------
+# Settings and secrets
+# ---------------------------------------------------------------------
+
+
+@route("GET", "/api/settings")
+def get_settings(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    return 200, {
+        "policy": ctx.policy.to_dict(),
+        "providers": {"l2": ctx.l2_config.describe(ctx.secrets),
+                      "l3": ctx.l3_config.describe(ctx.secrets)},
+        "secrets": ctx.secrets.describe(),
+        "detectors": DETECTOR_REGISTRY,
+        "versions": ctx.repos.list_config_versions(),
+        # Host-managed, shown so an operator knows why they cannot edit them.
+        "host_managed": {
+            "data_dir": str(ctx.config.data_dir),
+            "db_path": str(ctx.config.db_path),
+            "bind": f"{ctx.config.host}:{ctx.config.port}",
+        },
+    }
+
+
+@route("PUT", "/api/settings")
+def put_settings(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    payload = request.body.get("policy")
+    if not isinstance(payload, dict):
+        raise ApiError(400, "bad_request", "policy object is required")
+    policy = ctx.apply_policy(payload, note=str(request.body.get("note", "")))
+    return 200, {"policy": policy.to_dict(), "version": policy.version}
+
+
+@route("POST", "/api/settings/rollback")
+def post_rollback(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    version = str(request.body.get("version", ""))
+    if not ctx.rollback_policy(version):
+        raise ApiError(404, "not_found", f"no config version {version!r}")
+    return 200, {"policy": ctx.policy.to_dict(), "version": ctx.policy.version}
+
+
+@route("POST", "/api/settings/providers")
+def post_providers(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    """Model id / base URL / timeout per slot. L2 and L3 are independent."""
+    for slot, config in (("l2", ctx.l2_config), ("l3", ctx.l3_config)):
+        update = request.body.get(slot)
+        if not isinstance(update, dict):
+            continue
+        for field in ("model", "base_url"):
+            if isinstance(update.get(field), str) and update[field].strip():
+                setattr(config, field, update[field].strip())
+        if isinstance(update.get("timeout_sec"), (int, float)):
+            config.timeout_sec = float(update["timeout_sec"])
+        if isinstance(update.get("enabled"), bool):
+            config.enabled = update["enabled"]
+    ctx.rebuild(reason="providers_updated")
+    return 200, {"l2": ctx.l2_config.describe(ctx.secrets),
+                 "l3": ctx.l3_config.describe(ctx.secrets)}
+
+
+@route("POST", "/api/secrets")
+def post_secret(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    """Write-only. The response says 'configured', never the value."""
+    key = str(request.body.get("key", ""))
+    if key not in SECRET_KEYS:
+        raise ApiError(400, "unknown_secret", f"{key!r} is not a known secret")
+    ctx.secrets.set(key, str(request.body.get("value", "")))
+    ctx.rebuild(reason=f"secret_{key.lower()}_updated")
+    return 200, {"secrets": ctx.secrets.describe()}
+
+
+# ---------------------------------------------------------------------
+# Setup and integration probes (v5 03 §Setup / Settings)
+# ---------------------------------------------------------------------
+
+
+@route("GET", "/api/setup/state")
+def get_setup(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    """What Setup still needs. Nothing here downloads anything (v5 04)."""
+    detector_health = ctx.detector.health()
+    scenarios = sorted(p.stem for p in (ctx.config.data_dir / "replays").glob("*.json"))
+    steps = [
+        {"id": "runtime", "label": "Runtime & FFmpeg",
+         "done": ffmpeg.available(), "detail": ffmpeg.version()},
+        {"id": "storage", "label": "Database",
+         "done": ctx.config.db_path.exists(), "detail": str(ctx.config.db_path)},
+        {"id": "l1", "label": "L1 person detector",
+         "done": detector_health.get("status") in {"ok", "degraded"},
+         "detail": f"{ctx.policy.l1.detector_id}: {detector_health.get('status')}"},
+        {"id": "l2", "label": "Gemini (L2)",
+         "done": ctx.secrets.configured("GEMINI_API_KEY"),
+         "detail": ctx.l2_config.model},
+        {"id": "l3", "label": "MiniMax (L3)",
+         "done": ctx.secrets.configured("MINIMAX_API_KEY"),
+         "detail": ctx.l3_config.model},
+        {"id": "source", "label": "Camera or replay",
+         "done": ctx.source is not None,
+         "detail": "replay scenarios: " + (", ".join(scenarios) or "none")},
+    ]
+    return 200, {"steps": steps, "complete": all(s["done"] for s in steps),
+                 "detectors": DETECTOR_REGISTRY, "scenarios": scenarios}
+
+
+@route("POST", "/api/integrations/person-gate/test")
+def test_person_gate(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    detector_id = str(request.body.get("detector_id", ctx.policy.l1.detector_id))
+    frames = ctx.frames.buffer.latest(2)
+    if not frames:
+        raise ApiError(409, "no_frames", "start a source before testing L1")
+    try:
+        detector = (ctx.detector if detector_id == ctx.policy.l1.detector_id
+                    else build_detector(detector_id))
+    except ValueError as exc:
+        raise ApiError(400, "unknown_detector", str(exc)) from None
+    started = time.perf_counter()
+    readings = [detector.detect(frame).to_dict() for frame in frames]
+    return 200, {"detector_id": detector_id, "readings": readings,
+                 "health": detector.health(),
+                 "elapsed_ms": int((time.perf_counter() - started) * 1000)}
+
+
+@route("POST", "/api/integrations/gemini/test")
+def test_gemini(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    """Auth + model reachability. No media, so it is cheap and safe to repeat."""
+    key = ctx.secrets.get("GEMINI_API_KEY")
+    if not key:
+        raise ApiError(409, "not_configured", "GEMINI_API_KEY is not set")
+    client = GeminiClient(key, model=ctx.l2_config.model, base_url=ctx.l2_config.base_url,
+                          timeout_sec=min(ctx.l2_config.timeout_sec, 20.0))
+    started = time.perf_counter()
+    try:
+        models = client.list_models()
+    except GeminiError as exc:
+        return 200, {"ok": False, "code": exc.code,
+                     "message": ctx.secrets.redact(exc.message)[:300]}
+    return 200, {"ok": True, "elapsed_ms": int((time.perf_counter() - started) * 1000),
+                 "model_configured": ctx.l2_config.model,
+                 "model_available": ctx.l2_config.model in models,
+                 "models_visible": len(models)}
+
+
+@route("POST", "/api/integrations/minimax/test")
+def test_minimax(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    key = ctx.secrets.get("MINIMAX_API_KEY")
+    if not key:
+        raise ApiError(409, "not_configured", "MINIMAX_API_KEY is not set")
+    client = MiniMaxClient(key, model=ctx.l3_config.model, base_url=ctx.l3_config.base_url,
+                           timeout_sec=min(ctx.l3_config.timeout_sec, 20.0))
+    started = time.perf_counter()
+    try:
+        models = client.list_models()
+    except MiniMaxError as exc:
+        return 200, {"ok": False, "code": exc.code,
+                     "message": ctx.secrets.redact(exc.message)[:300]}
+    return 200, {"ok": True, "elapsed_ms": int((time.perf_counter() - started) * 1000),
+                 "model_configured": ctx.l3_config.model,
+                 "model_available": ctx.l3_config.model in models,
+                 "models_visible": len(models)}
+
+
+@route("POST", "/api/pipeline/cascade-test")
+def cascade_test(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    """One window through all three layers, against whatever is configured.
+
+    This is the E2E check v5 03 puts at the end of Setup: it proves the
+    layers agree on a contract, not merely that each one answers a ping.
+    """
+    scenario = str(request.body.get("scenario", "fall"))
+    path = ctx.config.data_dir / "replays" / f"{scenario}.json"
+    if not path.exists():
+        raise ApiError(404, "no_scenario", f"no replay scenario {scenario!r}")
+
+    source = ScriptedSource.from_file(path, fps=ctx.policy.cadence.clip_fps, realtime=False)
+    frames = source.frames(base_ms=now_ms() - 10_000)
+    if not frames:
+        raise ApiError(400, "empty_scenario", "scenario produced no frames")
+    for frame in frames[-64:]:
+        ctx.cascade.ingest(frame)
+    for _ in range(max(2, ctx.policy.l1.frames_to_enter)):
+        ctx.cascade._sample_once()
+
+    decision = ctx.cascade.decide_window(now_ms())
+    forced = type(decision)(L2Outcome.called, "cascade_test", decision.high_risk)
+    run = ctx.cascade.run_window(forced, now_ms())
+
+    escalation = ctx.cascade.l3_queue.take(timeout=0.1)
+    if escalation is not None:
+        try:
+            ctx.cascade._run_escalation(*escalation.payload)
+        finally:
+            ctx.cascade.l3_queue.finish()
+
+    return 200, {
+        "scenario": scenario,
+        "l1": {"decision": run.l1_decision, "detector": run.l1_detector_id},
+        "l2": {"outcome": run.l2_outcome, "model": run.l2_model, "latency_ms": run.l2_latency_ms,
+               "repaired": run.l2_repaired, "error": run.l2_error,
+               "escalation": run.l2_escalation_reasons},
+        "l3": {"outcome": run.l3_outcome, "model": run.l3_model, "latency_ms": run.l3_latency_ms,
+               "risk": run.l3_risk_level, "error": run.l3_error},
+        "run_id": run.run_id,
+        "trace": run.trace(),
+    }
+
+
+# ---------------------------------------------------------------------
+# Sources
+# ---------------------------------------------------------------------
+
+
+@route("GET", "/api/replay/scenarios")
+def get_scenarios(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    out = []
+    for path in sorted((ctx.config.data_dir / "replays").glob("*.json")):
+        try:
+            manifest = ScriptedSource.from_file(path).manifest
+        except (OSError, ValueError):
+            continue
+        out.append({"id": path.stem, "name": manifest.get("name", path.stem),
+                    "description": manifest.get("description", ""),
+                    "segments": len(manifest.get("segments", []))})
+    return 200, {"scenarios": out}
+
+
+@route("POST", "/api/source/start")
+def post_source_start(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    kind = str(request.body.get("kind", "replay_scenario"))
+    target = str(request.body.get("target", "fall"))
+    try:
+        health = ctx.start_source(kind, target)
+    except (ValueError, OSError) as exc:
+        raise ApiError(400, "source_failed", str(exc)) from None
+    return 200, {"source": health}
+
+
+@route("POST", "/api/source/stop")
+def post_source_stop(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    ctx.stop_source()
+    ctx.cascade.stop()
+    return 200, {"stopped": True}
