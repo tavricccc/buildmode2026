@@ -11,11 +11,13 @@ const eventNames: Record<string, string> = {
   cough: "咳嗽", tv_audio: "電視聲", speech_activity: "說話活動", alarm_sound: "警報聲", object_cup: "杯子",
   object_bottle: "瓶子", object_phone: "手機", object_remote: "遙控器", object_bag: "包包", object_pet: "寵物",
   object_vehicle: "車輛", smoke: "煙霧", fire: "火焰",
+  user_request: "使用者要求",
 };
 
 const serviceNames: Record<string, string> = {
   camera: "攝影機", microphone: "麥克風", virtual_camera: "虛擬串流", local_vlm: "流程多模態模型",
-  main_agent: "主 Agent", database: "SQLite", frigate_api: "Frigate",
+  main_agent: "主 Agent", resident_interaction: "互動驅動", resident_understanding: "理解／動機驅動",
+  resident_asr: "住民 ASR", local_tts: "本機 TTS", minimax_tts: "MiniMax TTS", database: "SQLite", frigate_api: "Frigate",
 };
 
 function eventLabel(type?: string) { return type ? (eventNames[type] || type) : "事件"; }
@@ -55,6 +57,12 @@ function Metric({ label, value, hint, accent = "" }: { label: string; value: str
 
 function mergeById(previous: Json[], item: Json, limit = 80) {
   return [item, ...previous.filter(existing => existing.id !== item.id)].slice(0, limit);
+}
+
+function mergeByObservedTime(previous: Json[], item: Json, limit = 12) {
+  return [item, ...previous.filter(existing => existing.id !== item.id)]
+    .sort((a, b) => new Date(b.observed_at || b.created_at || 0).getTime() - new Date(a.observed_at || a.created_at || 0).getTime())
+    .slice(0, limit);
 }
 
 function CapturePanel({ onUpdated, onStream }: { onUpdated: () => void; onStream: (value: Json | null) => void }) {
@@ -167,7 +175,8 @@ function TimelinePanel({ events }: { events: Json[] }) {
   return <Panel title="事件時間軸" eyebrow="CONFIRMED TRANSITIONS" className="timeline-panel"><div className="timeline-intro">只把已跨窗口確認的事件放在這裡；VLM 瞬時觀察會留在證據區，不會冒充事件。</div><div className="event-list">{events.length ? events.slice(0, 40).map(event => {
     const attrs = event.attributes_json || event.attributes || {};
     const offset = attrs.occurred_offset_ms ?? event.source_offset_ms;
-    return <article className={`event-row ${toneForEvent(event.event_type)}`} key={event.id}><div className="event-dot" /><div className="event-main"><div className="event-title"><strong>{eventLabel(event.event_type)}</strong><Badge status={event.status} /><span>{event.source === "recognition" ? "時間狀態追蹤" : "canonical"}</span></div><p>{attrs.from_state && attrs.to_state ? `${postureLabel(attrs.from_state)} → ${postureLabel(attrs.to_state)}` : (attrs.reason || "已保存事件")}</p><div className="event-meta"><b>{formatDate(event.occurred_at)}</b><span>串流 {formatOffset(offset)}</span>{attrs.confirmed_offset_ms !== undefined && <span>確認 {formatOffset(attrs.confirmed_offset_ms)}</span>}<span>信心 {Number(event.confidence || 0).toFixed(2)}</span></div></div><code>{event.id.slice(-8)}</code></article>;
+    const sourceLabel = event.event_type === "user_request" ? "住民互動" : (event.source === "recognition" ? "時間狀態追蹤" : "canonical");
+    return <article className={`event-row ${toneForEvent(event.event_type)}`} key={event.id}><div className="event-dot" /><div className="event-main"><div className="event-title"><strong>{eventLabel(event.event_type)}</strong><Badge status={event.status} /><span>{sourceLabel}</span></div><p>{attrs.from_state && attrs.to_state ? `${postureLabel(attrs.from_state)} → ${postureLabel(attrs.to_state)}` : (attrs.reason || "已保存事件")}</p><div className="event-meta"><b>{formatDate(event.occurred_at)}</b><span>串流 {formatOffset(offset)}</span>{attrs.confirmed_offset_ms !== undefined && <span>確認 {formatOffset(attrs.confirmed_offset_ms)}</span>}<span>信心 {Number(event.confidence || 0).toFixed(2)}</span></div></div><code>{event.id.slice(-8)}</code></article>;
   }) : <div className="empty">尚無已確認事件。穩定狀態會先建立基線，跨窗口確認後才會出現在這裡。</div>}</div></Panel>;
 }
 
@@ -179,6 +188,98 @@ function AgentPanel({ runs, trace }: { runs: Json[]; trace: Json[] }) {
     <div className="rounds"><div className="subheading"><span>所有分析輪次</span><small>{runs.length} rounds · 持久資料</small></div>{runs.slice(0, 12).map((run, index) => { const item = run.analysis_json || {}; const runPolicy = run.policy_json || {}; return <article className={`round-row ${index === 0 ? "current" : ""}`} key={run.id}><div className="round-index">{String(index + 1).padStart(2, "0")}</div><div><div className="round-title"><strong>{runPolicy.final_action || run.decision}</strong><Badge status={run.status} /><span>{formatDate(run.created_at)}</span></div><p>{item.situation_summary || run.error_code || "尚未有 structured judgment"}</p></div><small>{run.window_id || run.trigger_id}</small></article>; })}</div>
     <div className="trace"><div className="subheading"><span>每輪即時分析／行動 trace</span><small>不會因新訊息消失</small></div>{trace.slice(0, 24).map(item => <div className="trace-row" key={item.id}><Badge status={item.stage} /><span>{item.message}</span><small>{formatDate(item.occurred_at)}</small></div>)}</div>
     <p className="caption">前端顯示的是模型可稽核摘要、證據索引與 deterministic policy；不顯示隱藏 chain-of-thought token。</p>
+  </Panel>;
+}
+
+function PeriodSummaryPanel({ summaries }: { summaries: Json[] }) {
+  const latest = summaries[0];
+  return <Panel title="主 Agent 週期總結" eyebrow="全天摘要記憶" className="summary-panel">
+    {latest ? <><div className="summary-head"><div><Badge status={latest.status} /><strong>{latest.summary_type === "hourly" ? "1 小時紀錄" : "10 分鐘小節"} · {formatDate(latest.window_start)} → {formatDate(latest.window_end)}</strong></div><span>{latest.status === "healthy" ? "model-backed" : "fallback"} · confidence {Number(latest.confidence || 0).toFixed(2)}</span></div><div className="summary-text">{latest.summary_text}</div><div className="summary-columns"><div><h3>值得記住的事件</h3>{latest.key_events_json?.length ? <ul>{latest.key_events_json.map((item: string, index: number) => <li key={`${index}-${item}`}>{item}</li>)}</ul> : <p className="muted">這段期間沒有確認的值得注意事件。</p>}</div><div><h3>動作時間線</h3>{latest.action_timeline_json?.length ? <ul>{latest.action_timeline_json.slice(0, 8).map((item: string, index: number) => <li key={`${index}-${item}`}>{item}</li>)}</ul> : <p className="muted">沒有保存的人物／物品動作。</p>}</div><div><h3>Unknown</h3>{latest.unknowns_json?.length ? <ul>{latest.unknowns_json.map((item: string, index: number) => <li key={`${index}-${item}`}>{item}</li>)}</ul> : <p className="muted">沒有額外未知事項。</p>}</div></div><div className="summary-foot"><span>來源 {JSON.stringify(latest.source_counts_json || {})}</span>{latest.requires_follow_up ? <strong>需要後續確認：{latest.follow_up_reason || "—"}</strong> : <span>目前沒有後續確認要求</span>}</div></> : <div className="empty">等待第一個週期摘要。測試設定目前每 10 分鐘／每 1 小時產生一次。</div>}
+    <div className="summary-history">{summaries.slice(0, 8).map(item => <div className="summary-history-row" key={item.id}><Badge status={item.status} /><span>{formatDate(item.window_start)}–{formatDate(item.window_end)}</span><strong>{item.summary_text}</strong></div>)}</div>
+  </Panel>;
+}
+
+function ObservationHistoryPanel({ observations, latest }: { observations: Json[]; latest: Json | null }) {
+  const items = observations.length ? observations.slice(0, 12) : (latest ? [latest] : []);
+  return <Panel title="最近 VLM 觀察" eyebrow="ORDERED OBSERVATION HISTORY · UP TO 12" className="observation-history-panel">
+    {items.length ? <div className="observation-history-list">{items.map((item, index) => { const observation = item.observation_json || item.observation || item; return <article className="observation-history-row" key={item.id || `${item.observed_at}-${index}`}><div className="observation-index">{String(index + 1).padStart(2, "0")}</div><div className="observation-history-main"><div><strong>{item.summary_text || observation.change_summary || "偵測到人物或物品變化。"}</strong><Badge status={observation.warning_signal === "high" ? "urgent" : (observation.change_detected ? "accent" : "none")} /></div><p>人物{observation.person_visible ? "可見" : "不可見"} · 姿態 {postureLabel(observation.posture)}{observation.vertical_transition && observation.vertical_transition !== "none" ? ` · ${observation.vertical_transition === "up" ? "站起" : "向下移動"}` : ""}</p><small>{formatDate(item.observed_at || item.created_at)} · 串流 {formatOffset(item.end_offset_ms ?? observation.observed_at_offset_ms)} · 信心 {Number(observation.confidence || item.confidence || 0).toFixed(2)}{observation.audio_events?.length ? ` · 聲音 ${observation.audio_events.join("、")}` : ""}</small></div><code>{String(item.window_id || "").slice(-12)}</code></article>; })}</div> : <div className="empty">等待第一筆 Observation。只有通過 change gate 或 quiet probe 才會進入這裡。</div>}
+    <p className="caption">平行模型完成順序不會改變這裡的時間順序；完整 Observation record 仍保存於 SQLite。</p>
+  </Panel>;
+}
+
+function ResidentPanel({ status, messages, memories, insights, reminders, emergencyQuestion, messageEvent, onRefresh, onMemoryAction }: { status: Json | null; messages: Json[]; memories: Json[]; insights: Json[]; reminders: Json[]; emergencyQuestion: Json | null; messageEvent: Json | null; onRefresh: () => Promise<void>; onMemoryAction: (id: string, action: "confirm" | "invalidate") => Promise<void> }) {
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [autoSpeak, setAutoSpeak] = useState(true);
+  const [speaking, setSpeaking] = useState(false);
+  const [error, setError] = useState("");
+  const [ttsUrl, setTtsUrl] = useState("");
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const latestInsight = insights[0];
+  const emergencyActive = ["active", "awaiting_response", "confirmed"].includes(status?.high_risk?.status || "");
+
+  useEffect(() => () => { globalThis.speechSynthesis?.cancel(); }, []);
+
+  function stopSpeaking() { globalThis.speechSynthesis?.cancel(); setSpeaking(false); }
+  function speakLocal(replyText: string) {
+    if (!replyText || !globalThis.speechSynthesis || typeof SpeechSynthesisUtterance === "undefined") { setError("此瀏覽器不支援本機語音朗讀。"); return; }
+    stopSpeaking();
+    const utterance = new SpeechSynthesisUtterance(replyText);
+    utterance.lang = status?.services?.local_tts?.detail?.language || "zh-TW";
+    utterance.rate = Number(status?.services?.local_tts?.detail?.rate || 0.95);
+    utterance.onstart = () => setSpeaking(true); utterance.onend = () => setSpeaking(false); utterance.onerror = () => setSpeaking(false);
+    globalThis.speechSynthesis.speak(utterance);
+  }
+
+  useEffect(() => {
+    if (emergencyQuestion?.question) speakLocal(emergencyQuestion.question);
+  }, [emergencyQuestion?.question, emergencyQuestion?.question_count]);
+  useEffect(() => {
+    if (messageEvent?.proactive && messageEvent.reply_text) speakLocal(messageEvent.reply_text);
+  }, [messageEvent?.proactive, messageEvent?.reply_text]);
+
+  async function send(payload: Json) {
+    setBusy(true); setError("");
+    try {
+      const result = await api<Json>("/api/resident/message", { method: "POST", body: JSON.stringify({ conversation_id: "default", speak: true, emergency_response: emergencyActive, ...payload }) });
+      if (result.tts?.audio_base64) setTtsUrl(`data:${result.tts.mime_type || "audio/mpeg"};base64,${result.tts.audio_base64}`);
+      if (result.should_speak && autoSpeak && result.reply_text) speakLocal(result.reply_text); else if (!result.should_speak) stopSpeaking();
+      setText(""); await onRefresh();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "互動失敗"); }
+    finally { setBusy(false); }
+  }
+
+  async function sendText() { if (text.trim()) await send({ text: text.trim() }); }
+
+  async function toggleRecording() {
+    if (recording) { recorderRef.current?.stop(); return; }
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") { setError("此瀏覽器不支援語音錄製，請使用 HTTPS 新版瀏覽器。"); return; }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      streamRef.current = stream; chunksRef.current = [];
+      const mimeType = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"].find(item => MediaRecorder.isTypeSupported(item)) || "audio/webm";
+      const recorder = new MediaRecorder(stream, { mimeType }); recorderRef.current = recorder;
+      recorder.ondataavailable = event => { if (event.data.size) chunksRef.current.push(event.data); };
+      recorder.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: mimeType });
+        stream.getTracks().forEach(track => track.stop()); streamRef.current = null; recorderRef.current = null; setRecording(false);
+        const reader = new FileReader(); reader.onloadend = () => { const encoded = String(reader.result || "").split(",")[1] || ""; if (encoded) void send({ audio_base64: encoded }); }; reader.readAsDataURL(blob);
+      };
+      recorder.start(); setRecording(true); globalThis.setTimeout(() => { if (recorder.state !== "inactive") recorder.stop(); }, 8000);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "無法取得麥克風權限"); }
+  }
+
+  return <Panel title="住民互動 Agent" eyebrow="ONE AGENT · TWO DRIVERS" className="resident-panel">
+    {emergencyActive && <div className="emergency-banner"><div><Badge status="urgent" /><strong>目前正在確認高風險事件</strong><p>{emergencyQuestion?.question || status?.high_risk?.question || "請回應目前的關心詢問。"}</p><small>第 {emergencyQuestion?.question_count || status?.high_risk?.question_count || 1} 次詢問 · 回應後會停止重複詢問</small></div><button className="danger" onClick={() => void api<Json>("/api/high-risk/resolve", { method: "POST", body: JSON.stringify({ reason: "operator_resolved_from_dashboard" }) }).then(onRefresh).catch(cause => setError(cause instanceof Error ? cause.message : "解除高風險失敗"))}>解除高風險</button></div>}
+    <div className="resident-driver-grid"><div className="resident-driver-card"><div><Badge status={status?.services?.resident_interaction?.status || "waiting"} /><strong>互動驅動</strong></div><p>聽取文字／語音、讀取主 Agent 紀錄、回答與選擇性 TTS。</p><small>{status?.services?.resident_asr?.detail?.model || "ASR"} · {status?.services?.minimax_tts?.detail?.configured ? "TTS 已設定" : "TTS 尚未設定"}</small></div><div className="resident-driver-card"><div><Badge status={status?.services?.resident_understanding?.status || "waiting"} /><strong>理解／動機驅動</strong></div><p>背景歸納偏好、狀態與「此刻是否值得主動說話」，永遠先產生提案。</p><small>主動說話：{status?.services?.resident_understanding?.detail?.proactive_speech_enabled ? "已開啟" : "預設關閉"}</small></div></div>
+    <div className="resident-compose"><textarea value={text} onChange={(event: any) => setText(event.target.value)} onKeyDown={(event: any) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void sendText(); } }} placeholder="對住民 Agent 說話；Enter 傳送，Shift+Enter 換行" disabled={busy || recording} /><div className="button-row"><button className={recording ? "danger" : "secondary"} onClick={() => void toggleRecording()} disabled={busy}>{recording ? "停止錄音並送出" : "錄一段語音"}</button><button className="primary" onClick={() => void sendText()} disabled={busy || recording || !text.trim()}>{busy ? "處理中…" : "送出文字"}</button><button className="secondary" onClick={() => void api<Json>("/api/resident/run-understanding", { method: "POST" }).then(onRefresh).catch(cause => setError(cause instanceof Error ? cause.message : "理解層執行失敗"))}>執行理解層</button></div><div className="local-tts-controls"><Badge status={status?.services?.local_tts?.status || "healthy"} /><label><input type="checkbox" checked={autoSpeak} onChange={(event: any) => setAutoSpeak(event.target.checked)} /> 回覆後用本機朗讀</label><button className="ghost" onClick={() => speaking ? stopSpeaking() : speakLocal("我在這裡，可以慢慢和你說話。")}>{speaking ? "停止本機朗讀" : "測試本機朗讀"}</button></div>{error && <p className="error-text">{error}</p>}</div>
+    <div className="resident-columns"><div><div className="subheading"><span>對話紀錄</span><small>{messages.length} messages · persistent</small></div><div className="resident-messages">{messages.length ? messages.slice(-16).map(item => <div className={`resident-message ${item.role}`} key={item.id}><div><Badge status={item.role === "user" ? "candidate" : "healthy"} /><small>{formatDate(item.created_at)} · {item.intent || item.role}</small></div><p>{item.text}</p>{item.role === "assistant" && <button className="ghost message-speak" onClick={() => speakLocal(item.text)}>朗讀這句</button>}</div>) : <div className="empty">尚無互動。可先輸入文字測試本機 VLLM 回覆。</div>}</div>{ttsUrl && <div className="tts-player"><span>最近一次雲端語音回覆</span><audio controls src={ttsUrl} /></div>}</div><div><div className="subheading"><span>理解層最新提案</span><small>{latestInsight ? formatDate(latestInsight.created_at) : "waiting"}</small></div>{latestInsight ? <div className="insight-card"><div className="insight-line"><span>觀察</span><p>{latestInsight.observed_pattern}</p></div><div className="insight-line"><span>換位</span><p>{latestInsight.user_perspective}</p></div><div className="insight-line"><span>主動</span><p>{latestInsight.should_initiate ? `${latestInsight.suggested_message || "有一個主動關心提案"}（${(latestInsight.initiation_reasons || []).join("；") || "有背景理由"}）` : "目前不主動打擾"}</p></div><Badge status={latestInsight.status || "review"} /></div> : <div className="empty">理解層尚未產生提案。可按「執行理解層」手動測試。</div>}
+      <div className="subheading resident-memory-heading"><span>待確認記憶</span><small>沒有確認前不會成為事實</small></div>{memories.filter(item => item.status === "pending").slice(0, 8).map(item => <div className="memory-card" key={item.id}><strong>{item.title}</strong><p>{item.content_text}</p><small>信心 {Number(item.confidence || 0).toFixed(2)} · {item.source_driver}</small><div className="button-row"><button className="secondary" onClick={() => void onMemoryAction(item.id, "confirm")}>確認</button><button className="ghost" onClick={() => void onMemoryAction(item.id, "invalidate")}>不採用</button></div></div>)}{!memories.some(item => item.status === "pending") && <div className="empty">目前沒有待確認的偏好或事件記憶。</div>}
+      <div className="subheading resident-memory-heading"><span>已設定提醒</span><small>{reminders.filter(item => item.status === "pending").length} pending</small></div>{reminders.filter(item => item.status === "pending").slice(0, 6).map(item => <div className="reminder-row" key={item.id}><strong>{item.message}</strong><small>{item.schedule_text} · {item.next_trigger_at ? formatDate(item.next_trigger_at) : "等待可解析時間"}</small></div>)}{!reminders.some(item => item.status === "pending") && <div className="empty">尚未設定定時提醒。</div>}</div></div>
+    <p className="caption">理解層只讀取結構化事件、主 Agent 摘要與住民自己的互動紀錄；它不直接讀取原始影像、不直接說話。模型輸出仍須經過程式政策。</p>
   </Panel>;
 }
 
@@ -194,7 +295,7 @@ function DiagnosticsPanel({ status, logs }: { status: Json | null; logs: Json[] 
 function Setup({ onComplete }: { onComplete: () => Promise<void> }) {
   const [busy, setBusy] = useState(false);
   async function complete() { setBusy(true); try { await onComplete(); } finally { setBusy(false); } }
-  return <main className="setup-screen"><div className="setup-box"><div className="brand-mark">AC</div><div className="panel-eyebrow">CARE AGENT OS · FIRST RUN</div><h1>設定照護觀察環境</h1><p>目前使用 GMI Cloud MiniMax M3，從連續攝影機與麥克風建立有時間順序的觀察。姿態必須跨窗口確認後才會成為事件；只有有變化的窗口會送出分析。</p><div className="setup-points"><span><Badge status="healthy" /> HTTPS browser MediaStream</span><span><Badge status="healthy" /> 2 FPS × 5 秒變化 Gate</span><span><Badge status="healthy" /> SQLite 可追溯事件時間軸</span></div><div className="safety-note">模型輸出是觀察與假設，最終注意程度由程式政策裁決；不作診斷、治療或自動緊急服務。</div><button className="primary wide" disabled={busy} onClick={complete}>{busy ? "正在初始化…" : "進入觀察控制台"}</button></div></main>;
+  return <main className="setup-screen"><div className="setup-box"><div className="brand-mark">AC</div><div className="panel-eyebrow">CARE AGENT OS · FIRST RUN</div><h1>設定照護觀察環境</h1><p>目前主流程使用本機 Nemotron Omni vLLM，從連續攝影機與麥克風建立有時間順序的觀察。住民互動 agent 也共用本機模型；語音辨識仍是獨立通道。</p><div className="setup-points"><span><Badge status="healthy" /> HTTPS browser MediaStream</span><span><Badge status="healthy" /> 2 FPS × 5 秒變化 Gate</span><span><Badge status="healthy" /> SQLite 可追溯事件時間軸</span></div><div className="safety-note">模型輸出是觀察與假設，最終注意程度由程式政策裁決；不作診斷、治療或自動緊急服務。</div><button className="primary wide" disabled={busy} onClick={complete}>{busy ? "正在初始化…" : "進入觀察控制台"}</button></div></main>;
 }
 
 export function App() {
@@ -209,7 +310,16 @@ export function App() {
   const [changeGates, setChangeGates] = useState<Json[]>([]);
   const [transcripts, setTranscripts] = useState<Json[]>([]);
   const [agentRuns, setAgentRuns] = useState<Json[]>([]);
+  const [periodSummaries, setPeriodSummaries] = useState<Json[]>([]);
   const [agentTrace, setAgentTrace] = useState<Json[]>([]);
+  const [residentStatus, setResidentStatus] = useState<Json | null>(null);
+  const [residentMessages, setResidentMessages] = useState<Json[]>([]);
+  const [residentMemories, setResidentMemories] = useState<Json[]>([]);
+  const [residentInsights, setResidentInsights] = useState<Json[]>([]);
+  const [residentReminders, setResidentReminders] = useState<Json[]>([]);
+  const [observations, setObservations] = useState<Json[]>([]);
+  const [residentMessageEvent, setResidentMessageEvent] = useState<Json | null>(null);
+  const [emergencyQuestion, setEmergencyQuestion] = useState<Json | null>(null);
   const [logs, setLogs] = useState<Json[]>([]);
   const [liveFeed, setLiveFeed] = useState<Json[]>([]);
   const [error, setError] = useState("");
@@ -217,13 +327,14 @@ export function App() {
 
   const refresh = useCallback(async () => {
     try {
-      const [setup, currentStatus, currentEvents, descriptionsResult, gatesResult, transcriptResult, runsResult, traceResult, logsResult] = await Promise.all([
+      const [setup, currentStatus, currentEvents, descriptionsResult, gatesResult, observationsResult, transcriptResult, runsResult, periodSummaryResult, traceResult, residentStatusResult, residentMessagesResult, residentMemoriesResult, residentRemindersResult, residentInsightsResult, logsResult] = await Promise.all([
         api<Json>("/api/setup/status"), api<Json>("/api/status"), api<{ items: Json[] }>("/api/events?page_size=80"),
-        api<{ items: Json[] }>("/api/media/descriptions?limit=30"), api<{ items: Json[] }>("/api/media/change-gates?limit=30"), api<{ items: Json[] }>("/api/transcripts/recent"),
-        api<{ items: Json[] }>("/api/agent/runs?limit=20"), api<{ items: Json[] }>("/api/agent/events?limit=120"), api<{ items: Json[] }>("/api/logs?limit=50"),
+        api<{ items: Json[] }>("/api/media/descriptions?limit=30"), api<{ items: Json[] }>("/api/media/change-gates?limit=30"), api<{ items: Json[] }>("/api/media/observations?limit=30"), api<{ items: Json[] }>("/api/transcripts/recent"),
+        api<{ items: Json[] }>("/api/agent/runs?limit=20"), api<{ items: Json[] }>("/api/agent/periodic-summaries?limit=20"), api<{ items: Json[] }>("/api/agent/events?limit=120"),
+        api<Json>("/api/resident/status"), api<{ items: Json[] }>("/api/resident/messages?limit=100"), api<{ items: Json[] }>("/api/resident/memories?limit=100"), api<{ items: Json[] }>("/api/resident/reminders?limit=100"), api<{ items: Json[] }>("/api/resident/insights?limit=30"), api<{ items: Json[] }>("/api/logs?limit=50"),
       ]);
       setSetupDone(Boolean(setup.completed)); setStatus(currentStatus); setEvents(currentEvents.items); setDescriptions(descriptionsResult.items); setChangeGates(gatesResult.items);
-      setTranscripts(transcriptResult.items); setAgentRuns(runsResult.items); setAgentTrace(traceResult.items); setLogs(logsResult.items);
+      setTranscripts(transcriptResult.items); setAgentRuns(runsResult.items); setPeriodSummaries(periodSummaryResult.items); setAgentTrace(traceResult.items); setResidentStatus(residentStatusResult); setResidentMessages(residentMessagesResult.items); setResidentMemories(residentMemoriesResult.items); setResidentReminders(residentRemindersResult.items); setResidentInsights(residentInsightsResult.items); setObservations(observationsResult.items); setLogs(logsResult.items);
       const active = currentStatus.source?.detail?.active_streams?.[0];
       if (active) { setStream(active); if (active.last_observation) setObservation(active.last_observation); if (active.state_tracker) setTracker(active.state_tracker); if (active.scene_context) setScene(active.scene_context); }
       setError("");
@@ -244,13 +355,16 @@ export function App() {
             if (payload.gate) setChangeGates(previous => mergeById(previous, payload.gate, 30));
             addFeed({ id: `gate-${packet.message_id}`, kind: payload.changed ? "accent" : "neutral", at: packet.occurred_at, title: "快速變化 Gate", detail: payload.change_summary || (payload.changed ? "有變化" : "無變化") });
           } else if (packet.type === "local_analysis.completed") {
-            if (payload.observation) setObservation(payload.observation); if (payload.state_tracker) setTracker(payload.state_tracker); if (payload.scene_context) setScene(payload.scene_context);
+            if (payload.observation) setObservation(previous => !previous || Number(payload.observation.observed_at_offset_ms || 0) >= Number(previous.observed_at_offset_ms || 0) ? payload.observation : previous); if (payload.state_tracker) setTracker(payload.state_tracker); if (payload.scene_context) setScene(payload.scene_context);
+            if (payload.observation_record) setObservations(previous => mergeByObservedTime(previous, payload.observation_record, 12));
             for (const item of [...(payload.events || []), ...(payload.recognition_events || [])]) setEvents(previous => mergeById(previous, item, 80));
             if (payload.transcript) setTranscripts(previous => mergeById(previous, payload.transcript, 30));
-            addFeed({ id: `observation-${packet.message_id}`, kind: "observation", at: packet.occurred_at, title: "VLM 觀察完成", detail: `${postureLabel(payload.observation?.posture)} · ${formatOffset(payload.observation?.observed_at_offset_ms)}` });
+            addFeed({ id: `observation-${packet.message_id}`, kind: payload.risk_candidate ? "urgent" : "observation", at: packet.occurred_at, title: payload.risk_candidate ? "高風險候選" : "Observation", detail: payload.observation_summary || `${postureLabel(payload.observation?.posture)} · ${formatOffset(payload.observation?.observed_at_offset_ms)}` });
           } else if (packet.type === "event.updated") {
             if (payload.event_type) setEvents(previous => mergeById(previous, payload, 80));
             addFeed({ id: `event-${packet.message_id}`, kind: toneForEvent(payload.event_type), at: packet.occurred_at, title: eventLabel(payload.event_type), detail: `${payload.status || "updated"} · ${formatOffset(payload.attributes_json?.occurred_offset_ms || payload.source_offset_ms)}` });
+          } else if (packet.type === "agent.periodic_summary.completed" && payload.summary) {
+            setPeriodSummaries(previous => mergeById(previous, payload.summary, 20)); addFeed({ id: `period-summary-${packet.message_id}`, kind: "agent", at: packet.occurred_at, title: "主 Agent 週期總結", detail: payload.summary.summary_text || "—" });
           } else if (packet.type.startsWith("agent.")) {
             if (payload.event) setAgentTrace(previous => mergeById(previous, payload.event, 120));
             if (packet.type === "agent.analysis.completed" && payload.agent_run) setAgentRuns(previous => mergeById(previous, payload.agent_run, 20));
@@ -263,6 +377,16 @@ export function App() {
             setStatus(previous => previous ? { ...previous, services: payload.services } : previous);
           } else if (packet.type === "warning.created") {
             addFeed({ id: `warning-${packet.message_id}`, kind: "urgent", at: packet.occurred_at, title: "需要注意", detail: payload.description || payload.next_action || "—" });
+          } else if (packet.type === "resident.emergency.question") {
+            setEmergencyQuestion(payload); setStatus(previous => previous ? { ...previous, high_risk: payload.state || previous.high_risk } : previous); addFeed({ id: `emergency-${packet.message_id}`, kind: "urgent", at: packet.occurred_at, title: "危急詢問", detail: payload.question || "請回應目前的關心詢問。" }); void refresh();
+          } else if (packet.type.startsWith("high_risk.")) {
+            if (payload.state) setStatus(previous => previous ? { ...previous, high_risk: payload.state } : previous);
+            if (packet.type === "high_risk.resolved") setEmergencyQuestion(null);
+            addFeed({ id: `high-risk-${packet.message_id}`, kind: "urgent", at: packet.occurred_at, title: "高風險狀態", detail: payload.reason || payload.state?.status || packet.type }); void refresh();
+          } else if (packet.type === "resident.message") {
+            setResidentMessageEvent(payload); addFeed({ id: `resident-${packet.message_id}`, kind: "audio", at: packet.occurred_at, title: "住民互動完成", detail: payload.reply_text || "—" }); void refresh();
+          } else if (packet.type === "resident.insight.proposed" || packet.type === "resident.memory.updated") {
+            addFeed({ id: `resident-${packet.message_id}`, kind: "agent", at: packet.occurred_at, title: "住民理解層更新", detail: payload.status || "已保存" }); void refresh();
           }
         } catch { /* keep the persistent polling view intact */ }
       };
@@ -278,18 +402,22 @@ export function App() {
     setError("");
     try {
       await api("/api/history/reset", { method: "POST" });
-      setEvents([]); setDescriptions([]); setChangeGates([]); setTranscripts([]); setAgentRuns([]); setAgentTrace([]); setLogs([]); setLiveFeed([]); setObservation(null); setTracker(null); setScene(null);
+      setEvents([]); setDescriptions([]); setChangeGates([]); setObservations([]); setTranscripts([]); setAgentRuns([]); setPeriodSummaries([]); setAgentTrace([]); setResidentMessages([]); setResidentMemories([]); setResidentReminders([]); setResidentInsights([]); setResidentMessageEvent(null); setEmergencyQuestion(null); setLogs([]); setLiveFeed([]); setObservation(null); setTracker(null); setScene(null);
       await refresh();
     } catch (cause) { setError(cause instanceof Error ? cause.message : "清除歷史失敗"); }
   }
   async function completeSetup() { await api("/api/setup/complete", { method: "POST" }); setSetupDone(true); await refresh(); }
+  async function updateResidentMemory(id: string, action: "confirm" | "invalidate") {
+    try { await api(`/api/resident/memory/${id}`, { method: "PATCH", body: JSON.stringify({ action }) }); await refresh(); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "更新住民記憶失敗"); }
+  }
   if (setupDone === null) return <div className="loading-screen"><div><div className="brand-mark">AC</div><p>正在連線到 Care Agent backend…</p></div></div>;
   if (!setupDone) return <Setup onComplete={completeSetup} />;
   const services = status?.services || {}; const activeStream = stream || status?.source?.detail?.active_streams?.[0];
   return <main className="app-shell"><header className="app-header"><div className="brand-lockup"><div className="brand-mark">AC</div><div><div className="panel-eyebrow">AMBIENT CARE AGENT OS</div><h1>照護觀察控制台</h1><p>把短暫影像觀察轉成可驗證的時間事件</p></div></div><div className="header-right"><div className="connection"><span className="pulse" />{lastRealtimeAt ? `即時連線 · ${formatDate(lastRealtimeAt)}` : "等待即時連線"}</div><button className="danger" onClick={() => void resetHistory()}>重製並清除歷史</button></div></header>
     {error && <div className="global-error"><strong>系統訊息</strong>{error}</div>}
     <div className="service-strip">{Object.entries(serviceNames).map(([key, label]) => <div className="service-pill" key={key}><span className={`service-dot ${services[key]?.status || "unknown"}`} /><span>{label}</span><Badge status={services[key]?.status} /></div>)}</div>
-    <div className="dashboard"><CapturePanel onUpdated={refresh} onStream={setStream} /><CurrentStatePanel observation={observation} tracker={tracker} scene={scene} stream={activeStream} /><TimelinePanel events={events} /><AgentPanel runs={agentRuns} trace={agentTrace} /><EvidencePanel observation={observation} descriptions={descriptions} transcripts={transcripts} changeGates={changeGates} liveFeed={liveFeed} /><DiagnosticsPanel status={status} logs={logs} /></div>
+    <div className="dashboard"><CapturePanel onUpdated={refresh} onStream={setStream} /><CurrentStatePanel observation={observation} tracker={tracker} scene={scene} stream={activeStream} /><TimelinePanel events={events} /><AgentPanel runs={agentRuns} trace={agentTrace} /><PeriodSummaryPanel summaries={periodSummaries} /><ObservationHistoryPanel observations={observations} latest={observation} /><ResidentPanel status={status || residentStatus} messages={residentMessages} memories={residentMemories} insights={residentInsights} reminders={residentReminders} emergencyQuestion={emergencyQuestion} messageEvent={residentMessageEvent} onRefresh={refresh} onMemoryAction={updateResidentMemory} /><EvidencePanel observation={observation} descriptions={descriptions} transcripts={transcripts} changeGates={changeGates} liveFeed={liveFeed} /><DiagnosticsPanel status={status} logs={logs} /></div>
     <footer>CARE AGENT OS · persistent observation timeline · state tracker v1 · raw media is not shown as events</footer>
   </main>;
 }

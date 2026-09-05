@@ -46,6 +46,8 @@ class StreamSession:
     vlm_buffer: deque[tuple[int, bytes]] = field(default_factory=deque)
     vlm_last_window_mono: float | None = None
     last_observation_mono: float | None = None
+    quiet_probe_last_mono: float | None = None
+    quiet_probe_windows: int = 0
     focus_request: dict[str, Any] | None = None
     focus_windows: int = 0
     detail_buffer: deque[tuple[int, bytes]] = field(default_factory=deque)
@@ -54,9 +56,13 @@ class StreamSession:
     detail_windows: int = 0
     detail_pending: int = 0
     detail_reason: str | None = None
+    deferred_observation_windows: list[dict[str, Any]] = field(default_factory=list)
     scene_context: dict[str, Any] | None = None
     scene_context_id: str | None = None
     focus_pending: int = 0
+    analysis_queue: list[tuple[int, int, Callable[..., Awaitable[None]], tuple[bytes, ...], dict[str, Any], bytes | None, str, str]] = field(default_factory=list)
+    analysis_sequence: int = 0
+    analysis_dispatch_task: asyncio.Task | None = None
     raw_media_directory: str | None = None
     raw_media_path: str | None = None
     raw_media_segment_started_mono: float | None = None
@@ -70,6 +76,7 @@ class StreamSession:
     chunks_received: int = 0
     error_code: str | None = None
     last_observation: Any = None
+    last_observation_end_offset_ms: int | None = None
     last_state_tracker: dict[str, Any] | None = None
     gate_event_keys: set[str] = field(default_factory=set)
     last_gate_audio_level: float | None = None
@@ -96,7 +103,8 @@ class VirtualCameraBridge:
 
     async def open(self, camera_id: str, media_type: str) -> StreamSession:
         session = StreamSession(make_id("stream"), camera_id, media_type, now_iso(), "ingress_only", self.settings.frigate_rtsp_publish_url or None)
-        session.vlm_buffer = deque(maxlen=max(self.settings.vllm_window_frames, self.settings.focus_window_frames))
+        session.vlm_buffer = deque(maxlen=max(self.settings.vllm_window_frames, self.settings.focus_window_frames,
+                                              int(self.settings.vllm_sample_fps * self.settings.video_retention_seconds)))
         session.detail_buffer = deque(maxlen=self.settings.detail_window_frames * 3)
         raw_dir = Path(self.settings.media_root).resolve() / "rolling" / session.id
         raw_dir.mkdir(parents=True, exist_ok=True)
@@ -229,7 +237,7 @@ class VirtualCameraBridge:
                     break
                 session.audio_bytes += len(chunk)
                 session.audio_buffer.extend(chunk)
-                max_buffer = self.audio_window_bytes * 2
+                max_buffer = max(self.audio_window_bytes * 2, int(16000 * 2 * self.settings.video_retention_seconds))
                 if len(session.audio_buffer) > max_buffer:
                     del session.audio_buffer[:-max_buffer]
                 if session.audio_status == "sampling" and len(session.audio_buffer) >= self.audio_window_bytes:
@@ -276,21 +284,49 @@ class VirtualCameraBridge:
                     audio_pcm = bytes(session.audio_buffer[-self.audio_window_bytes:]) if len(session.audio_buffer) >= self.audio_window_bytes else None
                     session.gate_windows += 1
                     window = {"window_id": f"{session.id}:g{session.gate_windows}", "start_offset_ms": window_items[0][0], "end_offset_ms": window_items[-1][0], "frame_count": len(window_items), "sample_fps": self.settings.vllm_sample_fps, "window_seconds": self.settings.vllm_window_seconds, "stride_seconds": self.settings.vllm_window_stride_seconds, "audio_present": audio_pcm is not None, "audio_sample_rate": 16000, "audio_duration_ms": int(len(audio_pcm) / 32) if audio_pcm else 0, "stage": "change_gate", "gate_frame_indexes": [0, len(window_items) - 1]}
+                    self._schedule_quiet_probe_if_due(session, time.monotonic())
                     self._persist_progress(session)
-                    if len(session.analysis_tasks) >= self.settings.vllm_max_pending_windows:
-                        self.store.log("warning", "virtual_camera", "VLM window skipped because pending limit was reached", context={"stream_id": session.id, "window_id": window["window_id"], "pending": len(session.analysis_tasks), "max_pending": self.settings.vllm_max_pending_windows})
-                        continue
                     callback = self.on_change_gate or self.on_window
                     if callback is None:
                         continue
-                    task = asyncio.create_task(callback(session, tuple(item[1] for item in window_items), window, audio_pcm), name=f"change-gate-window-{window['window_id']}")
-                    session.analysis_tasks.add(task)
-                    task.add_done_callback(lambda completed, current=session: (current.analysis_tasks.discard(completed), completed.exception() if not completed.cancelled() else None))
+                    self._schedule_callback(session, callback, tuple(item[1] for item in window_items), window, audio_pcm,
+                                            f"change-gate-window-{window['window_id']}", "observation", priority=5)
         except (asyncio.CancelledError, BrokenPipeError, ConnectionError):
             raise
         except Exception:
             session.vlm_status = "error"
             session.error_code = session.error_code or "VLM_FRAME_PIPE_FAILED"
+
+    def _schedule_quiet_probe_if_due(self, session: StreamSession, now_mono: float) -> None:
+        if not self.on_change_gate or self.store.high_risk_active() or session.last_observation_mono is None:
+            return
+        if now_mono - session.last_observation_mono < self.settings.observation_quiet_seconds:
+            return
+        if session.quiet_probe_last_mono is not None and now_mono - session.quiet_probe_last_mono < self.settings.observation_quiet_seconds:
+            return
+        required = max(2, int(self.settings.vllm_sample_fps * self.settings.observation_quiet_seconds))
+        recent = list(session.vlm_buffer)[-required:]
+        if len(recent) < required:
+            return
+        count = min(self.settings.observation_quiet_frames, len(recent))
+        indexes = [round(index * (len(recent) - 1) / max(1, count - 1)) for index in range(count)]
+        selected = tuple(recent[index] for index in indexes)
+        session.quiet_probe_last_mono = now_mono
+        session.quiet_probe_windows += 1
+        window = {"window_id": f"{session.id}:q{session.quiet_probe_windows}",
+                  "start_offset_ms": selected[0][0], "end_offset_ms": selected[-1][0],
+                  "frame_count": len(selected), "sample_fps": 1 / self.settings.observation_quiet_sample_interval_seconds,
+                  "window_seconds": self.settings.observation_quiet_seconds, "stride_seconds": self.settings.observation_quiet_sample_interval_seconds,
+                  "audio_present": False, "audio_sample_rate": 16000, "audio_duration_ms": 0,
+                  "stage": "quiet_probe", "quiet_probe": True,
+                  "quiet_probe_reason": "no_observation_for_configured_quiet_period"}
+        if len(session.analysis_tasks) + len(session.analysis_queue) >= self.settings.vllm_max_pending_windows:
+            self.store.log("warning", "virtual_camera", "Quiet observation probe skipped because pending limit was reached",
+                           context={"stream_id": session.id, "window_id": window["window_id"], "pending": len(session.analysis_tasks),
+                                    "max_pending": self.settings.vllm_max_pending_windows})
+            return
+        self._schedule_callback(session, self.on_change_gate, tuple(item[1] for item in selected), window, None,
+                                f"quiet-observation-{window['window_id']}", "observation", priority=8)
 
     async def _read_detail_frames(self, session: StreamSession) -> None:
         if not session.detail_process or not session.detail_process.stdout or not self.on_description_window:
@@ -352,12 +388,25 @@ class VirtualCameraBridge:
                       context: dict[str, Any]) -> dict[str, Any]:
         if session.focus_request is None:
             session.focus_request = {"reason": reason, "source_window_id": source_window_id, "context": context}
+        self._schedule_focus_if_ready(session)
         return self.snapshot(session)
+
+    def defer_observation(self, session: StreamSession, images: tuple[bytes, ...], window: dict[str, Any],
+                          audio_pcm: bytes | None) -> None:
+        session.deferred_observation_windows.append({"images": images, "window": window, "audio_pcm": audio_pcm})
+        max_deferred = max(12, int(self.settings.video_retention_seconds / max(1.0, self.settings.vllm_window_stride_seconds)) + 2)
+        if len(session.deferred_observation_windows) > max_deferred:
+            del session.deferred_observation_windows[:-max_deferred]
+
+    def release_deferred_observations(self, session: StreamSession) -> list[dict[str, Any]]:
+        items = list(session.deferred_observation_windows)
+        session.deferred_observation_windows.clear()
+        return items
 
     def _schedule_focus_if_ready(self, session: StreamSession) -> None:
         if not self.on_focus_window or not session.focus_request or len(session.vlm_buffer) < self.settings.focus_window_frames:
             return
-        if session.focus_pending >= 1 or len(session.analysis_tasks) >= self.settings.vllm_max_pending_windows:
+        if session.focus_pending >= 1 or len(session.analysis_tasks) + len(session.analysis_queue) >= self.settings.vllm_max_pending_windows:
             return
         request = session.focus_request
         session.focus_request = None
@@ -376,19 +425,64 @@ class VirtualCameraBridge:
 
     def _schedule_callback(self, session: StreamSession, callback: Callable[..., Awaitable[None]],
                            images: tuple[bytes, ...], window: dict[str, Any], audio_pcm: bytes | None,
-                           name: str, kind: str) -> None:
-        async def run() -> None:
-            try:
-                await callback(session, images, window, audio_pcm)
-            finally:
-                if kind == "detail":
+                           name: str, kind: str, priority: int | None = None) -> None:
+        priority = priority if priority is not None else (0 if kind == "focus" or self.store.high_risk_active() else 5)
+        pending = len(session.analysis_tasks) + len(session.analysis_queue)
+        if pending >= self.settings.vllm_max_pending_windows:
+            lower_priority_indexes = [index for index, item in enumerate(session.analysis_queue) if item[0] > priority]
+            if lower_priority_indexes:
+                drop_index = max(lower_priority_indexes, key=lambda index: session.analysis_queue[index][0])
+                dropped = session.analysis_queue.pop(drop_index)
+                if dropped[7] == "detail":
                     session.detail_pending = max(0, session.detail_pending - 1)
-                elif kind == "focus":
+                elif dropped[7] == "focus":
                     session.focus_pending = max(0, session.focus_pending - 1)
+                self.store.log("warning", "virtual_camera", "Lower-priority model window displaced by newer urgent work",
+                               context={"stream_id": session.id, "dropped_window_id": dropped[4].get("window_id"), "new_window_id": window.get("window_id"),
+                                        "dropped_kind": dropped[7], "priority": priority})
+            else:
+                self.store.log("warning", "virtual_camera", "Model window deferred because pending limit was reached",
+                               context={"stream_id": session.id, "window_id": window.get("window_id"), "pending": pending,
+                                        "max_pending": self.settings.vllm_max_pending_windows, "kind": kind})
+                return
+        session.analysis_sequence += 1
+        session.analysis_queue.append((priority, session.analysis_sequence, callback, images, window, audio_pcm, name, kind))
+        session.analysis_queue.sort(key=lambda item: (item[0], item[1]))
+        if session.analysis_dispatch_task is None or session.analysis_dispatch_task.done():
+            session.analysis_dispatch_task = asyncio.create_task(self._dispatch_analysis(session), name=f"analysis-dispatch-{session.id}")
 
-        task = asyncio.create_task(run(), name=name)
-        session.analysis_tasks.add(task)
-        task.add_done_callback(lambda completed, current=session: (current.analysis_tasks.discard(completed), completed.exception() if not completed.cancelled() else None))
+    async def _dispatch_analysis(self, session: StreamSession) -> None:
+        try:
+            while session.analysis_queue or session.analysis_tasks:
+                while session.analysis_queue and len(session.analysis_tasks) < self.settings.vllm_max_concurrency:
+                    _, _, callback, images, window, audio_pcm, name, kind = session.analysis_queue.pop(0)
+
+                    async def run(callback=callback, images=images, window=window, audio_pcm=audio_pcm, kind=kind):
+                        try:
+                            await callback(session, images, window, audio_pcm)
+                        finally:
+                            if kind == "detail":
+                                session.detail_pending = max(0, session.detail_pending - 1)
+                            elif kind == "focus":
+                                session.focus_pending = max(0, session.focus_pending - 1)
+
+                    task = asyncio.create_task(run(), name=name)
+                    session.analysis_tasks.add(task)
+                    task.add_done_callback(lambda completed, current=session: self._analysis_task_done(completed, current))
+                await asyncio.sleep(0.01)
+        except asyncio.CancelledError:
+            raise
+        finally:
+            session.analysis_dispatch_task = None
+
+    @staticmethod
+    def _analysis_task_done(task: asyncio.Task, session: StreamSession) -> None:
+        session.analysis_tasks.discard(task)
+        if not task.cancelled():
+            try:
+                task.exception()
+            except (asyncio.CancelledError, Exception):
+                pass
 
     async def _close_process(self, process: asyncio.subprocess.Process | None) -> None:
         if not process:
@@ -414,6 +508,14 @@ class VirtualCameraBridge:
                 except asyncio.CancelledError:
                     pass
         session.vlm_task = None; session.audio_task = None; session.detail_task = None
+        if session.analysis_dispatch_task:
+            session.analysis_dispatch_task.cancel()
+            try:
+                await session.analysis_dispatch_task
+            except asyncio.CancelledError:
+                pass
+            session.analysis_dispatch_task = None
+        session.analysis_queue.clear()
         for task in list(session.analysis_tasks):
             task.cancel()
         if session.analysis_tasks:
@@ -436,16 +538,18 @@ class VirtualCameraBridge:
                 "bytes_received": session.bytes_received, "chunks_received": session.chunks_received, "bridge_status": session.bridge_status,
                 "vlm_status": session.vlm_status, "vlm_frames": session.vlm_frames, "vlm_windows": session.vlm_windows, "vlm_window_frames": session.vlm_window_frames,
                 "gate_windows": session.gate_windows, "gate_changed_windows": session.gate_changed_windows, "observation_windows": session.observation_windows,
+                "quiet_probe_windows": session.quiet_probe_windows, "deferred_observation_windows": len(session.deferred_observation_windows),
                 "vlm_sample_fps": self.settings.vllm_sample_fps, "vlm_window_seconds": self.settings.vllm_window_seconds, "vlm_window_stride_seconds": self.settings.vllm_window_stride_seconds,
                 "audio_status": session.audio_status, "audio_bytes": session.audio_bytes, "audio_windows": session.audio_windows, "audio_sample_rate": 16000,
                 "detail_sample_fps": self.settings.detail_sample_fps, "detail_window_seconds": self.settings.detail_window_seconds,
                 "detail_windows": session.detail_windows, "detail_pending": session.detail_pending, "detail_active": bool(session.detail_active_until_mono and session.detail_active_until_mono > time.monotonic()),
                 "focus_windows": session.focus_windows, "focus_pending": session.focus_pending, "focus_requested": bool(session.focus_request), "scene_context": session.scene_context,
                 "raw_media_path": session.raw_media_path, "raw_media_bytes": session.raw_media_bytes, "raw_media_retention_seconds": self.settings.video_retention_seconds,
-                "analysis_pending": len(session.analysis_tasks), "analysis_parallel_limit": self.settings.vllm_max_concurrency,
+                "analysis_pending": len(session.analysis_tasks) + len(session.analysis_queue), "analysis_active": len(session.analysis_tasks), "analysis_queue": len(session.analysis_queue), "analysis_parallel_limit": self.settings.vllm_max_concurrency,
                 "analysis_pending_limit": self.settings.vllm_max_pending_windows,
                 "rtsp_target_configured": bool(session.rtsp_target), "error_code": session.error_code,
                 "last_observation": session.last_observation.model_dump() if hasattr(session.last_observation, "model_dump") else session.last_observation,
+                "last_observation_end_offset_ms": session.last_observation_end_offset_ms,
                 "state_tracker": session.last_state_tracker}
 
     def active_snapshot(self) -> list[dict[str, Any]]:
@@ -455,7 +559,13 @@ class VirtualCameraBridge:
         """Re-baseline active streams after history reset without stopping media."""
         for session in self.sessions.values():
             session.last_observation = None
+            session.last_observation_end_offset_ms = None
             session.last_state_tracker = None
+            session.last_observation_mono = None
+            session.quiet_probe_last_mono = None
+            session.quiet_probe_windows = 0
+            session.deferred_observation_windows.clear()
+            session.analysis_queue.clear()
             session.gate_event_keys.clear()
             session.last_gate_audio_level = None
             session.last_main_agent_mono = None

@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import Settings
-from .schemas import FocusReview, MainAgentJudgment, RecognitionEventCandidate, SceneDescription, VisualDescription, VisionObservation
+from .schemas import FocusReview, MainAgentJudgment, MainAgentPeriodSummary, RecognitionEventCandidate, ResidentAsrResult, ResidentInteractionReply, ResidentMemoryCandidate, ResidentUnderstandingInsight, SceneDescription, VisualDescription, VisionObservation
 
 
 @dataclass
@@ -174,6 +174,7 @@ class VllmVisionAdapter:
                 "person_actions": cls._string_list(raw.get("person_actions")), "changes": cls._string_list(raw.get("changes")),
                 "warnings": cls._string_list(raw.get("warnings")), "unknowns": cls._string_list(raw.get("unknowns")),
                 "confidence": cls._number(raw.get("confidence"), .35), "warning_level": raw.get("warning_level") if raw.get("warning_level") in {"none", "possible", "high"} else "none",
+                "risk_event_type": str(raw.get("risk_event_type", ""))[:80], "risk_confirmed": bool(raw.get("risk_confirmed", False)),
                 "schema_version": "visual-description.v1"}
 
     @classmethod
@@ -391,8 +392,9 @@ class VllmVisionAdapter:
             "warnings": {"type": "array", "maxItems": 12, "items": {"type": "string", "maxLength": 180}},
             "unknowns": {"type": "array", "maxItems": 12, "items": {"type": "string", "maxLength": 180}},
             "confidence": {"type": "number", "minimum": 0, "maximum": 1}, "warning_level": {"type": "string", "enum": ["none", "possible", "high"]},
+            "risk_event_type": {"type": "string", "maxLength": 80}, "risk_confirmed": {"type": "boolean"},
             "schema_version": {"type": "string"},
-        }, "required": ["description", "observed_facts", "visible_objects", "person_actions", "changes", "warnings", "unknowns", "confidence", "warning_level", "schema_version"], "additionalProperties": False}
+        }, "required": ["description", "observed_facts", "visible_objects", "person_actions", "changes", "warnings", "unknowns", "confidence", "warning_level", "risk_event_type", "risk_confirmed", "schema_version"], "additionalProperties": False}
 
     @staticmethod
     def _focus_schema() -> dict[str, Any]:
@@ -459,13 +461,15 @@ class VllmVisionAdapter:
             return AdapterResult("invalid", {"error": "empty_description_window"}, "VLLM_EMPTY_DESCRIPTION_WINDOW")
         encoded = [base64.b64encode(image).decode("ascii") for image in images]
         prompt = (
-            f"你是 Longcare 的 5fps action description worker。這是連續 2 秒、{len(images)} 張有序 frame；只描述這段時間人物或物品的動作與狀態變化。"
-            "不要重複場景 bootstrap 或 scene footnote；不要描述房間、牆面、地板、燈光、固定擺設、空間用途或未參與動作的物件。"
-            "description 必須是簡短的繁體中文動作摘要，例如『人物從坐姿站起並向右移動』或『人物拿起杯子靠近嘴邊』。"
-            "observed_facts 只能列動作事實；person_actions 只能列人物動作；visible_objects 只能列參與動作或狀態變化的物品；changes 只能列這段窗口新發生的動作／狀態變化。"
-            "若沒有觀察到人物或物品動作，description 填『這段窗口未觀察到人物或物品動作。』，其動作與 changes 陣列填空。"
-            "不要做最終風險裁決，不要把推測寫成事實；warnings 只保留與觀察到的動作直接相關的注意事項，unknowns 只保留影響動作判讀的未知。"
-            "只輸出 visual-description.v1 JSON。window=" + json.dumps(window, ensure_ascii=False, separators=(",", ":"))
+            f"你是 Longcare 的 5fps high-risk confirmation worker。這是連續 2 秒、{len(images)} 張有序 frame。"
+            "本窗口只因為前一層提出高風險候選才啟動；請只確認候選事件是否被這段連續影像支持。"
+            "不要重複場景 bootstrap 或 scene footnote；不要描述房間、牆面、地板、燈光、固定擺設或未參與事件的物件。"
+            "description 必須是一句簡短繁體中文，例如『人物倒地後持續躺在地面，符合疑似跌倒』或『人物只是坐下，未見跌倒證據』。"
+            "risk_event_type 必須回填候選事件類型；risk_confirmed=true 只有在連續 frame 直接支持候選高風險事件時才可使用。"
+            "warning_level=high 只代表候選事件被影像支持；若只是正常坐下、躺下或一般移動，請填 risk_confirmed=false、warning_level=none 或 possible。"
+            "observed_facts、person_actions、changes 只列與候選事件相關的短事實；warnings 只列高風險確認理由；unknowns 保留影像無法確認的部分。"
+            "只輸出 visual-description.v1 JSON。high_risk_candidate=" + str(window.get("high_risk_event_type", "unknown")) + "; window="
+            + json.dumps(window, ensure_ascii=False, separators=(",", ":"))
         )
         if scene_context:
             prompt += "場景註腳（背景參考，不可取代目前 frame evidence）：" + json.dumps(scene_context, ensure_ascii=False, separators=(",", ":"))
@@ -526,8 +530,9 @@ class VllmVisionAdapter:
             "若聽到清楚的人聲或 speech_activity，speech_detected=true 並把可辨識內容放入 speech_transcript；沒有清楚語音時 speech_detected=false、speech_transcript=\"\"、transcript_confidence=0。不要猜測聽不清楚的字，transcript_uncertainty_reasons 說明原因。"
             "event_candidates(array)：優先使用 fall/hydration 既有事件欄位；只有家庭聲音、人物活動、非人物物件等例外才新增候選。可用 event_type 包含 doorbell、door_knock、door_open、door_closed、fridge_open、fridge_closed、water_running、toilet_flush、washing_machine、microwave、rice_cooker、range_hood、dishes、impact_sound、cough、tv_audio、speech_activity、alarm_sound、person_present、person_walking、person_sitting、person_lying、person_entered、person_left、person_inactive、object_cup、object_bottle、object_phone、object_remote、object_bag、object_pet、object_vehicle、smoke、fire。只有有證據且 confidence >= 0.55 才列出，否則留在 uncertainty。"
             "若 request 提供 audio_url，audio_present 必須為 true；即使沒有辨識到聲音事件，audio_events 可以是空陣列並在 audio_uncertainty_reasons 說明。"
-            "輸出 change_detected(boolean)、change_confidence(0..1)、change_reasons(array) 與 change_summary(string)：只在相對於前一窗口有姿勢、人物、物件、聲音、光線或場景狀態變化時為 true；change_summary 必須用一句繁體中文簡短說明『觀察到的變化內容』，不要只寫『有變化』，沒有變化時填空字串。"
-            "輸出 warning_signal(none|possible|high)：只有有潛在危險或需進一步注意的證據才提高，不要把一般人物出現當警示。"
+            "輸出 change_detected(boolean)、change_confidence(0..1)、change_reasons(array) 與 change_summary(string)：只在相對於前一窗口有姿勢、人物、物件、聲音、光線或場景狀態變化時為 true；change_summary 必須用一句 60 字以內的繁體中文只說明『觀察到的變化內容』，例如『人物站起並向右走』，不要復述場景、不要只寫『有變化』，沒有變化時填空字串。"
+            "這份 JSON 是給後端狀態機的 compact signal；除必要的 posture、audio、risk 與 event candidate 外，不要填長篇說明。"
+            "輸出 warning_signal(none|possible|high)：只有有潛在危險或需進一步注意的證據才提高；high 只供高風險候選啟動 5fps 確認，不要把一般人物出現當警示。"
             "這不是單張判讀：只有跨 frame 的變化才支持 vertical_transition；不要僅因單張 lying 確認跌倒。"
         )
         if scene_context:
@@ -698,6 +703,241 @@ class VllmVisionAdapter:
             frames.append(buffer.getvalue())
         return await self.analyze_video(tuple(frames * 5), fps=2.0)
 
+    @staticmethod
+    def _period_summary_schema() -> dict[str, Any]:
+        return {"type": "object", "properties": {
+            "summary_text": {"type": "string", "maxLength": 2000},
+            "key_events": {"type": "array", "maxItems": 20, "items": {"type": "string", "maxLength": 240}},
+            "action_timeline": {"type": "array", "maxItems": 30, "items": {"type": "string", "maxLength": 240}},
+            "stable_states": {"type": "array", "maxItems": 20, "items": {"type": "string", "maxLength": 180}},
+            "unknowns": {"type": "array", "maxItems": 20, "items": {"type": "string", "maxLength": 240}},
+            "risk_level": {"type": "string", "enum": ["normal", "watch", "elevated", "urgent", "unknown"]},
+            "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+            "requires_follow_up": {"type": "boolean"}, "follow_up_reason": {"type": "string", "maxLength": 500},
+            "schema_version": {"type": "string"},
+        }, "required": ["summary_text", "key_events", "action_timeline", "stable_states", "unknowns", "risk_level", "confidence", "requires_follow_up", "follow_up_reason", "schema_version"], "additionalProperties": False}
+
+    @classmethod
+    def _normalize_period_summary(cls, raw: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+        summary = raw.get("summary_text") or raw.get("summary") or raw.get("situation_summary")
+        if not isinstance(summary, str) or not summary.strip():
+            summary = "這段期間沒有足夠證據確認值得注意的事件。"
+        risk = raw.get("risk_level", raw.get("risk", "unknown"))
+        if risk not in {"normal", "watch", "elevated", "urgent", "unknown"}:
+            risk = "unknown"
+        return {"summary_text": summary[:2000], "key_events": cls._string_list(raw.get("key_events") or raw.get("noteworthy_events"), 20),
+                "action_timeline": cls._string_list(raw.get("action_timeline") or raw.get("observed_actions"), 30),
+                "stable_states": cls._string_list(raw.get("stable_states") or raw.get("ongoing_states"), 20),
+                "unknowns": cls._string_list(raw.get("unknowns"), 20), "risk_level": risk,
+                "confidence": cls._number(raw.get("confidence"), .35), "requires_follow_up": bool(raw.get("requires_follow_up", False)),
+                "follow_up_reason": str(raw.get("follow_up_reason", ""))[:500], "schema_version": "main-agent-period-summary.v1"}
+
+    async def analyze_period_summary(self, context: dict[str, Any]) -> AdapterResult:
+        """Condense structured logs into a durable period digest; no raw media."""
+        prompt = (
+            "你是 Longcare 主 Agent 的週期摘要器。請閱讀提供的 structured logs、事件、動作描述、時間片段、轉錄與先前 Agent judgment，"
+            "把這段時間濃縮成全天照護者真正需要知道的重點。不要重新描述固定場景，不要捏造未出現的動作或事件，不要輸出 hidden chain-of-thought。"
+            "key_events 只放值得記住或需要追蹤的事件；action_timeline 要保留可用的時間／offset 與人物或物品動作；stable_states 只放持續狀態；"
+            "unknowns 要保留證據不足之處。沒有重要事件時明確寫『這段期間沒有確認的值得注意事件。』，不要為了填滿欄位而製造事件。"
+            "只輸出 main-agent-period-summary.v1 JSON。context=" + json.dumps(context, ensure_ascii=False, separators=(",", ":"))
+        )
+        content = [{"type": "text", "text": prompt}]
+        result = await self._structured_chat(content, name="main_agent_period_summary", schema=self._period_summary_schema(), max_tokens=900,
+                                             timeout=60, enable_thinking=self.settings.vllm_main_agent_enable_thinking)
+        if result.status != "healthy":
+            return result
+        try:
+            summary = MainAgentPeriodSummary.model_validate(self._normalize_period_summary(result.payload["raw"], context))
+            return AdapterResult("healthy", {"summary": summary.model_dump()}, None, result.latency_ms)
+        except Exception as exc:
+            return AdapterResult("invalid", {"error": type(exc).__name__}, "VLLM_INVALID_PERIOD_SUMMARY", result.latency_ms)
+
+    @staticmethod
+    def _resident_memory_schema() -> dict[str, Any]:
+        return {"type": "object", "properties": {
+            "memory_type": {"type": "string", "enum": ["preference", "routine", "avoidance", "accessibility", "interest", "communication", "important_event"]},
+            "title": {"type": "string", "maxLength": 120}, "content": {"type": "string", "maxLength": 600},
+            "confidence": {"type": "number", "minimum": 0, "maximum": 1}, "requires_confirmation": {"type": "boolean"},
+        }, "required": ["memory_type", "title", "content", "confidence", "requires_confirmation"], "additionalProperties": False}
+
+    @classmethod
+    def _resident_reply_schema(cls) -> dict[str, Any]:
+        return {"type": "object", "properties": {
+            "reply_text": {"type": "string", "maxLength": 1200},
+            "intent": {"type": "string", "enum": ["conversation", "question", "reminder", "confirmation", "clarification", "repeat", "stop", "forget", "memory_query", "help", "event_report", "preference_statement", "schedule_reminder", "proactive_settings", "emergency_response", "unknown"]},
+            "tone": {"type": "string", "enum": ["warm", "calm", "cheerful", "serious", "empathetic", "neutral"]},
+            "used_main_agent_context": {"type": "boolean"}, "memory_candidates": {"type": "array", "maxItems": 8, "items": cls._resident_memory_schema()},
+            "needs_follow_up": {"type": "boolean"}, "follow_up_question": {"type": ["string", "null"]},
+            "should_speak": {"type": "boolean"}, "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+            "safety_notes": {"type": "array", "maxItems": 8, "items": {"type": "string", "maxLength": 240}},
+            "reported_event_type": {"type": ["string", "null"], "maxLength": 80}, "reported_event_summary": {"type": ["string", "null"], "maxLength": 500},
+            "reminder_time": {"type": ["string", "null"], "maxLength": 120}, "reminder_text": {"type": ["string", "null"], "maxLength": 600},
+            "proactive_enabled": {"type": ["boolean", "null"]}, "proactive_interval_minutes": {"type": ["integer", "null"], "minimum": 30, "maximum": 1440},
+            "proactive_align_to_hour": {"type": ["boolean", "null"]},
+            "schema_version": {"type": "string"},
+        }, "required": ["reply_text", "intent", "tone", "used_main_agent_context", "memory_candidates", "needs_follow_up", "follow_up_question", "should_speak", "confidence", "safety_notes", "reported_event_type", "reported_event_summary", "reminder_time", "reminder_text", "proactive_enabled", "proactive_interval_minutes", "proactive_align_to_hour", "schema_version"], "additionalProperties": False}
+
+    @classmethod
+    def _resident_understanding_schema(cls) -> dict[str, Any]:
+        return {"type": "object", "properties": {
+            "observed_pattern": {"type": "string", "maxLength": 1000}, "user_perspective": {"type": "string", "maxLength": 1000},
+            "preference_hypotheses": {"type": "array", "maxItems": 12, "items": {"type": "string", "maxLength": 240}},
+            "state_hypotheses": {"type": "array", "maxItems": 12, "items": {"type": "string", "maxLength": 240}},
+            "memory_candidates": {"type": "array", "maxItems": 8, "items": cls._resident_memory_schema()},
+            "should_initiate": {"type": "boolean"}, "suggested_message": {"type": "string", "maxLength": 500},
+            "initiation_reasons": {"type": "array", "maxItems": 10, "items": {"type": "string", "maxLength": 240}},
+            "confidence": {"type": "number", "minimum": 0, "maximum": 1}, "requires_review": {"type": "boolean"}, "schema_version": {"type": "string"},
+        }, "required": ["observed_pattern", "user_perspective", "preference_hypotheses", "state_hypotheses", "memory_candidates", "should_initiate", "suggested_message", "initiation_reasons", "confidence", "requires_review", "schema_version"], "additionalProperties": False}
+
+    @classmethod
+    def _normalize_resident_reply(cls, raw: dict[str, Any]) -> dict[str, Any]:
+        memories = []
+        for item in raw.get("memory_candidates", []) if isinstance(raw.get("memory_candidates", []), list) else []:
+            if not isinstance(item, dict):
+                continue
+            try:
+                memories.append(ResidentMemoryCandidate.model_validate(item).model_dump())
+            except Exception:
+                continue
+        intent = raw.get("intent", "unknown")
+        if intent not in {"conversation", "question", "reminder", "confirmation", "clarification", "repeat", "stop", "forget", "memory_query", "help", "event_report", "preference_statement", "schedule_reminder", "proactive_settings", "emergency_response", "unknown"}:
+            intent = "unknown"
+        tone = raw.get("tone", "warm") if raw.get("tone") in {"warm", "calm", "cheerful", "serious", "empathetic", "neutral"} else "warm"
+        reply = str(raw.get("reply_text") or raw.get("response") or "我聽到了，但目前不確定該怎麼回答。請再說一次。")[:1200]
+        return {"reply_text": reply, "intent": intent, "tone": tone, "used_main_agent_context": bool(raw.get("used_main_agent_context", False)),
+                "memory_candidates": memories[:8], "needs_follow_up": bool(raw.get("needs_follow_up", False)),
+                "follow_up_question": raw.get("follow_up_question") if isinstance(raw.get("follow_up_question"), str) else None,
+                "should_speak": bool(raw.get("should_speak", True)), "confidence": cls._number(raw.get("confidence"), .35),
+                "safety_notes": cls._string_list(raw.get("safety_notes"), 8), "reported_event_type": str(raw.get("reported_event_type"))[:80] if raw.get("reported_event_type") else None,
+                "reported_event_summary": str(raw.get("reported_event_summary"))[:500] if raw.get("reported_event_summary") else None,
+                "reminder_time": str(raw.get("reminder_time"))[:120] if raw.get("reminder_time") else None,
+                "reminder_text": str(raw.get("reminder_text"))[:600] if raw.get("reminder_text") else None,
+                "proactive_enabled": raw.get("proactive_enabled") if isinstance(raw.get("proactive_enabled"), bool) else None,
+                "proactive_interval_minutes": int(raw.get("proactive_interval_minutes")) if isinstance(raw.get("proactive_interval_minutes"), (int, float)) and 30 <= int(raw.get("proactive_interval_minutes")) <= 1440 else None,
+                "proactive_align_to_hour": raw.get("proactive_align_to_hour") if isinstance(raw.get("proactive_align_to_hour"), bool) else None,
+                "schema_version": "resident-interaction-reply.v1"}
+
+    @classmethod
+    def _normalize_resident_understanding(cls, raw: dict[str, Any]) -> dict[str, Any]:
+        observed = str(raw.get("observed_pattern") or raw.get("observation") or "目前沒有足夠資料形成穩定偏好。")[:1000]
+        perspective = str(raw.get("user_perspective") or raw.get("if_i_were_user") or "目前沒有足夠資料推測使用者此刻希望收到什麼資訊。")[:1000]
+        if not observed.startswith("我觀察到"):
+            observed = "我觀察到：" + observed
+        if not perspective.startswith("如果我是使用者"):
+            perspective = "如果我是使用者：" + perspective
+        memories = []
+        for item in raw.get("memory_candidates", []) if isinstance(raw.get("memory_candidates", []), list) else []:
+            if not isinstance(item, dict):
+                continue
+            try:
+                item = {**item, "requires_confirmation": True}
+                memories.append(ResidentMemoryCandidate.model_validate(item).model_dump())
+            except Exception:
+                continue
+        return {"observed_pattern": observed, "user_perspective": perspective,
+                "preference_hypotheses": cls._string_list(raw.get("preference_hypotheses"), 12),
+                "state_hypotheses": cls._string_list(raw.get("state_hypotheses"), 12), "memory_candidates": memories[:8],
+                "should_initiate": bool(raw.get("should_initiate", False)), "suggested_message": str(raw.get("suggested_message", ""))[:500],
+                "initiation_reasons": cls._string_list(raw.get("initiation_reasons"), 10), "confidence": cls._number(raw.get("confidence"), .35),
+                "requires_review": True, "schema_version": "resident-understanding-insight.v1"}
+
+    @staticmethod
+    def _resident_intent(text: str, *, emergency_response: bool = False) -> str:
+        value = text.strip().lower()
+        if emergency_response:
+            return "emergency_response"
+        if any(token in value for token in ("停止", "不要說", "安靜", "先不用")):
+            return "stop"
+        if any(token in value for token in ("設定提醒", "定時提醒", "幾點提醒", "提醒我")):
+            return "schedule_reminder"
+        if any(token in value for token in ("忘記", "刪掉", "刪除")):
+            return "forget"
+        if any(token in value for token in ("我喜歡", "我不喜歡", "我的偏好", "習慣是")):
+            return "preference_statement"
+        if any(token in value for token in ("記錄", "記下", "剛剛發生", "今天有", "我發現")):
+            return "event_report"
+        if any(token in value for token in ("幫忙", "協助", "救命", "怎麼辦")):
+            return "help"
+        if "?" in value or "？" in value or any(token in value for token in ("什麼", "為什麼", "怎麼", "嗎", "哪裡")):
+            return "question"
+        return "conversation"
+
+    @staticmethod
+    def _resident_fallback(text: str, intent: str) -> str:
+        if intent == "question" and any(token in text for token in ("做什麼", "在做", "現在")):
+            return "我現在正在陪你聊天，也在幫你留意重要變化。你想和我聊什麼呢？"
+        if intent == "schedule_reminder":
+            return "可以，我可以幫你設定提醒。請告訴我時間和要提醒的事情。"
+        if intent == "help":
+            return "我在這裡，請告訴我需要什麼協助。"
+        if intent == "event_report":
+            return "我聽到了，我會先把這件事記下來，再和你確認細節。"
+        if intent == "preference_statement":
+            return "我記下你的偏好，之後會用它來調整提醒方式；需要更正時隨時告訴我。"
+        if intent == "stop":
+            return "好的，我先安靜下來。需要我時再叫我。"
+        if intent == "emergency_response":
+            return "我收到你的回應了，會繼續確認目前的狀況。"
+        return "我現在正在和你互動，也可以幫你回答問題、設定提醒或記錄事情。你想先做哪一件？"
+
+    async def analyze_resident_interaction(self, context: dict[str, Any]) -> AdapterResult:
+        current_input = str(context.get("current_user_input") or "").strip()
+        inferred_intent = self._resident_intent(current_input, emergency_response=bool(context.get("emergency_response")))
+        prompt = (
+            "你是同一個 Resident Interaction Agent 的 interaction driver，正在和長者進行簡短、尊重、容易理解的繁體中文對話。"
+            "最重要的輸入是 context.current_user_input，必須直接針對這一輪內容回答；conversation_history 與 main_agent_context 只是背景，不能用背景取代當輪問題。"
+            "你可以使用已由 backend allowlist 工具讀取的 main_agent_context 與 resident_memory，但只能把它們當背景注意事項，不可假裝是使用者剛說的話。"
+            "支援一般問答、提醒、確認、重複、澄清、求助、查詢記憶、忘記偏好、停止聆聽／停止說話、陳述事件、陳述偏好、設定定時提醒與調整主動互動設定等語音助理功能。"
+            "回覆要短、一次一件事、避免幼兒化語氣；健康問題只提供一般照護資訊並建議依既有流程確認，不做診斷。"
+            "使用者說停止時 intent=stop 且 should_speak=false；要求忘記時 intent=forget，不能假裝已刪除，必須交給 backend 執行。"
+            "若 context.high_risk_state.status 是 active、awaiting_response 或 confirmed，使用者輸入視為危急回應，只需簡短確認已收到，不要再建立一般提醒或主動互動設定。"
+            "使用者主動陳述的事件放在 reported_event_type/reported_event_summary；設定提醒時把時間正規化成 ISO 8601 或 HH:MM，並填 reminder_text。若使用者要調整主動互動，填 proactive_enabled、proactive_interval_minutes（至少 30 分鐘）與 proactive_align_to_hour。只有使用者明確表達或高信心時才提出 memory_candidates，預設 requires_confirmation=true。只輸出 resident-interaction-reply.v1 JSON。"
+            "\n\n【本輪使用者原話，最高優先，必須直接回答，不可回覆正在等待或請對方再說一次】\n"
+            + current_input[:2000]
+            + "\n\n【這些只是背景資料，不是新的使用者問題】\n"
+            + json.dumps(context, ensure_ascii=False, separators=(",", ":"))
+            + "\n\n【現在請完成這一輪對話】\n使用者："
+            + current_input[:2000]
+            + "\n助理：請直接回答使用者，不要說正在等待指示。"
+        )
+        result = await self._structured_chat([{"type": "text", "text": prompt}], name="resident_interaction_reply",
+                                             schema=self._resident_reply_schema(), max_tokens=700, timeout=60,
+                                             enable_thinking=self.settings.vllm_main_agent_enable_thinking)
+        if result.status != "healthy":
+            return result
+        try:
+            reply = ResidentInteractionReply.model_validate(self._normalize_resident_reply(result.payload["raw"]))
+            generic_reply = any(token in reply.reply_text for token in ("等待您的指示", "等待您的問題", "等待下一句", "等待您的下一句", "等待您的下句", "請提出問題", "準備好為您提供", "隨時為您提供幫助"))
+            if generic_reply:
+                reply = reply.model_copy(update={"reply_text": self._resident_fallback(current_input, inferred_intent),
+                                                 "intent": inferred_intent,
+                                                 "should_speak": inferred_intent != "stop"})
+            elif reply.intent == "unknown" and inferred_intent != "conversation":
+                reply = reply.model_copy(update={"intent": inferred_intent})
+            return AdapterResult("healthy", {"reply": reply.model_dump()}, None, result.latency_ms)
+        except Exception as exc:
+            return AdapterResult("invalid", {"error": type(exc).__name__}, "INVALID_RESIDENT_INTERACTION_REPLY", result.latency_ms)
+
+    async def analyze_resident_understanding(self, context: dict[str, Any]) -> AdapterResult:
+        prompt = (
+            "你是同一個 Resident Interaction Agent 的 understanding/motivation driver。你永遠不直接對使用者說話，也不能執行 TTS。"
+            "請從對話、事件、主 Agent 摘要與既有記憶歸納偏好與狀態，但全部視為可撤回 hypothesis。"
+            "observed_pattern 必須以『我觀察到』開始，user_perspective 必須以『如果我是使用者』開始。"
+            "判斷此刻使用者是否真的希望收到資訊；不要只因系統有資料就打擾。should_initiate=true 時必須提供 suggested_message 與具體 initiation_reasons。"
+            "所有 memory_candidates 都必須 requires_confirmation=true；只輸出 resident-understanding-insight.v1 JSON。context="
+            + json.dumps(context, ensure_ascii=False, separators=(",", ":"))
+        )
+        result = await self._structured_chat([{"type": "text", "text": prompt}], name="resident_understanding_insight",
+                                             schema=self._resident_understanding_schema(), max_tokens=900, timeout=60,
+                                             enable_thinking=self.settings.vllm_main_agent_enable_thinking)
+        if result.status != "healthy":
+            return result
+        try:
+            insight = ResidentUnderstandingInsight.model_validate(self._normalize_resident_understanding(result.payload["raw"]))
+            return AdapterResult("healthy", {"insight": insight.model_dump()}, None, result.latency_ms)
+        except Exception as exc:
+            return AdapterResult("invalid", {"error": type(exc).__name__}, "INVALID_RESIDENT_UNDERSTANDING", result.latency_ms)
+
     async def analyze_main_agent(self, images: tuple[bytes, ...] | list[bytes] | None, context: dict[str, Any],
                                  audio_pcm: bytes | None = None, mime_type: str = "image/jpeg") -> AdapterResult:
         """Run the main local agent on the same bounded evidence window.
@@ -761,6 +1001,77 @@ class VllmVisionAdapter:
                     os.unlink(transient_audio)
                 except FileNotFoundError:
                     pass
+
+
+class GmiAsrAdapter:
+    """Independent resident ASR adapter using the configured MiniMax M3 route.
+
+    Current GMI M3 audio support is empirically unavailable; this adapter keeps
+    the contract explicit and fails closed instead of inventing a transcript.
+    """
+
+    def __init__(self, settings: Settings):
+        self.settings = settings
+
+    async def transcribe(self, audio_bytes: bytes, mime_type: str = "audio/wav") -> AdapterResult:
+        if not audio_bytes:
+            return AdapterResult("invalid", {}, "ASR_EMPTY_AUDIO")
+        if not self.settings.minimax_configured:
+            return AdapterResult("unavailable", {"configured": False, "model": self.settings.minimax_model}, "MINIMAX_ASR_NOT_CONFIGURED")
+        encoded = base64.b64encode(audio_bytes).decode("ascii")
+        audio_format = "mp3" if "mpeg" in mime_type or "mp3" in mime_type else "wav"
+        content_variants = [
+            {"type": "input_audio", "input_audio": {"data": encoded, "format": audio_format}},
+            {"type": "audio_url", "audio_url": {"url": f"data:{mime_type};base64,{encoded}"}},
+        ]
+        endpoint_base = self.settings.minimax_base_url.rstrip("/")
+        endpoint = endpoint_base if endpoint_base.endswith("/v1") else f"{endpoint_base}/v1"
+        headers = {"Authorization": f"Bearer {self.settings.minimax_api_key}"} if self.settings.minimax_api_key else None
+        prompt = "Listen to the audio and return only JSON with speech_detected, transcript, language, confidence, uncertainty_reasons, schema_version. Never guess inaudible words."
+        last_error = "GMI_M3_AUDIO_NOT_ACCEPTED"
+        for audio_item in content_variants:
+            body = {"model": self.settings.minimax_model, "messages": [{"role": "user", "content": [{"type": "text", "text": prompt}, audio_item]}],
+                    "temperature": 0.0, "max_tokens": 300, "response_format": {"type": "json_object"}}
+            started = time.perf_counter()
+            try:
+                status, payload = await asyncio.to_thread(_http_json, "POST", f"{endpoint}/chat/completions", headers=headers, body=body, timeout=60)
+                raw = VllmVisionAdapter._extract_json(payload.get("choices", [{}])[0].get("message", {}).get("content", ""))
+                result = ResidentAsrResult.model_validate({"speech_detected": bool(raw.get("speech_detected", bool(raw.get("transcript")))),
+                    "transcript": str(raw.get("transcript", ""))[:2000], "language": str(raw.get("language", "unknown"))[:40],
+                    "confidence": VllmVisionAdapter._number(raw.get("confidence"), 0.0),
+                    "uncertainty_reasons": VllmVisionAdapter._string_list(raw.get("uncertainty_reasons"), 10), "schema_version": "resident-asr.v1"})
+                if status < 300 and result.speech_detected and result.transcript.strip():
+                    return AdapterResult("healthy", {"asr": result.model_dump(), "input_format": audio_item["type"]}, None, int((time.perf_counter() - started) * 1000))
+            except Exception as exc:
+                last_error = f"GMI_M3_ASR_{type(exc).__name__.upper()}"
+        return AdapterResult("unavailable", {"asr": ResidentAsrResult(speech_detected=False, transcript="", language="unknown", confidence=0.0,
+                              uncertainty_reasons=["GMI MiniMax M3 did not expose the supplied audio to the model"]).model_dump()}, last_error)
+
+
+class MiniMaxTtsAdapter:
+    def __init__(self, settings: Settings):
+        self.settings = settings
+
+    async def synthesize(self, text: str) -> AdapterResult:
+        if not self.settings.minimax_tts_configured:
+            return AdapterResult("unavailable", {"configured": False, "model": self.settings.minimax_tts_model}, "MINIMAX_TTS_NOT_CONFIGURED")
+        body = {"model": self.settings.minimax_tts_model, "text": text[:10000], "stream": False, "language_boost": "Chinese", "output_format": "hex",
+                "voice_setting": {"voice_id": self.settings.minimax_tts_voice_id, "speed": 0.95, "vol": 1.0, "pitch": 0},
+                "audio_setting": {"sample_rate": 32000, "bitrate": 128000, "format": "mp3", "channel": 1}}
+        headers = {"Authorization": f"Bearer {self.settings.minimax_tts_api_key}"}
+        started = time.perf_counter()
+        try:
+            status, payload = await asyncio.to_thread(_http_json, "POST", self.settings.minimax_tts_base_url, headers=headers, body=body, timeout=60)
+            base = payload.get("base_resp") or {}
+            audio_hex = (payload.get("data") or {}).get("audio", "")
+            if status >= 300 or base.get("status_code", 0) != 0 or not audio_hex:
+                return AdapterResult("invalid", {"configured": True, "trace_id": payload.get("trace_id")}, "MINIMAX_TTS_INVALID_RESPONSE", int((time.perf_counter() - started) * 1000))
+            audio_bytes = bytes.fromhex(audio_hex)
+            return AdapterResult("healthy", {"audio_bytes": audio_bytes, "mime_type": "audio/mpeg", "trace_id": payload.get("trace_id"),
+                                  "extra_info": payload.get("extra_info") or {}, "model": self.settings.minimax_tts_model,
+                                  "voice_id": self.settings.minimax_tts_voice_id}, None, int((time.perf_counter() - started) * 1000))
+        except (OSError, urllib.error.URLError, ValueError, TypeError) as exc:
+            return AdapterResult("unavailable", {"configured": True, "error": type(exc).__name__}, "MINIMAX_TTS_REQUEST_FAILED", int((time.perf_counter() - started) * 1000))
 
 
 class MiniMaxAdapter:
@@ -833,6 +1144,31 @@ class MiniMaxAdapter:
             return AdapterResult("healthy", result, None, int((time.perf_counter() - started) * 1000))
         except (OSError, urllib.error.URLError, ValueError, json.JSONDecodeError, KeyError, IndexError) as exc:
             return AdapterResult("degraded", self._local_result(summary, window), "MINIMAX_REQUEST_FAILED", int((time.perf_counter() - started) * 1000))
+
+    async def confirm_risk(self, *, event_type: str, focus_review: dict[str, Any], user_response: str | None = None) -> AdapterResult:
+        """Optional cloud tie-breaker after local focus review rejects a risk candidate."""
+        if not self.configured():
+            return AdapterResult("unavailable", {"configured": False, "event_type": event_type}, "MINIMAX_RISK_CONFIRM_NOT_CONFIGURED")
+        prompt = ("Return exactly one JSON object with keys confirmed (boolean), risk_level (normal|watch|elevated|urgent|unknown), "
+                  "confidence (0..1), reason (short string), schema_version (exactly risk-confirmation.v1). "
+                  "Use only the supplied focus review and optional resident response. This is not diagnosis and cannot authorize an action. "
+                  f"event_type={event_type}; focus_review=" + json.dumps(focus_review, ensure_ascii=False, separators=(",", ":")) +
+                  "; resident_response=" + json.dumps(user_response or "", ensure_ascii=False))
+        body = {"model": self.settings.minimax_model, "messages": [{"role": "user", "content": prompt}], "temperature": 0.0,
+                "max_tokens": 300, "chat_template_kwargs": {"enable_thinking": False}, "response_format": {"type": "json_object"}}
+        started = time.perf_counter()
+        try:
+            status, payload = await asyncio.to_thread(_http_json, "POST", f"{self.settings.minimax_base_url}/v1/chat/completions",
+                                                       headers={"Authorization": f"Bearer {self.settings.minimax_api_key}"}, body=body, timeout=30)
+            content = payload.get("choices", [{}])[0].get("message", {}).get("content", "")
+            result = VllmVisionAdapter._extract_json(content)
+            if status >= 300 or result.get("schema_version") != "risk-confirmation.v1" or not isinstance(result.get("confirmed"), bool):
+                return AdapterResult("invalid", {"raw": result}, "MINIMAX_RISK_CONFIRM_INVALID", int((time.perf_counter() - started) * 1000))
+            result["confidence"] = max(0.0, min(1.0, float(result.get("confidence", 0.0))))
+            result["event_type"] = event_type
+            return AdapterResult("healthy", result, None, int((time.perf_counter() - started) * 1000))
+        except (OSError, urllib.error.URLError, ValueError, json.JSONDecodeError, KeyError, IndexError, TypeError) as exc:
+            return AdapterResult("unavailable", {"event_type": event_type, "error": type(exc).__name__}, "MINIMAX_RISK_CONFIRM_FAILED", int((time.perf_counter() - started) * 1000))
 
 
 class TelegramAdapter:

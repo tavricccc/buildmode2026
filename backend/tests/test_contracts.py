@@ -184,8 +184,27 @@ class CareContractsTest(unittest.TestCase):
             adapter_module._http_json = original
         self.assertEqual(result.status, "healthy")
         prompt = captured["body"]["messages"][0]["content"][0]["text"]
-        self.assertIn("只描述這段時間人物或物品的動作與狀態變化", prompt)
+        self.assertIn("只確認候選事件是否被這段連續影像支持", prompt)
         self.assertIn("不要重複場景 bootstrap", prompt)
+
+    def test_period_summary_adapter_returns_durable_digest_contract(self):
+        original = adapter_module._http_json
+
+        def fake_http(method, url, **kwargs):
+            return 200, {"choices": [{"message": {"content": json.dumps({
+                "summary_text": "這段期間人物維持坐姿，未確認值得注意事件。",
+                "key_events": [], "action_timeline": ["12000–14000ms 人物拿起杯子"], "stable_states": ["人物坐著"],
+                "unknowns": ["畫面外不可觀測"], "risk_level": "normal", "confidence": .8,
+                "requires_follow_up": False, "follow_up_reason": "", "schema_version": "main-agent-period-summary.v1",
+            }, ensure_ascii=False)}}]}
+
+        adapter_module._http_json = fake_http
+        try:
+            result = asyncio.run(VllmVisionAdapter(self.store.settings).analyze_period_summary({"source_counts": {"events": 0}}))
+        finally:
+            adapter_module._http_json = original
+        self.assertEqual(result.status, "healthy")
+        self.assertEqual(result.payload["summary"]["schema_version"], "main-agent-period-summary.v1")
 
     def test_observation_evidence_keeps_window_offsets(self):
         observation = VisionObservation(observed_at_offset_ms=5000, person_visible=False, posture="unknown", vertical_transition="unknown", near_floor=False,
@@ -194,6 +213,10 @@ class CareContractsTest(unittest.TestCase):
         evidence = self.store.db.fetch_one("SELECT source_offset_start_ms,source_offset_end_ms,metadata_json FROM evidence WHERE id=?", (result["evidence_id"],))
         self.assertEqual((evidence["source_offset_start_ms"], evidence["source_offset_end_ms"]), (0, 5000))
         self.assertEqual(json.loads(evidence["metadata_json"])["frame_count"], 10)
+        observations = self.store.vision_observations(limit=12)
+        self.assertEqual(len(observations), 1)
+        self.assertEqual(observations[0]["end_offset_ms"], 5000)
+        self.assertEqual(observations[0]["observation_json"]["posture"], "unknown")
 
     def test_pcm_audio_is_wrapped_as_transient_wav_for_vllm(self):
         wav_bytes = VllmVisionAdapter._pcm_to_wav(b"\x00\x00" * 16000)

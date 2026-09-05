@@ -46,9 +46,12 @@ class Settings:
     vllm_window_stride_seconds: float = field(default_factory=lambda: float(os.getenv("VLLM_WINDOW_STRIDE_SECONDS", "5.0")))
     vllm_window_frames: int = field(default_factory=lambda: int(os.getenv("VLLM_WINDOW_FRAMES", "10")))
     vllm_max_frame_width: int = field(default_factory=lambda: int(os.getenv("VLLM_MAX_FRAME_WIDTH", "1280")))
-    vllm_max_concurrency: int = field(default_factory=lambda: max(1, int(os.getenv("VLLM_MAX_CONCURRENCY", "2"))))
-    vllm_max_pending_windows: int = field(default_factory=lambda: max(1, int(os.getenv("VLLM_MAX_PENDING_WINDOWS", "8"))))
-    observation_heartbeat_seconds: float = field(default_factory=lambda: max(0.0, float(os.getenv("OBSERVATION_HEARTBEAT_SECONDS", "15"))))
+    vllm_max_concurrency: int = field(default_factory=lambda: min(12, max(1, int(os.getenv("VLLM_MAX_CONCURRENCY", "12")))))
+    vllm_max_pending_windows: int = field(default_factory=lambda: max(12, int(os.getenv("VLLM_MAX_PENDING_WINDOWS", "48"))))
+    observation_heartbeat_seconds: float = field(default_factory=lambda: max(0.0, float(os.getenv("OBSERVATION_HEARTBEAT_SECONDS", "0"))))
+    observation_quiet_seconds: float = field(default_factory=lambda: max(10.0, float(os.getenv("OBSERVATION_QUIET_SECONDS", "30"))))
+    observation_quiet_sample_interval_seconds: float = field(default_factory=lambda: max(1.0, float(os.getenv("OBSERVATION_QUIET_SAMPLE_INTERVAL_SECONDS", "3"))))
+    observation_quiet_frames: int = field(default_factory=lambda: max(2, int(os.getenv("OBSERVATION_QUIET_FRAMES", "10"))))
     change_gate_threshold: float = field(default_factory=lambda: max(0.005, min(0.5, float(os.getenv("CHANGE_GATE_THRESHOLD", "0.06")))))
     change_gate_audio_delta_threshold: float = field(default_factory=lambda: max(0.005, min(0.5, float(os.getenv("CHANGE_GATE_AUDIO_DELTA_THRESHOLD", "0.06")))))
     change_gate_min_changed_pairs: int = field(default_factory=lambda: max(1, int(os.getenv("CHANGE_GATE_MIN_CHANGED_PAIRS", "2"))))
@@ -76,12 +79,31 @@ class Settings:
     main_agent_enabled: bool = field(default_factory=lambda: _bool("MAIN_AGENT_ENABLED", True))
     main_agent_max_pending: int = field(default_factory=lambda: max(1, int(os.getenv("MAIN_AGENT_MAX_PENDING", "6"))))
     main_agent_interval_seconds: float = field(default_factory=lambda: max(5.0, float(os.getenv("MAIN_AGENT_INTERVAL_SECONDS", "20"))))
+    agent_summary_interval_seconds: float = field(default_factory=lambda: max(60.0, float(os.getenv("AGENT_SUMMARY_INTERVAL_SECONDS", "600"))))
+    agent_hourly_summary_interval_seconds: float = field(default_factory=lambda: max(600.0, float(os.getenv("AGENT_HOURLY_SUMMARY_INTERVAL_SECONDS", "3600"))))
     main_agent_min_confidence: float = field(default_factory=lambda: float(os.getenv("MAIN_AGENT_MIN_CONFIDENCE", "0.55")))
     whisper_model: str = field(default_factory=lambda: os.getenv("WHISPER_MODEL", "small"))
     minimax_base_url: str = field(default_factory=lambda: os.getenv("MINIMAX_BASE_URL", "").rstrip("/"))
     minimax_api_key_file: str = field(default_factory=lambda: os.getenv("MINIMAX_API_KEY_FILE", ""))
     minimax_api_key: str = field(default_factory=lambda: os.getenv("MINIMAX_API_KEY", "") or _secret_from_file(os.getenv("MINIMAX_API_KEY_FILE", "")))
     minimax_model: str = field(default_factory=lambda: os.getenv("MINIMAX_MODEL", "MiniMaxAI/MiniMax-M3"))
+    minimax_tts_base_url: str = field(default_factory=lambda: os.getenv("MINIMAX_TTS_BASE_URL", "https://api.minimax.io/v1/t2a_v2").rstrip("/"))
+    minimax_tts_model: str = field(default_factory=lambda: os.getenv("MINIMAX_TTS_MODEL", "speech-2.8-turbo"))
+    minimax_tts_voice_id: str = field(default_factory=lambda: os.getenv("MINIMAX_TTS_VOICE_ID", "Chinese (Mandarin)_Warm_Bestie"))
+    minimax_tts_api_key_file: str = field(default_factory=lambda: os.getenv("MINIMAX_TTS_API_KEY_FILE", ""))
+    minimax_tts_api_key: str = field(default_factory=lambda: os.getenv("MINIMAX_TTS_API_KEY", "") or _secret_from_file(os.getenv("MINIMAX_TTS_API_KEY_FILE", "")))
+    local_tts_enabled: bool = field(default_factory=lambda: _bool("LOCAL_TTS_ENABLED", True))
+    local_tts_language: str = field(default_factory=lambda: os.getenv("LOCAL_TTS_LANGUAGE", "zh-TW"))
+    local_tts_rate: float = field(default_factory=lambda: max(0.5, min(2.0, float(os.getenv("LOCAL_TTS_RATE", "0.95")))))
+    tts_retention_minutes: int = field(default_factory=lambda: max(1, int(os.getenv("TTS_RETENTION_MINUTES", "60"))))
+    resident_understanding_interval_seconds: float = field(default_factory=lambda: max(60.0, float(os.getenv("RESIDENT_UNDERSTANDING_INTERVAL_SECONDS", "300"))))
+    resident_proactive_speech_enabled: bool = field(default_factory=lambda: _bool("RESIDENT_PROACTIVE_SPEECH_ENABLED", False))
+    resident_proactive_cooldown_minutes: int = field(default_factory=lambda: max(1, int(os.getenv("RESIDENT_PROACTIVE_COOLDOWN_MINUTES", "30"))))
+    resident_proactive_interval_seconds: float = field(default_factory=lambda: max(60.0, float(os.getenv("RESIDENT_PROACTIVE_INTERVAL_SECONDS", "1800"))))
+    resident_proactive_align_to_hour: bool = field(default_factory=lambda: _bool("RESIDENT_PROACTIVE_ALIGN_TO_HOUR", False))
+    resident_display_name: str = field(default_factory=lambda: os.getenv("RESIDENT_DISPLAY_NAME", "阿嬤"))
+    high_risk_repeat_question_seconds: float = field(default_factory=lambda: max(5.0, float(os.getenv("HIGH_RISK_REPEAT_QUESTION_SECONDS", "20"))))
+    high_risk_no_response_seconds: float = field(default_factory=lambda: max(30.0, float(os.getenv("HIGH_RISK_NO_RESPONSE_SECONDS", "60"))))
     telegram_bot_token: str = field(default_factory=lambda: os.getenv("TELEGRAM_BOT_TOKEN", ""))
     telegram_allowed_chat_ids: tuple[str, ...] = field(default_factory=lambda: tuple(x.strip() for x in os.getenv("TELEGRAM_ALLOWED_CHAT_IDS", "").split(",") if x.strip()))
     telegram_poll_timeout_sec: int = field(default_factory=lambda: int(os.getenv("TELEGRAM_POLL_TIMEOUT_SEC", "20")))
@@ -148,6 +170,10 @@ class Settings:
     @property
     def telegram_configured(self) -> bool:
         return bool(self.telegram_bot_token and self.telegram_allowed_chat_ids)
+
+    @property
+    def minimax_tts_configured(self) -> bool:
+        return bool(self.minimax_tts_base_url and self.minimax_tts_api_key)
 
 
 _settings: Settings | None = None

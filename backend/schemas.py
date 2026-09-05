@@ -90,6 +90,8 @@ class VisualDescription(BaseModel):
     unknowns: list[str] = Field(default_factory=list, max_length=12)
     confidence: float = Field(ge=0, le=1)
     warning_level: WarningLevel = "none"
+    risk_event_type: str = Field(default="", max_length=80)
+    risk_confirmed: bool = False
     schema_version: str = "visual-description.v1"
 
 
@@ -161,6 +163,100 @@ class MainAgentJudgment(BaseModel):
     schema_version: str = "main-agent-judgment.v1"
 
 
+class MainAgentPeriodSummary(BaseModel):
+    """Compact, durable digest used to carry important events across a day."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    summary_text: str = Field(min_length=1, max_length=2000)
+    key_events: list[str] = Field(default_factory=list, max_length=20)
+    action_timeline: list[str] = Field(default_factory=list, max_length=30)
+    stable_states: list[str] = Field(default_factory=list, max_length=20)
+    unknowns: list[str] = Field(default_factory=list, max_length=20)
+    risk_level: RiskLevel
+    confidence: float = Field(ge=0, le=1)
+    requires_follow_up: bool = False
+    follow_up_reason: str = Field(default="", max_length=500)
+    schema_version: str = "main-agent-period-summary.v1"
+
+
+class ResidentMemoryCandidate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    memory_type: Literal["preference", "routine", "avoidance", "accessibility", "interest", "communication", "important_event"]
+    title: str = Field(min_length=1, max_length=120)
+    content: str = Field(min_length=1, max_length=600)
+    confidence: float = Field(ge=0, le=1)
+    requires_confirmation: bool = True
+
+
+class ResidentInteractionReply(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reply_text: str = Field(min_length=1, max_length=1200)
+    intent: Literal["conversation", "question", "reminder", "confirmation", "clarification", "repeat", "stop", "forget", "memory_query", "help", "event_report", "preference_statement", "schedule_reminder", "proactive_settings", "emergency_response", "unknown"] = "unknown"
+    tone: Literal["warm", "calm", "cheerful", "serious", "empathetic", "neutral"] = "warm"
+    used_main_agent_context: bool = False
+    memory_candidates: list[ResidentMemoryCandidate] = Field(default_factory=list, max_length=8)
+    needs_follow_up: bool = False
+    follow_up_question: str | None = Field(default=None, max_length=300)
+    should_speak: bool = True
+    confidence: float = Field(ge=0, le=1)
+    safety_notes: list[str] = Field(default_factory=list, max_length=8)
+    reported_event_type: str | None = Field(default=None, max_length=80)
+    reported_event_summary: str | None = Field(default=None, max_length=500)
+    reminder_time: str | None = Field(default=None, max_length=120)
+    reminder_text: str | None = Field(default=None, max_length=600)
+    proactive_enabled: bool | None = None
+    proactive_interval_minutes: int | None = Field(default=None, ge=30, le=1440)
+    proactive_align_to_hour: bool | None = None
+    schema_version: str = "resident-interaction-reply.v1"
+
+
+class ResidentUnderstandingInsight(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    observed_pattern: str = Field(min_length=1, max_length=1000)
+    user_perspective: str = Field(min_length=1, max_length=1000)
+    preference_hypotheses: list[str] = Field(default_factory=list, max_length=12)
+    state_hypotheses: list[str] = Field(default_factory=list, max_length=12)
+    memory_candidates: list[ResidentMemoryCandidate] = Field(default_factory=list, max_length=8)
+    should_initiate: bool = False
+    suggested_message: str = Field(default="", max_length=500)
+    initiation_reasons: list[str] = Field(default_factory=list, max_length=10)
+    confidence: float = Field(ge=0, le=1)
+    requires_review: bool = True
+    schema_version: str = "resident-understanding-insight.v1"
+
+
+class ResidentAsrResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    speech_detected: bool
+    transcript: str = Field(default="", max_length=2000)
+    language: str = Field(default="unknown", max_length=40)
+    confidence: float = Field(ge=0, le=1)
+    uncertainty_reasons: list[str] = Field(default_factory=list, max_length=10)
+    schema_version: str = "resident-asr.v1"
+
+
+class ResidentMessageRequest(BaseModel):
+    text: str | None = Field(default=None, min_length=1, max_length=2000)
+    conversation_id: str | None = Field(default=None, max_length=100)
+    speak: bool = True
+    audio_base64: str | None = Field(default=None, max_length=2_000_000)
+    asr_only: bool = False
+    emergency_response: bool = False
+
+
+class ResidentMemoryUpdateRequest(BaseModel):
+    action: Literal["confirm", "invalidate"]
+
+
+class HighRiskResolveRequest(BaseModel):
+    reason: str = Field(default="operator_resolved", max_length=300)
+
+
 class EventEnvelope(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -208,6 +304,20 @@ class SetupSettingsPatch(BaseModel):
     minimax_base_url: str | None = None
     minimax_model: str | None = None
     minimax_api_key: str | None = None
+    local_tts_enabled: bool | None = None
+    local_tts_language: str | None = Field(default=None, max_length=20)
+    local_tts_rate: float | None = Field(default=None, ge=0.5, le=2.0)
+    agent_summary_interval_seconds: float | None = Field(default=None, ge=60, le=86400)
+    agent_hourly_summary_interval_seconds: float | None = Field(default=None, ge=600, le=172800)
+    observation_quiet_seconds: float | None = Field(default=None, ge=10, le=3600)
+    observation_quiet_sample_interval_seconds: float | None = Field(default=None, ge=1, le=30)
+    observation_quiet_frames: int | None = Field(default=None, ge=2, le=60)
+    resident_proactive_speech_enabled: bool | None = None
+    resident_proactive_interval_seconds: float | None = Field(default=None, ge=60, le=86400)
+    resident_proactive_align_to_hour: bool | None = None
+    resident_display_name: str | None = Field(default=None, max_length=80)
+    high_risk_repeat_question_seconds: float | None = Field(default=None, ge=5, le=300)
+    high_risk_no_response_seconds: float | None = Field(default=None, ge=30, le=3600)
     telegram_bot_token: str | None = None
     telegram_allowed_chat_ids: list[str] | None = None
 

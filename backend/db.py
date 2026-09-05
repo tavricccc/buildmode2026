@@ -66,6 +66,61 @@ CREATE TABLE IF NOT EXISTS agent_run_events (
 );
 CREATE INDEX IF NOT EXISTS idx_agent_run_events_run_sequence ON agent_run_events(agent_run_id, sequence);
 CREATE INDEX IF NOT EXISTS idx_agent_run_events_subject_time ON agent_run_events(subject_id, occurred_at);
+CREATE TABLE IF NOT EXISTS agent_period_summaries (
+  id TEXT PRIMARY KEY, subject_id TEXT NOT NULL, window_start TEXT NOT NULL, window_end TEXT NOT NULL,
+  summary_text TEXT NOT NULL, key_events_json TEXT NOT NULL DEFAULT '[]', action_timeline_json TEXT NOT NULL DEFAULT '[]',
+  stable_states_json TEXT NOT NULL DEFAULT '[]', unknowns_json TEXT NOT NULL DEFAULT '[]',
+  risk_level TEXT NOT NULL, confidence REAL NOT NULL, requires_follow_up INTEGER NOT NULL DEFAULT 0,
+  follow_up_reason TEXT NOT NULL DEFAULT '', source_counts_json TEXT NOT NULL DEFAULT '{}',
+  summary_type TEXT NOT NULL DEFAULT 'ten_minute', status TEXT NOT NULL, model_call_id TEXT REFERENCES model_calls(id), created_at TEXT NOT NULL,
+  dedup_key TEXT NOT NULL UNIQUE
+);
+CREATE INDEX IF NOT EXISTS idx_agent_period_summaries_subject_time ON agent_period_summaries(subject_id, window_end);
+CREATE TABLE IF NOT EXISTS resident_agent_runs (
+  id TEXT PRIMARY KEY, subject_id TEXT NOT NULL, conversation_id TEXT,
+  driver TEXT NOT NULL CHECK(driver IN ('interaction','understanding')), trigger_type TEXT NOT NULL,
+  status TEXT NOT NULL, action TEXT NOT NULL, input_json TEXT NOT NULL, output_json TEXT,
+  provider TEXT NOT NULL, model TEXT NOT NULL, latency_ms INTEGER, error_code TEXT,
+  created_at TEXT NOT NULL, completed_at TEXT, dedup_key TEXT NOT NULL UNIQUE
+);
+CREATE INDEX IF NOT EXISTS idx_resident_agent_runs_subject_time ON resident_agent_runs(subject_id, created_at);
+CREATE TABLE IF NOT EXISTS resident_messages (
+  id TEXT PRIMARY KEY, subject_id TEXT NOT NULL, conversation_id TEXT NOT NULL,
+  role TEXT NOT NULL CHECK(role IN ('user','assistant','system')), text TEXT NOT NULL,
+  intent TEXT, run_id TEXT, asr_status TEXT, tts_artifact_id TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_resident_messages_conversation_time ON resident_messages(conversation_id, created_at);
+CREATE TABLE IF NOT EXISTS resident_reminders (
+  id TEXT PRIMARY KEY, subject_id TEXT NOT NULL, conversation_id TEXT NOT NULL,
+  message TEXT NOT NULL, schedule_text TEXT NOT NULL, next_trigger_at TEXT,
+  status TEXT NOT NULL DEFAULT 'pending', source_run_id TEXT, triggered_at TEXT,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, dedup_key TEXT NOT NULL UNIQUE
+);
+CREATE INDEX IF NOT EXISTS idx_resident_reminders_due ON resident_reminders(subject_id, status, next_trigger_at);
+CREATE TABLE IF NOT EXISTS resident_memories (
+  id TEXT PRIMARY KEY, subject_id TEXT NOT NULL, memory_type TEXT NOT NULL,
+  title TEXT NOT NULL, content_text TEXT NOT NULL, attributes_json TEXT NOT NULL DEFAULT '{}',
+  confidence REAL NOT NULL, status TEXT NOT NULL, requires_confirmation INTEGER NOT NULL DEFAULT 1,
+  source_driver TEXT NOT NULL, source_run_id TEXT, confirmed_at TEXT, invalidated_at TEXT,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, dedup_key TEXT NOT NULL UNIQUE
+);
+CREATE INDEX IF NOT EXISTS idx_resident_memories_subject_status ON resident_memories(subject_id, status, updated_at);
+CREATE TABLE IF NOT EXISTS resident_understanding_insights (
+  id TEXT PRIMARY KEY, subject_id TEXT NOT NULL, run_id TEXT NOT NULL,
+  observed_pattern TEXT NOT NULL, user_perspective TEXT NOT NULL,
+  preference_hypotheses_json TEXT NOT NULL DEFAULT '[]', state_hypotheses_json TEXT NOT NULL DEFAULT '[]',
+  should_initiate INTEGER NOT NULL DEFAULT 0, suggested_message TEXT NOT NULL DEFAULT '',
+  initiation_reasons_json TEXT NOT NULL DEFAULT '[]', confidence REAL NOT NULL,
+  policy_json TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_resident_insights_subject_time ON resident_understanding_insights(subject_id, created_at);
+CREATE TABLE IF NOT EXISTS tts_artifacts (
+  id TEXT PRIMARY KEY, subject_id TEXT NOT NULL, run_id TEXT, model TEXT NOT NULL, voice_id TEXT NOT NULL,
+  text_hash TEXT NOT NULL, mime_type TEXT NOT NULL, path TEXT, bytes INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL, error_code TEXT, created_at TEXT NOT NULL, expires_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_tts_artifacts_expiry ON tts_artifacts(expires_at, status);
 CREATE TABLE IF NOT EXISTS agent_notes (
   id TEXT PRIMARY KEY, subject_id TEXT NOT NULL,
   layer TEXT NOT NULL CHECK(layer IN ('decision','abstraction','research')),
@@ -95,10 +150,20 @@ CREATE TABLE IF NOT EXISTS visual_descriptions (
   description_text TEXT NOT NULL, facts_json TEXT NOT NULL DEFAULT '[]', objects_json TEXT NOT NULL DEFAULT '[]',
   actions_json TEXT NOT NULL DEFAULT '[]', changes_json TEXT NOT NULL DEFAULT '[]', warnings_json TEXT NOT NULL DEFAULT '[]',
   unknowns_json TEXT NOT NULL DEFAULT '[]', confidence REAL NOT NULL, warning_level TEXT NOT NULL DEFAULT 'none',
+  risk_event_type TEXT NOT NULL DEFAULT '', risk_confirmed INTEGER NOT NULL DEFAULT 0,
   model_call_id TEXT REFERENCES model_calls(id), scene_context_id TEXT REFERENCES scene_contexts(id),
   created_at TEXT NOT NULL, dedup_key TEXT NOT NULL UNIQUE
 );
 CREATE INDEX IF NOT EXISTS idx_visual_descriptions_stream_time ON visual_descriptions(stream_id, start_offset_ms);
+CREATE TABLE IF NOT EXISTS vision_observations (
+  id TEXT PRIMARY KEY, subject_id TEXT NOT NULL, stream_id TEXT NOT NULL, window_id TEXT NOT NULL,
+  start_offset_ms INTEGER NOT NULL, end_offset_ms INTEGER NOT NULL, observed_at TEXT NOT NULL,
+  summary_text TEXT NOT NULL DEFAULT '', warning_signal TEXT NOT NULL DEFAULT 'none',
+  observation_json TEXT NOT NULL, model_call_id TEXT REFERENCES model_calls(id), created_at TEXT NOT NULL,
+  dedup_key TEXT NOT NULL UNIQUE
+);
+CREATE INDEX IF NOT EXISTS idx_vision_observations_subject_time ON vision_observations(subject_id, observed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_vision_observations_stream_time ON vision_observations(stream_id, end_offset_ms DESC);
 CREATE TABLE IF NOT EXISTS focus_reviews (
   id TEXT PRIMARY KEY, subject_id TEXT NOT NULL, stream_id TEXT NOT NULL,
   window_id TEXT NOT NULL, trigger_window_id TEXT, abnormal INTEGER NOT NULL,
@@ -265,6 +330,14 @@ class Database:
                 conn.execute("ALTER TABLE virtual_camera_streams ADD COLUMN media_path TEXT")
             if "media_retention_seconds" not in columns:
                 conn.execute("ALTER TABLE virtual_camera_streams ADD COLUMN media_retention_seconds INTEGER NOT NULL DEFAULT 60")
+            description_columns = {row["name"] for row in conn.execute("PRAGMA table_info(visual_descriptions)").fetchall()}
+            if "risk_event_type" not in description_columns:
+                conn.execute("ALTER TABLE visual_descriptions ADD COLUMN risk_event_type TEXT NOT NULL DEFAULT ''")
+            if "risk_confirmed" not in description_columns:
+                conn.execute("ALTER TABLE visual_descriptions ADD COLUMN risk_confirmed INTEGER NOT NULL DEFAULT 0")
+            summary_columns = {row["name"] for row in conn.execute("PRAGMA table_info(agent_period_summaries)").fetchall()}
+            if "summary_type" not in summary_columns:
+                conn.execute("ALTER TABLE agent_period_summaries ADD COLUMN summary_type TEXT NOT NULL DEFAULT 'ten_minute'")
             conn.execute("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(1, datetime('now'))")
             conn.commit()
         finally:

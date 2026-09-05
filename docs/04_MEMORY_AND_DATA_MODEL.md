@@ -52,6 +52,8 @@ Unknown 不能被記憶成「沒有」。Hypothesis 必須引用 supporting obse
 
 只有 exception recognition event 才使用 `recognition_events`，欄位形狀仍保持相同語意：id、subject、type、domain、label、status、time、confidence、attributes、window、model call、dedup。
 
+住民互動中的明確要求（詢問、提醒、確認、澄清、重複、停止、忘記／刪除、記憶查詢、求助）也以 `event_type=user_request` 寫入 `recognition_events`，`domain=resident_interaction`。事件只代表「使用者提出了要求」，`action_executed=false`；實際提醒、刪除、通知或其他行動仍須通過後端 policy。普通寒暄與無法辨識的語句不建立要求事件。
+
 ## 5. Provenance 與 retention
 
 - 每筆 Observation 反查 `evidence`、window offsets、model、prompt/schema version。

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import io
 import json
@@ -19,13 +20,19 @@ from fastapi.responses import JSONResponse
 
 from .agent import MainAgentPolicy, build_main_agent_context, build_main_agent_notes, evaluate_change_gate
 from .adapters import FrigateAdapter, MiniMaxAdapter, TelegramAdapter, VllmVisionAdapter
+from .resident import ResidentInteractionAgent
 from .change_gate import detect_frame_change, observation_override_reasons
 from .config import get_settings
 from .db import Database
 from .frigate_mqtt import FrigateMqttWorker
 from .media_stream import VirtualCameraBridge
 from .replay import ReplayManager
-from .schemas import AudioTranscriptRequest, CaptureStatusRequest, FrigateEventRequest, HealthScenarioRequest, MainAgentJudgment, ModelDownloadRequest, ReplayLoadRequest, SetupSettingsPatch, SourceActivateRequest, VadActivityRequest, WindowRequest, VisionObservation
+from .schemas import (
+    AudioTranscriptRequest, CaptureStatusRequest, FrigateEventRequest, HealthScenarioRequest,
+    MainAgentJudgment, ModelDownloadRequest, ReplayLoadRequest, SetupSettingsPatch,
+    SourceActivateRequest, VadActivityRequest, WindowRequest, VisionObservation,
+    ResidentMemoryUpdateRequest, ResidentMessageRequest, HighRiskResolveRequest,
+)
 from .store import Store, make_id, now_iso, parse_dt
 
 
@@ -75,9 +82,15 @@ main_agent_health: dict[str, Any] = {"status": "disabled" if not settings.main_a
 # One shared semaphore lets observation and main-agent calls run concurrently
 # while keeping the total number of in-flight Omni requests bounded.
 vllm_semaphore = asyncio.Semaphore(settings.vllm_max_concurrency)
+resident_agent = ResidentInteractionAgent(settings, store, vision=vllm, inference_semaphore=vllm_semaphore)
 main_agent_tasks: set[asyncio.Task] = set()
 main_agent_policy = MainAgentPolicy(settings)
 scene_locks: dict[str, asyncio.Lock] = {}
+periodic_summary_task: asyncio.Task | None = None
+hourly_summary_task: asyncio.Task | None = None
+resident_understanding_task: asyncio.Task | None = None
+resident_proactive_task: asyncio.Task | None = None
+high_risk_monitor_task: asyncio.Task | None = None
 
 
 async def ensure_scene_context(session, image_bytes: tuple[bytes, ...], window: dict[str, Any]) -> dict[str, Any]:
@@ -120,6 +133,143 @@ def session_observation_overrides(session) -> list[str]:
         hydration_session_open=bool((store.get_state("hydration_state") or {}).get("event_id")))
 
 
+HIGH_RISK_EVENT_TYPES = {"fall", "fire", "smoke", "alarm_sound", "impact_sound"}
+HIGH_RISK_EVENT_LABELS = {"fall": "跌倒", "fire": "火災或火焰", "smoke": "煙霧", "alarm_sound": "警報聲", "impact_sound": "撞擊聲"}
+
+
+def high_risk_candidate(observation: VisionObservation) -> dict[str, Any] | None:
+    candidates = [item for item in observation.event_candidates if item.event_type in HIGH_RISK_EVENT_TYPES and item.confidence >= 0.55]
+    if candidates:
+        candidate = max(candidates, key=lambda item: item.confidence)
+        return {"event_type": candidate.event_type, "label": candidate.label, "confidence": candidate.confidence,
+                "reason": "; ".join(candidate.uncertainty_reasons) or f"Observation 提出 {candidate.label} 高風險候選"}
+    if observation.warning_signal == "high":
+        if observation.vertical_transition == "down" or observation.near_floor or observation.posture == "lying":
+            return {"event_type": "fall", "label": "疑似跌倒", "confidence": observation.confidence,
+                    "reason": "Observation 的垂直下降、接近地面或躺姿與高風險訊號一致"}
+        if any(str(item).lower() in {"fire", "smoke", "alarm_sound", "impact_sound"} for item in observation.audio_events):
+            event_type = next((str(item).lower() for item in observation.audio_events if str(item).lower() in HIGH_RISK_EVENT_TYPES), "alarm_sound")
+            return {"event_type": event_type, "label": event_type, "confidence": observation.audio_confidence or observation.confidence,
+                    "reason": "Observation 回報高風險環境聲音"}
+    return None
+
+
+def compact_observation_summary(observation: VisionObservation) -> str:
+    """One-line change-only text for realtime UI; full record stays in SQLite."""
+    if observation.change_summary and "場景" not in observation.change_summary:
+        return observation.change_summary[:240]
+    if observation.vertical_transition == "up":
+        return "人物站起。"
+    if observation.vertical_transition == "down":
+        return "人物坐下或向下移動。"
+    if observation.drinking_motion:
+        return "人物拿著容器靠近嘴邊並有飲用動作。"
+    if observation.audio_events:
+        return f"偵測到聲音變化：{'、'.join(observation.audio_events[:3])}。"
+    if observation.change_detected:
+        return "偵測到人物或物品動作變化。"
+    return "這段窗口未觀察到人物或物品動作。"
+
+
+def _high_risk_question(event_label: str) -> str:
+    return f"{settings.resident_display_name}還好嗎？是否發生{event_label}呢？"
+
+
+async def start_high_risk_flow(session, window: dict[str, Any], description: dict[str, Any]) -> dict[str, Any]:
+    existing = store.high_risk_state()
+    if existing.get("status") in {"active", "awaiting_response", "confirmed"}:
+        return existing
+    event_type = str(description.get("risk_event_type") or window.get("high_risk_event_type") or "high_risk")
+    event_label = str(window.get("high_risk_label") or event_type)
+    if event_label == event_type or event_label == "high_risk":
+        event_label = HIGH_RISK_EVENT_LABELS.get(event_type, event_type)
+    started = datetime.now(timezone.utc)
+    question = _high_risk_question(event_label)
+    state = store.begin_high_risk(
+        stream_id=session.id, source_window_id=window.get("trigger_window_id") or window.get("window_id", ""),
+        event_type=event_type, event_label=event_label, confidence=float(description.get("confidence", 0)),
+        reason="；".join(description.get("warnings") or description.get("changes") or []) or "5 FPS 連續影像支持高風險候選",
+        question=question, started_at=started.isoformat(),
+        response_deadline_at=(started + timedelta(seconds=settings.high_risk_no_response_seconds)).isoformat(),
+        next_question_at=(started + timedelta(seconds=settings.high_risk_repeat_question_seconds)).isoformat())
+    if state.get("source_window_id") != (window.get("trigger_window_id") or window.get("window_id", "")):
+        return state
+    focus_context = {"high_risk_state": state, "high_risk_event_type": event_type, "high_risk_label": event_label,
+                     "trigger_window": {key: window.get(key) for key in ("window_id", "start_offset_ms", "end_offset_ms", "frame_count")},
+                     "risk_description": description}
+    focus_snapshot = media_bridge.request_focus(session, reason=f"high_risk:{event_type}",
+                                                 source_window_id=window.get("trigger_window_id") or window.get("window_id", ""),
+                                                 context=focus_context)
+    state = store.update_high_risk(focus_requested=True, focus_context=focus_context,
+                                   focus_snapshot={key: focus_snapshot.get(key) for key in ("focus_windows", "focus_pending", "focus_requested")})
+    store.add_resident_message(conversation_id="default", role="assistant", text=question,
+                               intent="emergency_response", asr_status="not_applicable")
+    store.record_tool_call("resident_interaction", "ask_high_risk_question",
+                           {"event_type": event_type, "question_count": 1},
+                           {"question": question, "action_executed": False})
+    await broadcaster.send({"type": "high_risk.confirmed", "correlation_id": window.get("window_id"),
+                            "payload": {"stream_id": session.id, "window_id": window.get("window_id"), "state": state,
+                                        "risk_event_type": event_type, "risk_label": event_label,
+                                        "focus": focus_snapshot, "action_executed": False}})
+    await broadcaster.send({"type": "resident.emergency.question", "correlation_id": window.get("window_id"),
+                            "payload": {"question": question, "event_type": event_type, "event_label": event_label,
+                                        "question_count": state.get("question_count", 1), "state": state,
+                                        "speak_mode": "browser_local", "action_executed": False}})
+    return state
+
+
+async def finish_high_risk_flow(*, status: str, reason: str) -> dict[str, Any]:
+    state = store.finish_high_risk(status=status, reason=reason)
+    await broadcaster.send({"type": "high_risk.resolved", "correlation_id": state.get("source_window_id"),
+                            "payload": {"state": state, "action_executed": False}})
+    session = media_bridge.sessions.get(state.get("stream_id"))
+    if session:
+        deferred = media_bridge.release_deferred_observations(session)
+        if deferred:
+            await broadcaster.send({"type": "observation.backfill.started", "correlation_id": state.get("stream_id"),
+                                    "payload": {"stream_id": state.get("stream_id"), "count": len(deferred)}})
+            for item in deferred:
+                await handle_vllm_window(session, item["images"], {**item["window"], "backfill": True,
+                                                                     "stage": "observation_backfill"}, item.get("audio_pcm"))
+            await broadcaster.send({"type": "observation.backfill.completed", "correlation_id": state.get("stream_id"),
+                                    "payload": {"stream_id": state.get("stream_id"), "count": len(deferred)}})
+    return state
+
+
+async def high_risk_monitor_loop() -> None:
+    while True:
+        await asyncio.sleep(5)
+        try:
+            state = store.high_risk_state()
+            if state.get("status") not in {"active", "awaiting_response", "confirmed"} or state.get("response_received_at"):
+                continue
+            now = datetime.now(timezone.utc)
+            deadline = parse_dt(state.get("response_deadline_at"))
+            next_question = parse_dt(state.get("next_question_at"))
+            if deadline and now >= deadline:
+                state = store.update_high_risk(status="confirmed", confirmation_reason="no_response_after_deadline",
+                                               confirmed_at=now.isoformat())
+                await broadcaster.send({"type": "high_risk.confirmed_no_response", "correlation_id": state.get("source_window_id"),
+                                        "payload": {"state": state, "reason": "超過 1 分鐘沒有收到住民回應", "action_executed": False}})
+                continue
+            if next_question and now >= next_question:
+                count = int(state.get("question_count", 1)) + 1
+                state = store.update_high_risk(question_count=count, last_question_at=now.isoformat(),
+                                               next_question_at=(now + timedelta(seconds=settings.high_risk_repeat_question_seconds)).isoformat())
+                store.add_resident_message(conversation_id="default", role="assistant", text=state.get("question", "請回應目前的關心詢問。"),
+                                           intent="emergency_response", asr_status="not_applicable")
+                await broadcaster.send({"type": "resident.emergency.question", "correlation_id": state.get("source_window_id"),
+                                        "payload": {"question": state.get("question"), "event_type": state.get("event_type"),
+                                                    "event_label": state.get("event_label"), "question_count": count,
+                                                    "repeated": True, "state": state, "speak_mode": "browser_local",
+                                                    "action_executed": False}})
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            store.log("error", "high_risk_monitor", "High-risk response monitor failed closed",
+                      context={"error": type(exc).__name__})
+
+
 async def handle_change_gate(session, image_bytes: tuple[bytes, ...], window: dict[str, Any], audio_pcm: bytes | None) -> None:
     """Run the cheap L0 gate, then decide whether the window reaches L1.
 
@@ -147,6 +297,12 @@ async def handle_change_gate(session, image_bytes: tuple[bytes, ...], window: di
                                         "changed": bool(gate["changed"]), "change_summary": gate.get("change_summary", ""),
                                         "observation_forced": bool(forced_reasons), "observation_force_reasons": forced_reasons,
                                         "method": gate.get("method", "local_pixel_delta")}})
+    if store.high_risk_active():
+        media_bridge.defer_observation(session, image_bytes, window, audio_pcm)
+        await broadcaster.send({"type": "observation.deferred", "correlation_id": window["window_id"],
+                                "payload": {"stream_id": session.id, "window_id": window["window_id"],
+                                            "reason": "high_risk_flow_active", "deferred_count": len(session.deferred_observation_windows)}})
+        return
     if not gate["changed"] and not forced_reasons:
         return
 
@@ -183,43 +339,40 @@ async def handle_vllm_window(session, image_bytes: tuple[bytes, ...], window: di
             "change_reasons": list(dict.fromkeys([*observation.change_reasons, *local_gate_reasons, *gate["reasons"]]))[:12],
             "change_summary": observation.change_summary or window.get("change_summary", ""),
         })
-    session.last_observation = observation
+    observation_is_newest = session.last_observation_end_offset_ms is None or window["end_offset_ms"] >= session.last_observation_end_offset_ms
+    if observation_is_newest:
+        session.last_observation = observation
+        session.last_observation_end_offset_ms = int(window["end_offset_ms"])
     session.gate_event_keys = set(gate["event_keys"])
     window = {**window, "change_gate_triggered": gate["trigger"], "change_gate_reasons": gate["reasons"], "change_gate_events": gate["noteworthy_events"]}
     persisted = store.process_observation(observation, session.id, "vllm", window_metadata=window)
-    session.last_state_tracker = persisted.get("state_tracker")
+    if observation_is_newest:
+        session.last_state_tracker = persisted.get("state_tracker")
     post_persist_gate = evaluate_change_gate(session.last_observation, observation, persisted, session.gate_event_keys)
     session.gate_event_keys.update(post_persist_gate["event_keys"])
     all_gate_reasons = list(dict.fromkeys([*local_gate_reasons, *gate["reasons"], *post_persist_gate["reasons"]]))[:12]
     all_gate_events = list(dict.fromkeys([*gate["noteworthy_events"], *post_persist_gate["noteworthy_events"]]))[:12]
     if post_persist_gate["trigger"] and not observation.change_detected:
         observation = observation.model_copy(update={"change_detected": True, "change_confidence": post_persist_gate["change_confidence"], "change_reasons": all_gate_reasons})
-        session.last_observation = observation
+        if observation_is_newest:
+            session.last_observation = observation
     window = {**window, "change_gate_triggered": bool(local_gate_trigger or gate["trigger"] or post_persist_gate["trigger"]), "change_gate_reasons": all_gate_reasons, "change_gate_events": all_gate_events}
     session.vlm_status = "active"
     store.log("info", "flow_model", "Multimodal window observation accepted", context={"stream_id": session.id, "window_id": window["window_id"], "frame_count": window["frame_count"], "audio_present": window["audio_present"], "audio_duration_ms": window["audio_duration_ms"], "provider": settings.inference_provider, "model": settings.inference_model, "person_visible": observation.person_visible, "posture": observation.posture, "vertical_transition": observation.vertical_transition, "audio_events": observation.audio_events, "speaker_emotion": observation.speaker_emotion, "speech_detected": observation.speech_detected, "transcript_saved": bool(persisted.get("transcript")), "confidence": observation.confidence})
-    await broadcaster.send({"type": "local_analysis.completed", "correlation_id": window["window_id"], "payload": {"stream_id": session.id, "window": window, "scene_context": scene_context, "model": settings.inference_model, "provider": settings.inference_provider, "observation": observation.model_dump(), "state_tracker": persisted.get("state_tracker"), "events": persisted["events"], "recognition_events": persisted["recognition_events"], "transcript": persisted.get("transcript"), "latency_ms": result.latency_ms}})
+    risk_candidate = high_risk_candidate(observation)
+    await broadcaster.send({"type": "local_analysis.completed", "correlation_id": window["window_id"], "payload": {"stream_id": session.id, "window": window, "scene_context": scene_context, "model": settings.inference_model, "provider": settings.inference_provider, "observation": observation.model_dump(), "observation_record": persisted.get("observation"), "observation_summary": compact_observation_summary(observation), "risk_candidate": risk_candidate, "state_tracker": persisted.get("state_tracker"), "events": persisted["events"], "recognition_events": persisted["recognition_events"], "transcript": persisted.get("transcript"), "latency_ms": result.latency_ms}})
     if persisted.get("transcript"):
         await broadcaster.send({"type": "audio.transcript", "correlation_id": window["window_id"], "payload": persisted["transcript"]})
     for event in [*persisted["events"], *persisted["recognition_events"]]:
         await broadcaster.send({"type": "event.updated", "correlation_id": event["id"], "payload": event})
-    if gate["trigger"] or post_persist_gate["trigger"] or observation.warning_signal != "none":
-        detail_reason = observation.warning_signal if observation.warning_signal != "none" else (all_gate_events[0] if all_gate_events else "change_detected")
+    if risk_candidate and not window.get("backfill"):
+        detail_reason = risk_candidate["event_type"]
+        detail_window = {**window, "high_risk_event_type": risk_candidate["event_type"], "high_risk_label": risk_candidate["label"], "high_risk_reason": risk_candidate["reason"]}
         detail_snapshot = media_bridge.trigger_detail(session, reason=detail_reason, source_window_id=window["window_id"])
         await broadcaster.send({"type": "detail.sampling.triggered", "correlation_id": window["window_id"],
                                 "payload": {"stream_id": session.id, "source_window_id": window["window_id"],
-                                            "change_detected": window["change_gate_triggered"], "warning_signal": observation.warning_signal,
-                                            "change_reasons": window["change_gate_reasons"], "stream": detail_snapshot}})
-    meaningful_change = bool(window["change_gate_triggered"] or persisted.get("events") or persisted.get("recognition_events") or observation.warning_signal != "none")
-    periodic_due = session.last_main_agent_mono is None or (time.monotonic() - session.last_main_agent_mono) >= settings.main_agent_interval_seconds
-    if settings.main_agent_enabled and (meaningful_change or periodic_due) and len(main_agent_tasks) < settings.main_agent_max_pending:
-        session.last_main_agent_mono = time.monotonic()
-        task = asyncio.create_task(run_main_agent(session, window, observation, persisted), name=f"main-agent-{window['window_id']}")
-        main_agent_tasks.add(task)
-        task.add_done_callback(main_agent_tasks.discard)
-    elif settings.main_agent_enabled and (meaningful_change or periodic_due):
-        store.log("warning", "main_agent", "Main-agent queue is full; window deferred", context={"window_id": window["window_id"], "pending": len(main_agent_tasks), "max_pending": settings.main_agent_max_pending})
-        await broadcaster.send({"type": "agent.analysis.skipped", "correlation_id": window["window_id"], "payload": {"window_id": window["window_id"], "reason": "pending_limit", "max_pending": settings.main_agent_max_pending}})
+                                            "change_detected": True, "warning_signal": observation.warning_signal,
+                                            "high_risk_candidate": risk_candidate, "change_reasons": window["change_gate_reasons"], "stream": detail_snapshot}})
 
 
 async def handle_detail_window(session, image_bytes: tuple[bytes, ...], window: dict[str, Any], audio_pcm: bytes | None) -> None:
@@ -245,6 +398,16 @@ async def handle_detail_window(session, image_bytes: tuple[bytes, ...], window: 
     await broadcaster.send({"type": "detail.description.completed", "correlation_id": window["window_id"],
                             "payload": {"stream_id": session.id, "window": window, "scene_context": scene_context,
                                         "description": saved, "model": settings.inference_model, "latency_ms": result.latency_ms}})
+    candidate_event_type = str(description.get("risk_event_type") or window.get("description_reason", "").rsplit(":", 1)[-1] or "high_risk")
+    if description.get("risk_confirmed") and description.get("warning_level") == "high":
+        await start_high_risk_flow(session, {**window, "high_risk_event_type": candidate_event_type,
+                                             "high_risk_label": description.get("risk_event_type") or candidate_event_type}, description)
+    else:
+        await broadcaster.send({"type": "high_risk.rejected", "correlation_id": window["window_id"],
+                                "payload": {"stream_id": session.id, "window_id": window["window_id"],
+                                            "candidate_event_type": candidate_event_type,
+                                            "description": description.get("description"),
+                                            "reason": "5 FPS 連續影像未確認高風險事件"}})
     if description.get("warning_level") != "none" or description.get("changes"):
         await broadcaster.send({"type": "detail.attention.signal", "correlation_id": window["window_id"],
                                 "payload": {"stream_id": session.id, "window_id": window["window_id"],
@@ -275,6 +438,32 @@ async def handle_focus_window(session, image_bytes: tuple[bytes, ...], window: d
     await broadcaster.send({"type": "focus.review.completed", "correlation_id": window["window_id"],
                             "payload": {"stream_id": session.id, "window": window, "focus": saved,
                                         "model": settings.inference_model, "latency_ms": result.latency_ms}})
+    if store.high_risk_active():
+        state = store.high_risk_state()
+        store.update_high_risk(focus_window_id=window["window_id"])
+        if settings.main_agent_enabled and len(main_agent_tasks) < settings.main_agent_max_pending:
+            emergency_context = {"high_risk_state": state, "focus_review": saved,
+                                 "user_response": state.get("response_text")}
+            task = asyncio.create_task(run_main_agent(session, window, session.last_observation,
+                                                      {"events": [], "recognition_events": []},
+                                                      emergency_context=emergency_context),
+                                       name=f"main-agent-emergency-{window['window_id']}")
+            main_agent_tasks.add(task)
+            task.add_done_callback(main_agent_tasks.discard)
+            store.update_high_risk(main_agent_run_pending=True, main_agent_trigger="focus_review")
+        if focus.get("abnormal") or focus.get("warning_level") == "high":
+            state = store.update_high_risk(status="confirmed", confirmed_at=now_iso(), confirmation_reason="local_focus_review")
+            await broadcaster.send({"type": "high_risk.local_confirmed", "correlation_id": window["window_id"],
+                                    "payload": {"state": state, "focus": saved, "action_executed": False}})
+        elif state.get("event_type") == "fall":
+            cloud = await minimax.confirm_risk(event_type="fall", focus_review=focus,
+                                               user_response=state.get("response_text"))
+            cloud_payload = cloud.payload | ({"error_code": cloud.error_code} if cloud.error_code else {})
+            state = store.update_high_risk(cloud_confirmation=cloud_payload)
+            await broadcaster.send({"type": "high_risk.cloud_confirmation", "correlation_id": window["window_id"],
+                                    "payload": {"status": cloud.status, "result": cloud_payload, "action_executed": False}})
+            if cloud.status == "healthy" and cloud.payload.get("confirmed") is False:
+                await finish_high_risk_flow(status="resolved", reason="local_focus_and_cloud_confirmation_rejected_fall")
     if focus.get("abnormal") or focus.get("warning_level") != "none":
         store.log("warning", "focus_review", "Focus review produced warning", context={"stream_id": session.id, "window_id": window["window_id"], "warning_level": focus.get("warning_level"), "confidence": focus.get("confidence")})
         await broadcaster.send({"type": "warning.created", "correlation_id": window["window_id"],
@@ -284,13 +473,15 @@ async def handle_focus_window(session, image_bytes: tuple[bytes, ...], window: d
 
 
 async def run_main_agent(session, window: dict[str, Any], observation: VisionObservation,
-                         persisted: dict[str, Any]) -> None:
+                         persisted: dict[str, Any], emergency_context: dict[str, Any] | None = None) -> None:
     """Run the main local agent without blocking the media sampler."""
     global main_agent_health
     descriptions = store.visual_descriptions(limit=8)
     context = build_main_agent_context(observation, persisted, window, store.list_events(limit=12)[0], store.agent_notes(limit=40), descriptions, session.scene_context)
-    dedup_key = f"main_agent:{session.id}:{window['window_id']}:{settings.config_version}"
-    agent_run, is_new = store.start_agent_run(agent_name="main_agent", trigger_type="multimodal_window",
+    if emergency_context:
+        context["high_risk_flow"] = emergency_context
+    dedup_key = f"main_agent:{session.id}:{window['window_id']}:{'emergency' if emergency_context else 'normal'}:{settings.config_version}"
+    agent_run, is_new = store.start_agent_run(agent_name="main_agent", trigger_type="high_risk_focus" if emergency_context else "multimodal_window",
                                                trigger_id=window["window_id"], window_id=window["window_id"],
                                                input_context=context, dedup_key=dedup_key)
     if not is_new and agent_run.get("status") in {"completed", "failed"}:
@@ -336,7 +527,7 @@ async def run_main_agent(session, window: dict[str, Any], observation: VisionObs
         await emit_agent_event(agent_run["id"], stage="policy_evaluated", event_type="agent.policy.evaluated",
                                message="Deterministic attention and action policy evaluated",
                                payload={"policy": policy})
-        if judgment.needs_further_attention:
+        if judgment.needs_further_attention and not emergency_context:
             focus_snapshot = media_bridge.request_focus(session, reason=judgment.attention_reason or "main_agent_requested_focus",
                                                          source_window_id=window["window_id"], context={
                                                              "main_agent_run_id": agent_run["id"],
@@ -395,6 +586,157 @@ async def run_main_agent(session, window: dict[str, Any], observation: VisionObs
                                payload={"agent_run": saved, "policy": policy, "degraded": True})
 
 
+def fallback_period_summary(context: dict[str, Any]) -> dict[str, Any]:
+    """Keep the daily digest useful when the summary model is unavailable."""
+    events = context.get("events") or []
+    descriptions = context.get("visual_descriptions") or []
+    segments = context.get("time_segments") or []
+    key_events = []
+    for event in events[:20]:
+        if event.get("status") in {"confirmed", "resolved", "observed"}:
+            key_events.append(f"{event.get('occurred_at', '—')} {event.get('label') or event.get('event_type')} ({event.get('status')})")
+    action_timeline = []
+    for item in descriptions:
+        for action in (item.get("actions_json") or [])[:4]:
+            action_timeline.append(f"{item.get('start_offset_ms', 0)}–{item.get('end_offset_ms', 0)}ms {action}")
+    if not action_timeline:
+        action_timeline.append(f"{context.get('window', {}).get('start', '—')}–{context.get('window', {}).get('end', '—')}：無事件發生。")
+    stable_states = [str(item.get("summary"))[:180] for item in segments[:10] if item.get("summary")]
+    unknowns = []
+    for item in descriptions:
+        unknowns.extend((item.get("unknowns_json") or [])[:3])
+    unknowns = list(dict.fromkeys(unknowns))[:20]
+    urgent = any(str(item.get("event_type")) in {"fall", "fire", "smoke", "alarm_sound"} and item.get("status") in {"confirmed", "resolved", "observed"} for item in events)
+    summary_text = f"這段期間確認 {len(key_events)} 項事件。" + "；".join(key_events[:5]) if key_events else "這段期間沒有確認的值得注意事件。"
+    return {"summary_text": summary_text[:2000], "key_events": key_events[:20], "action_timeline": action_timeline[:30],
+            "stable_states": stable_states[:20], "unknowns": unknowns, "risk_level": "urgent" if urgent else "normal",
+            "confidence": .35, "requires_follow_up": urgent, "follow_up_reason": "存在需要主 Agent 後續確認的高風險事件。" if urgent else "",
+            "schema_version": "main-agent-period-summary.v1"}
+
+
+async def run_periodic_summary(summary_type: str = "ten_minute") -> dict[str, Any] | None:
+    if store.high_risk_active():
+        store.log("info", "periodic_summary", "Summary deferred while high-risk flow is active",
+                  context={"summary_type": summary_type})
+        return None
+    end_dt = datetime.now(timezone.utc)
+    interval_seconds = settings.agent_summary_interval_seconds if summary_type == "ten_minute" else settings.agent_hourly_summary_interval_seconds
+    last_end = store.latest_period_summary_end(summary_type)
+    start_dt = parse_dt(last_end) if last_end else end_dt - timedelta(seconds=interval_seconds)
+    if start_dt >= end_dt:
+        start_dt = end_dt - timedelta(seconds=interval_seconds)
+    window_start, window_end = start_dt.isoformat(timespec="milliseconds"), end_dt.isoformat(timespec="milliseconds")
+    context = store.period_summary_context(window_start, window_end)
+    context["summary_type"] = summary_type
+    await broadcaster.send({"type": "agent.periodic_summary.started", "correlation_id": f"period:{window_end}",
+                            "payload": {"window_start": window_start, "window_end": window_end,
+                                        "summary_type": summary_type, "source_counts": context["source_counts"], "interval_seconds": interval_seconds,
+                                        "model": settings.inference_model, "provider": settings.inference_provider}})
+    async with vllm_semaphore:
+        result = await vllm.analyze_period_summary(context)
+    status = "healthy" if result.status == "healthy" else "degraded"
+    summary = result.payload.get("summary") if result.status == "healthy" else fallback_period_summary(context)
+    input_hash = hashlib.sha256(json.dumps(context, ensure_ascii=False, sort_keys=True, default=str).encode()).hexdigest()
+    with db.transaction() as conn:
+        call_id = store.add_model_call(conn, provider=settings.inference_provider, model=settings.inference_model, purpose=f"{summary_type}_summary",
+                                        input_hash=input_hash, prompt_version="main-agent-period-summary.v1",
+                                        schema_version=summary.get("schema_version", "main-agent-period-summary.v1"), status=status,
+                                        response=summary, latency_ms=result.latency_ms, error_code=result.error_code)
+    saved = store.record_period_summary(window_start=window_start, window_end=window_end, summary=summary,
+                                        source_counts=context["source_counts"], status=status, model_call_id=call_id,
+                                        summary_type=summary_type)
+    store.log("info" if status == "healthy" else "warning", "periodic_summary",
+              "Main-agent period summary recorded" if status == "healthy" else "Main-agent period summary recorded in degraded mode",
+              context={"summary_id": saved["id"], "window_start": window_start, "window_end": window_end,
+                       "provider": settings.inference_provider, "model": settings.inference_model,
+                       "status": status, "summary_type": summary_type, "source_counts": context["source_counts"], "error_code": result.error_code})
+    await broadcaster.send({"type": "agent.periodic_summary.completed", "correlation_id": saved["id"],
+                            "payload": {"summary": saved, "status": status, "degraded": status != "healthy",
+                                        "summary_type": summary_type,
+                                        "model": settings.inference_model, "provider": settings.inference_provider,
+                                        "latency_ms": result.latency_ms, "source_counts": context["source_counts"]}})
+    return saved
+
+
+async def periodic_summary_loop(summary_type: str, interval_seconds: float) -> None:
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            await run_periodic_summary(summary_type)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            store.log("error", "periodic_summary", "Periodic summary failed closed", context={"error": type(exc).__name__})
+
+
+async def resident_background_loop() -> None:
+    """Silent understanding/motivation driver; only proposes, never speaks."""
+    while True:
+        await asyncio.sleep(settings.resident_understanding_interval_seconds)
+        try:
+            await resident_agent.background_run(conversation_id="default")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            store.log("error", "resident_understanding", "Resident understanding run failed closed",
+                      context={"error": type(exc).__name__})
+
+
+async def _broadcast_resident_result(result: dict[str, Any], *, source: str = "resident_proactive") -> None:
+    if result.get("request_event"):
+        await broadcaster.send({"type": "event.updated", "correlation_id": result["request_event"]["id"],
+                                "payload": result["request_event"]})
+    await broadcaster.send({"type": "resident.message", "correlation_id": f"resident:{source}",
+                            "payload": result})
+
+
+def _proactive_due(now: datetime) -> bool:
+    marker = store.get_state("resident_proactive_last_check")
+    if settings.resident_proactive_align_to_hour:
+        if now.minute != 0:
+            return False
+        return not marker or str(marker)[:13] != now.isoformat()[:13]
+    if not marker:
+        store.set_state("resident_proactive_last_check", now.isoformat())
+        return False
+    previous = parse_dt(marker)
+    return previous is None or (now - previous).total_seconds() >= settings.resident_proactive_interval_seconds
+
+
+async def resident_proactive_loop() -> None:
+    """Run reminders and opt-in motivation proposals through one interaction driver."""
+    while True:
+        await asyncio.sleep(30)
+        try:
+            if store.high_risk_active():
+                continue
+            for reminder in store.due_resident_reminders(limit=5):
+                store.mark_resident_reminder_triggered(reminder["id"])
+                result = await resident_agent.deliver_proactive(reminder["message"], conversation_id=reminder["conversation_id"])
+                result.update({"proactive": True, "trigger_type": "scheduled_reminder", "reminder_id": reminder["id"]})
+                await broadcaster.send({"type": "resident.reminder.triggered", "correlation_id": reminder["id"],
+                                        "payload": {"reminder": reminder, "action_executed": False}})
+                await _broadcast_resident_result(result, source=f"reminder:{reminder['id']}")
+            now = datetime.now(timezone.utc)
+            if not settings.resident_proactive_speech_enabled or not _proactive_due(now):
+                continue
+            store.set_state("resident_proactive_last_check", now.isoformat())
+            insight_result = await resident_agent.background_run(conversation_id="default", force=True)
+            if insight_result.get("status") != "completed" or not insight_result.get("policy", {}).get("allowed"):
+                continue
+            insight = next((item for item in store.understanding_insights(limit=20) if item.get("id") == insight_result.get("insight_id")), None)
+            if not insight or not insight.get("suggested_message"):
+                continue
+            result = await resident_agent.deliver_proactive(insight["suggested_message"])
+            result.update({"proactive": True, "trigger_type": "motivation"})
+            await _broadcast_resident_result(result)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            store.log("error", "resident_proactive", "Resident proactive driver failed closed",
+                      context={"error": type(exc).__name__})
+
+
 media_bridge = VirtualCameraBridge(settings, store, on_window=handle_vllm_window, on_change_gate=handle_change_gate,
                                    on_description_window=handle_detail_window,
                                    on_focus_window=handle_focus_window)
@@ -434,6 +776,7 @@ def status_payload() -> dict[str, Any]:
         source_status = "degraded" if settings.active_source == "simulated" else "unavailable"
     source_detail = replay.snapshot() if settings.active_source == "replay" else {"source": "browser_media", "active_streams": active_streams, "vllm_sampling": settings.local_vlm_mode in {"vllm", "real"}}
     return {"app": "healthy", "environment": settings.app_env, "run_id": replay.run_id,
+            "high_risk": store.high_risk_state(),
             "source": {"name": settings.active_source, "status": source_status, "detail": source_detail},
             "services": {
                 "database": service("database", "healthy", {"path": settings.database_path, "journal_mode": "WAL"}),
@@ -446,7 +789,12 @@ def status_payload() -> dict[str, Any]:
                 "vad": service("vad", "unavailable", "Silero runtime not configured"),
                 "whisper": service("whisper", "unavailable", settings.whisper_model),
                 "local_vlm": service("local_vlm", local_status, {"provider": settings.inference_provider, "mode": settings.local_vlm_mode, "model": settings.inference_model if settings.local_vlm_mode in {"vllm", "real"} else settings.local_vlm_model, "endpoint": settings.inference_base_url if settings.local_vlm_mode in {"vllm", "real"} else None, "quantization": settings.local_vlm_quantization, "change_gate": {"method": "local_pixel_delta_plus_audio", "threshold": settings.change_gate_threshold, "audio_delta_threshold": settings.change_gate_audio_delta_threshold, "min_changed_pairs": settings.change_gate_min_changed_pairs, "strong_score_multiplier": settings.change_gate_strong_score_multiplier, "model_calls": 0, "thinking": False}, "thinking": {"change_gate": False, "observation": settings.vllm_observation_enable_thinking, "main_agent": settings.vllm_main_agent_enable_thinking}, "sampling": {"fps": settings.vllm_sample_fps, "window_seconds": settings.vllm_window_seconds, "window_stride_seconds": settings.vllm_window_stride_seconds, "frames_per_window": settings.vllm_window_frames, "max_concurrency": settings.vllm_max_concurrency, "max_pending_windows": settings.vllm_max_pending_windows}, "detail_sampling": {"fps": settings.detail_sample_fps, "window_seconds": settings.detail_window_seconds, "window_frames": settings.detail_window_frames, "active_seconds": settings.detail_active_seconds}, "focus_sampling": {"fps": settings.vllm_sample_fps, "window_seconds": settings.focus_window_seconds, "window_frames": settings.focus_window_frames}, "detail": vlm_health.get("detail")}),
-                "main_agent": service("main_agent", main_agent_health["status"], main_agent_health.get("detail") | {"provider": settings.inference_provider, "enabled": settings.main_agent_enabled, "pending": len(main_agent_tasks), "max_pending": settings.main_agent_max_pending, "parallel_limit": settings.vllm_max_concurrency, "interval_seconds": settings.main_agent_interval_seconds} if isinstance(main_agent_health.get("detail"), dict) else {"provider": settings.inference_provider, "enabled": settings.main_agent_enabled, "pending": len(main_agent_tasks), "max_pending": settings.main_agent_max_pending, "parallel_limit": settings.vllm_max_concurrency, "interval_seconds": settings.main_agent_interval_seconds, "detail": main_agent_health.get("detail")}),
+                "main_agent": service("main_agent", main_agent_health["status"], main_agent_health.get("detail") | {"provider": settings.inference_provider, "enabled": settings.main_agent_enabled, "emergency_only": True, "pending": len(main_agent_tasks), "max_pending": settings.main_agent_max_pending, "parallel_limit": settings.vllm_max_concurrency, "interval_seconds": settings.main_agent_interval_seconds, "summary_interval_seconds": settings.agent_summary_interval_seconds, "hourly_summary_interval_seconds": settings.agent_hourly_summary_interval_seconds} if isinstance(main_agent_health.get("detail"), dict) else {"provider": settings.inference_provider, "model": settings.inference_model, "enabled": settings.main_agent_enabled, "emergency_only": True, "pending": len(main_agent_tasks), "max_pending": settings.main_agent_max_pending, "parallel_limit": settings.vllm_max_concurrency, "interval_seconds": settings.main_agent_interval_seconds, "summary_interval_seconds": settings.agent_summary_interval_seconds, "hourly_summary_interval_seconds": settings.agent_hourly_summary_interval_seconds, "detail": main_agent_health.get("detail")}),
+                "resident_interaction": service("resident_interaction", local_status, {"driver": "interaction", "provider": settings.inference_provider, "model": settings.inference_model, "tts_configured": resident_agent.tts_configured}),
+                "resident_understanding": service("resident_understanding", "healthy" if settings.resident_understanding_interval_seconds > 0 and local_status == "healthy" else ("degraded" if settings.resident_understanding_interval_seconds > 0 else "disabled"), {"driver": "understanding_motivation", "interval_seconds": settings.resident_understanding_interval_seconds, "proactive_speech_enabled": settings.resident_proactive_speech_enabled, "proactive_interval_seconds": settings.resident_proactive_interval_seconds, "align_to_hour": settings.resident_proactive_align_to_hour}),
+                "resident_asr": service("resident_asr", "healthy" if settings.minimax_configured else "unavailable", {"provider": "gmi_cloud", "model": settings.minimax_model, "configured": settings.minimax_configured, "independent_from_local_vlm": True}),
+                "local_tts": service("local_tts", "healthy" if settings.local_tts_enabled else "disabled", {"mode": "browser_speech_synthesis", "language": settings.local_tts_language, "rate": settings.local_tts_rate}),
+                "minimax_tts": service("minimax_tts", "healthy" if settings.minimax_tts_configured else "unavailable", {"model": settings.minimax_tts_model, "voice_id": settings.minimax_tts_voice_id, "configured": settings.minimax_tts_configured}),
                 "minimax": service("minimax", minimax_health["status"], minimax_health.get("detail") | {"configured": settings.minimax_configured, "model": settings.minimax_model} if isinstance(minimax_health.get("detail"), dict) else {"configured": settings.minimax_configured, "model": settings.minimax_model, "detail": minimax_health.get("detail")}),
                 "telegram": service("telegram", "healthy" if settings.telegram_configured else "unavailable", {"configured": settings.telegram_configured}),
                 "model_store": service("model_store", "healthy", {"path": str(Path("data/models"))}),
@@ -527,6 +875,11 @@ async def notify_for_action(action: dict[str, Any]) -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    global periodic_summary_task
+    global hourly_summary_task
+    global resident_understanding_task
+    global resident_proactive_task
+    global high_risk_monitor_task
     db.initialize()
     Path(settings.media_root).mkdir(parents=True, exist_ok=True)
     # Restore only non-secret settings. Secret values intentionally remain in
@@ -562,6 +915,15 @@ async def lifespan(_: FastAPI):
         probe = await frigate.test()
         frigate_health.update({"status": probe.status, "detail": probe.payload | ({"error_code": probe.error_code} if probe.error_code else {})})
     store.log("info", "backend", "Care Agent backend started", context={"source": settings.active_source, "mode": settings.demo_mode})
+    if settings.main_agent_enabled and settings.agent_summary_interval_seconds > 0:
+        periodic_summary_task = asyncio.create_task(periodic_summary_loop("ten_minute", settings.agent_summary_interval_seconds), name="main-agent-ten-minute-summary")
+    if settings.main_agent_enabled and settings.agent_hourly_summary_interval_seconds > 0:
+        hourly_summary_task = asyncio.create_task(periodic_summary_loop("hourly", settings.agent_hourly_summary_interval_seconds), name="main-agent-hourly-summary")
+    if settings.resident_understanding_interval_seconds > 0:
+        resident_understanding_task = asyncio.create_task(resident_background_loop(), name="resident-understanding-loop")
+    if settings.resident_proactive_interval_seconds > 0:
+        resident_proactive_task = asyncio.create_task(resident_proactive_loop(), name="resident-proactive-loop")
+    high_risk_monitor_task = asyncio.create_task(high_risk_monitor_loop(), name="high-risk-monitor-loop")
     yield
     await replay.pause()
     for task in list(main_agent_tasks):
@@ -569,6 +931,26 @@ async def lifespan(_: FastAPI):
     if main_agent_tasks:
         await asyncio.gather(*main_agent_tasks, return_exceptions=True)
     main_agent_tasks.clear()
+    if periodic_summary_task:
+        periodic_summary_task.cancel()
+        await asyncio.gather(periodic_summary_task, return_exceptions=True)
+        periodic_summary_task = None
+    if hourly_summary_task:
+        hourly_summary_task.cancel()
+        await asyncio.gather(hourly_summary_task, return_exceptions=True)
+        hourly_summary_task = None
+    if resident_understanding_task:
+        resident_understanding_task.cancel()
+        await asyncio.gather(resident_understanding_task, return_exceptions=True)
+        resident_understanding_task = None
+    if resident_proactive_task:
+        resident_proactive_task.cancel()
+        await asyncio.gather(resident_proactive_task, return_exceptions=True)
+        resident_proactive_task = None
+    if high_risk_monitor_task:
+        high_risk_monitor_task.cancel()
+        await asyncio.gather(high_risk_monitor_task, return_exceptions=True)
+        high_risk_monitor_task = None
     mqtt_worker.stop()
 
 
@@ -642,6 +1024,13 @@ async def recognition_logs(limit: int = Query(50, ge=1, le=200)):
 @app.get("/api/agent/runs")
 async def agent_runs(limit: int = Query(30, ge=1, le=100)):
     return {"items": store.agent_runs(limit), "agent": "main_agent", "provider": settings.inference_provider, "model": settings.inference_model}
+
+
+@app.get("/api/agent/periodic-summaries")
+async def agent_periodic_summaries(limit: int = Query(50, ge=1, le=100)):
+    return {"items": store.agent_period_summaries(limit), "interval_seconds": settings.agent_summary_interval_seconds,
+            "hourly_interval_seconds": settings.agent_hourly_summary_interval_seconds,
+            "provider": settings.inference_provider, "model": settings.inference_model}
 
 
 @app.get("/api/agent/events")
@@ -766,7 +1155,7 @@ async def _reset_history() -> dict[str, Any]:
         # Delete children before their referenced event/model rows. In
         # particular visual_descriptions/focus_reviews/scene_contexts reference
         # model_calls, so model_calls must be deleted near the end.
-        for table in ("notification_deliveries", "event_evidence", "hydration_sessions", "tool_calls", "transcripts", "actions", "focus_reviews", "visual_descriptions", "scene_contexts", "agent_run_events", "agent_notes", "analyses", "agent_runs", "memories", "recognition_events", "events", "evidence", "model_calls", "health_samples", "daily_summaries", "observer_findings", "frigate_log_snippets", "time_segments", "change_gate_results", "app_logs"):
+        for table in ("notification_deliveries", "event_evidence", "hydration_sessions", "tool_calls", "transcripts", "actions", "focus_reviews", "visual_descriptions", "vision_observations", "scene_contexts", "agent_period_summaries", "agent_run_events", "agent_notes", "analyses", "agent_runs", "memories", "recognition_events", "events", "evidence", "model_calls", "health_samples", "daily_summaries", "observer_findings", "frigate_log_snippets", "time_segments", "change_gate_results", "resident_messages", "resident_reminders", "resident_memories", "resident_understanding_insights", "resident_agent_runs", "tts_artifacts", "app_logs"):
             conn.execute(f"DELETE FROM {table}")
         if active_stream_ids:
             placeholders = ",".join("?" for _ in active_stream_ids)
@@ -833,6 +1222,112 @@ async def frigate_event(request: FrigateEventRequest):
 @app.get("/api/tools/calls")
 async def tools_calls(limit: int = Query(100, ge=1, le=500)):
     return {"items": store.tool_calls(limit)}
+
+
+@app.get("/api/resident/status")
+async def resident_status():
+    return {
+        "conversation_id": "default",
+        "minimax_configured": settings.minimax_configured,
+        "tts_configured": resident_agent.tts_configured,
+        "local_tts_enabled": settings.local_tts_enabled,
+        "local_tts_language": settings.local_tts_language,
+        "local_tts_rate": settings.local_tts_rate,
+        "proactive_enabled": settings.resident_proactive_speech_enabled,
+        "proactive_interval_seconds": settings.resident_proactive_interval_seconds,
+        "proactive_align_to_hour": settings.resident_proactive_align_to_hour,
+        "display_name": settings.resident_display_name,
+        "high_risk": store.high_risk_state(),
+        "understanding_interval_seconds": settings.resident_understanding_interval_seconds,
+        "stop_active": resident_agent.stop_active(),
+    }
+
+
+@app.post("/api/high-risk/resolve")
+async def high_risk_resolve(request: HighRiskResolveRequest):
+    if not store.high_risk_active():
+        return {"status": "idle", "reason": "no_active_high_risk"}
+    state = await finish_high_risk_flow(status="resolved", reason=request.reason)
+    return {"status": "resolved", "state": state, "action_executed": False}
+
+
+@app.post("/api/resident/message")
+async def resident_message(request: ResidentMessageRequest):
+    conversation_id = request.conversation_id or "default"
+    audio_pcm = None
+    if request.audio_base64:
+        try:
+            audio_pcm = base64.b64decode(request.audio_base64)
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail={"error": {"code": "INVALID_AUDIO_BASE64", "detail": type(exc).__name__}})
+    if not audio_pcm and not (request.text or "").strip():
+        raise HTTPException(status_code=422, detail={"error": {"code": "EMPTY_RESIDENT_MESSAGE", "message": "text or audio_base64 is required"}})
+    result = await resident_agent.turn(
+        text=None if audio_pcm else request.text,
+        audio_pcm=audio_pcm,
+        conversation_id=conversation_id,
+        speak=request.speak, emergency_response=request.emergency_response)
+    if result.get("request_event"):
+        await broadcaster.send({"type": "event.updated", "correlation_id": result["request_event"]["id"], "payload": result["request_event"]})
+    if request.emergency_response and result.get("status") != "blocked":
+        await broadcaster.send({"type": "resident.emergency.response_received", "correlation_id": f"res:{conversation_id}",
+                                "payload": {"response_text": result.get("reply_text"), "state": store.high_risk_state(),
+                                            "asr_status": result.get("asr_status"), "action_executed": False}})
+    await broadcaster.send({"type": "resident.message", "correlation_id": f"res:{conversation_id}", "payload": result})
+    return {"conversation_id": conversation_id, **result}
+
+
+@app.post("/api/resident/run-understanding")
+async def resident_run_understanding():
+    result = await resident_agent.background_run(conversation_id="default", force=True)
+    await broadcaster.send({"type": "resident.insight.proposed", "payload": result})
+    return result
+
+
+@app.get("/api/resident/messages")
+async def resident_messages(conversation_id: str = "default", limit: int = Query(200, ge=1, le=1000)):
+    items = store.resident_messages(conversation_id=conversation_id, limit=limit)
+    return {"items": items}
+
+
+@app.get("/api/resident/runs")
+async def resident_runs(driver: str | None = None, limit: int = Query(100, ge=1, le=300)):
+    return {"items": store.resident_runs(driver=driver, limit=limit)}
+
+
+@app.get("/api/resident/memories")
+async def resident_memories(status: str | None = None, limit: int = Query(100, ge=1, le=300)):
+    return {"items": store.resident_memory(status=status, limit=limit)}
+
+
+@app.get("/api/resident/reminders")
+async def resident_reminders(status: str | None = None, limit: int = Query(100, ge=1, le=300)):
+    return {"items": store.resident_reminders(status=status, limit=limit)}
+
+
+@app.post("/api/resident/asr")
+async def resident_asr(audio: UploadFile = File(...)):
+    content_type = (audio.content_type or "audio/wav").lower()
+    body = await audio.read(10_485_761)
+    if len(body) > 10_485_760:
+        raise HTTPException(status_code=413, detail={"error": {"code": "AUDIO_TOO_LARGE", "message": "resident audio exceeds 10 MB"}})
+    result = await resident_agent.asr.transcribe(body, content_type)
+    return {"status": result.status, "asr": result.payload.get("asr", result.payload), "error_code": result.error_code,
+            "raw_audio_persisted": False}
+
+
+@app.get("/api/resident/insights")
+async def resident_insights(status: str | None = None, limit: int = Query(100, ge=1, le=500)):
+    return {"items": store.understanding_insights(status=status, limit=limit)}
+
+
+@app.patch("/api/resident/memory/{memory_id}")
+async def resident_memory_action(memory_id: str, body: ResidentMemoryUpdateRequest):
+    updated = store.resolve_resident_memory(memory_id, body.action)
+    if not updated:
+        raise HTTPException(status_code=404, detail={"error": {"code": "MEMORY_NOT_FOUND"}})
+    await broadcaster.send({"type": "resident.memory.updated", "payload": updated})
+    return updated
 
 
 @app.get("/api/logs")
@@ -1035,6 +1530,12 @@ async def get_settings_api():
             "fall_confirm_window_sec": settings.fall_confirm_window_sec, "fall_no_recovery_alert_sec": settings.fall_no_recovery_alert_sec,
             "demo_no_recovery_alert_sec": settings.demo_no_recovery_alert_sec, "minimax_model": settings.minimax_model,
             "minimax_base_url": settings.minimax_base_url, "minimax_api_key_configured": settings.minimax_configured,
+            "local_tts_enabled": settings.local_tts_enabled, "local_tts_language": settings.local_tts_language, "local_tts_rate": settings.local_tts_rate,
+            "agent_summary_interval_seconds": settings.agent_summary_interval_seconds, "agent_hourly_summary_interval_seconds": settings.agent_hourly_summary_interval_seconds,
+            "observation_quiet_seconds": settings.observation_quiet_seconds, "observation_quiet_sample_interval_seconds": settings.observation_quiet_sample_interval_seconds, "observation_quiet_frames": settings.observation_quiet_frames,
+            "resident_proactive_speech_enabled": settings.resident_proactive_speech_enabled, "resident_proactive_interval_seconds": settings.resident_proactive_interval_seconds,
+            "resident_proactive_align_to_hour": settings.resident_proactive_align_to_hour, "resident_display_name": settings.resident_display_name,
+            "high_risk_repeat_question_seconds": settings.high_risk_repeat_question_seconds, "high_risk_no_response_seconds": settings.high_risk_no_response_seconds,
             "telegram_token_configured": bool(settings.telegram_bot_token), "telegram_allowed_chat_ids_configured": bool(settings.telegram_allowed_chat_ids)}
 
 
@@ -1119,6 +1620,11 @@ async def media_scene_contexts(limit: int = Query(20, ge=1, le=100)):
 @app.get("/api/media/descriptions")
 async def media_descriptions(limit: int = Query(50, ge=1, le=200)):
     return {"items": store.visual_descriptions(limit)}
+
+
+@app.get("/api/media/observations")
+async def media_observations(limit: int = Query(50, ge=1, le=200)):
+    return {"items": store.vision_observations(limit)}
 
 
 @app.get("/api/media/focus-reviews")

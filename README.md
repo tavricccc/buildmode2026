@@ -6,22 +6,23 @@
 
 ## 目前實作路徑
 
-目前先跳過 Frigate；流程模型已切換到 GMI Cloud 的 `MiniMaxAI/MiniMax-M3`，本機 Nemotron Omni vLLM 保留為可切回的影像模型：
+目前先跳過 Frigate；主流程已切回本機 `nemotron_omni` vLLM。住民互動 Agent 與理解／動機驅動共用這個本機多模態模型；獨立 ASR 仍可選用 GMI Cloud 的 `MiniMaxAI/MiniMax-M3`。目前 TTS 暫時使用瀏覽器本機 Web Speech API，不呼叫模型：
 
 ```text
 HTTPS browser MediaStream (camera + microphone)
   → continuous WebM over WSS /ws/media
   → backend in-memory sampler
   → 2 FPS × 5 seconds = 10 ordered images + 5 seconds 16 kHz mono audio
-  → GMI Cloud MiniMaxAI/MiniMax-M3（有變化窗口；已獲使用者同意）
+  → 本機 Nemotron Omni vLLM（有變化窗口）
   → L0 local change gate（每 5 秒只輸出有／無）
-  → 有變化才進 L1 structured Observation / event_candidates
+  → 有變化才進 Observation，前端只顯示人物／物品變化短述
   → temporal posture tracker（跨窗口確認起身／坐下）
   → existing fall/hydration state machine or exceptional recognition_events
   → SQLite Event Ledger
   → WSS /ws
-  → Main Agent（同一 Omni、可並行、bounded concurrency）
-  → deterministic attention / risk policy
+  → 一般事件留在時間軸；高風險候選才啟動 5 FPS 確認
+  → Main Agent Focus／本機 TTS 詢問住民／必要時雲端二次確認
+  → 10 分鐘與 1 小時摘要、deterministic risk policy
   → persistent event timeline / Agent rounds / Known / Unknown / Next action
 ```
 
@@ -59,14 +60,14 @@ Frigate、MQTT 與 RTSP adapter 仍保留，等需要時再接回；它們不是
 - `fall`、`hydration` 優先使用既有事件欄位與 state machine；只有家庭聲音、人物活動、非人物物件等例外才建立 `recognition_events`。
 - `UNKNOWN` 是合法且重要的結果；不可用最後觀察位置冒充目前位置。
 - Default Silent；詢問、提醒、警告都要經過 attention／interruption policy。
-- 原始影像與音訊只在本機短暫保留；獲授權的有變化窗口會送至 GMI Cloud MiniMax M3，SQLite 保存必要 metadata、hash、confidence、窗口與 provenance，不保存 raw stream 或 API key。
+- 原始影像與音訊只在本機短暫保留；主影像流程不送雲端，只有住民明確啟用語音互動時才可將短音訊送至獨立 ASR。SQLite 保存必要 metadata、hash、confidence、窗口與 provenance，不保存 raw stream 或 API key。
 - 目前不做診斷、治療、自動通報或 L4 emergency executor。
 - Caregiver 預設收到 privacy-aggregated summary，不是完整生活紀錄。
 - Main Agent 會保存 facts、跨 frame 時序、existing-first mapping、Unknown/Hypothesis、attention score、policy gates 與 next action；模型建議不等於已執行 action。
 
 ## 啟動
 
-需求：Python 3.10+、Node.js 18+、GMI Cloud API key（`GMIAPI.txt`）；本機 vLLM `nemotron_omni` 可選。`.env` 預設使用 HTTPS、Care Agent `8002`：
+需求：Python 3.10+、Node.js 18+、本機 vLLM `nemotron_omni`。GMI M3 ASR 與 MiniMax TTS fallback 皆為可選，金鑰只從本機 secret file 讀取。`.env` 預設使用 HTTPS、Care Agent `8002`：
 
 ```powershell
 # D:\Longcare

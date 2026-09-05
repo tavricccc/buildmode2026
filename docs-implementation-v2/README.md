@@ -24,7 +24,7 @@ HTTPS browser MediaStream
 
 Browser media 不會變成 screenshot polling；音訊只在單次 multimodal request 期間以 local temporary WAV URI 提供給 Omni，完成即刪除。
 
-Current video retention 是 rolling 60 秒。第一層 2 FPS/5 秒輸出 change/warning gate；觸發後由預熱的 5 FPS sampler 產生 2 秒 sliding descriptions。Main Agent 預設只讀 descriptions、scene footnote、events 與 notes；只有 `needs_further_attention` 才取 2 FPS/10 秒 focus review。
+Current video retention 是 rolling 60 秒。第一層 2 FPS/5 秒輸出 change gate；只有 Observation 提出高風險候選時，才由預熱的 5 FPS sampler 產生 2 秒 high-risk confirmation，接著才取 2 FPS/10 秒 Focus review。普通 Observation 只送 change-only 短述；完整 normalized record 留在 SQLite。
 
 ## 文件順序
 
@@ -55,7 +55,7 @@ Current video retention 是 rolling 60 秒。第一層 2 FPS/5 秒輸出 change/
 
 目前 local multimodal observation、exception event contract、SQLite、WSS dashboard 與 basic health/observer 已可運作。下一個 Gate 2b 項目是 Context Sentinel World State、information-gap/Active Inquiry、Default Silent/Interruption Budget、VLM event → Policy/Alert，以及受限 Silero VAD/Whisper conversation window。Gate 3 再做 caregiver aggregate、personal baseline、connector、重連與完整正負例 E2E。
 
-目前新增 Main Agent vertical slice：每個完成的 5 秒窗口以獨立 task 交給同一個 Nemotron Omni vLLM，可在 `VLLM_MAX_CONCURRENCY` 內並行。它產生 `MainAgentJudgment`（facts、時序、existing-first mapping、unknown、hypothesis、risk、attention、next action），再由 deterministic `MainAgentPolicy` 計算 attention score 與 fail-closed final action。結果保存於 `agent_runs`，並由 `/api/agent/runs`、`agent.analysis.*` WebSocket 訊息與 Dashboard 顯示。
+目前新增 Main Agent vertical slice：只有高風險 Focus review 完成後才以獨立 task 交給流程模型，可在 `VLLM_MAX_CONCURRENCY` 內並行。它產生 `MainAgentJudgment`（facts、時序、existing-first mapping、unknown、hypothesis、risk、attention、next action），再由 deterministic `MainAgentPolicy` 計算 attention score 與 fail-closed final action。結果保存於 `agent_runs`，並由 `/api/agent/runs`、`agent.analysis.*` WebSocket 訊息與 Dashboard 顯示。另有 10 分鐘小節與 1 小時摘要讀取 logs／events／descriptions／segments，保存 `main-agent-period-summary.v1` 到 `agent_period_summaries.summary_type`。
 
 ## 安全邊界
 

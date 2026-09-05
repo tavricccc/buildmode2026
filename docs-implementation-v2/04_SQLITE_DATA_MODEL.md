@@ -162,6 +162,28 @@ CREATE TABLE agent_run_events (
   occurred_at TEXT NOT NULL
 );
 
+CREATE TABLE agent_period_summaries (
+  id TEXT PRIMARY KEY,
+  subject_id TEXT NOT NULL,
+  window_start TEXT NOT NULL,
+  window_end TEXT NOT NULL,
+  summary_text TEXT NOT NULL,
+  key_events_json TEXT NOT NULL DEFAULT '[]',
+  action_timeline_json TEXT NOT NULL DEFAULT '[]',
+  stable_states_json TEXT NOT NULL DEFAULT '[]',
+  unknowns_json TEXT NOT NULL DEFAULT '[]',
+  risk_level TEXT NOT NULL,
+  confidence REAL NOT NULL,
+  requires_follow_up INTEGER NOT NULL DEFAULT 0,
+  follow_up_reason TEXT NOT NULL DEFAULT '',
+  source_counts_json TEXT NOT NULL DEFAULT '{}',
+  summary_type TEXT NOT NULL DEFAULT 'ten_minute',
+  status TEXT NOT NULL,
+  model_call_id TEXT REFERENCES model_calls(id),
+  created_at TEXT NOT NULL,
+  dedup_key TEXT NOT NULL UNIQUE
+);
+
 CREATE TABLE agent_notes (
   id TEXT PRIMARY KEY,
   subject_id TEXT NOT NULL,
@@ -353,3 +375,6 @@ MiniMax 不取得 SQL 字串工具，只能呼叫參數化函式：
 - World State、Inquiry、privacy aggregation 的專用表仍是下一階段 migration；在此之前不得把尚未存在的欄位寫成已完成能力。
 - `agent_runs` 是目前 Main Agent 的 audit ledger；它保存 judgment 與 deterministic policy，不代表 action 已執行。
 - `agent_run_events` 保存每輪的 stage trace；`agent_notes` 提供 decision／abstraction／research 三層小型記憶文件，Research note 可透過 `target_layers_json` 提出注意事項，但必須 review 才能影響決策。
+- `agent_period_summaries` 是 10 分鐘小節與 1 小時紀錄的主 Agent 摘要 ledger，由 `summary_type` 區分；它只讀 structured logs 與既有摘要，不保存 raw media，也不直接執行 action。
+- 高風險期間暫存的 Observation window 只存在 memory buffer，解除或確認結束後批量補寫；未解除前不讓普通觀察覆蓋危急 Focus 資源。
+- `visual_descriptions` 的 `risk_event_type`／`risk_confirmed` 用來記錄 5 FPS 高風險確認結果；一般 Observation 的 change-only 短述不取代完整狀態機記錄。

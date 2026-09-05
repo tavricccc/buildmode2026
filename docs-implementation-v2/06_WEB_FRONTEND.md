@@ -59,6 +59,8 @@
 - 開發面板展開每輪 Main Agent 的 situation summary、observed facts、temporal assessment、event assessments、Unknown/Hypothesis、不確定性、decision reasons、policy gates、score components、next action 與 TTL transcript；只顯示 structured judgment，不顯示隱藏 chain-of-thought。
 - Transcript 只顯示仍在 retention window 的內容；到期後同步移除。
 - WSS 事件只做增量合併；每 4 秒由 REST 恢復 canonical state。不得因新 observation、agent trace 或重連清空前一輪內容。
+- 顯示主 Agent 10 分鐘小節與 1 小時摘要歷史。小節包含窗口、事件、動作時間線、Unknown、來源數量與是否需後續確認；小時摘要再補上整體動向的保守推測。高風險期間摘要暫停。
+- 高風險流程固定顯示警示 banner、事件名稱、目前詢問次數與回應按鈕；瀏覽器本機 TTS 朗讀詢問，回應輸入標記為 emergency response，普通新要求在確認期間不送入 Agent。
 
 ### Observer 後台
 

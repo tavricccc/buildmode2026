@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import secrets
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
@@ -15,6 +16,27 @@ from .state_tracker import initial_state, update_state
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+
+
+def _parse_reminder_time(value: str) -> str | None:
+    """Accept model-normalized ISO datetime or a local HH:MM reminder time."""
+    text = (value or "").strip()
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc).isoformat(timespec="milliseconds")
+    except ValueError:
+        pass
+    match = re.fullmatch(r"(?:[01]?\d|2[0-3]):[0-5]\d", text)
+    if not match:
+        return None
+    hour, minute = (int(part) for part in text.split(":"))
+    local_now = datetime.now().astimezone()
+    candidate = local_now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if candidate <= local_now:
+        candidate += timedelta(days=1)
+    return candidate.astimezone(timezone.utc).isoformat(timespec="milliseconds")
 
 
 def parse_dt(value: str | datetime) -> datetime:
@@ -58,11 +80,52 @@ class Store:
                 ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,version=runtime_state.version+1,updated_at=excluded.updated_at""",
                          (key, self.db.dumps(value), now_iso()))
 
+    def save_setting(self, key: str, value: Any, config_version: str | None = None) -> None:
+        version = config_version or self.settings.config_version
+        with self.db.transaction() as conn:
+            conn.execute("INSERT INTO settings(key,value_json,config_version,updated_at) VALUES(?,?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,config_version=excluded.config_version,updated_at=excluded.updated_at",
+                         (key, self.db.dumps(value), version, now_iso()))
+
     def clear_runtime(self) -> None:
         with self.db.transaction() as conn:
             # Setup/configuration is durable state, while these keys belong to a
             # replay run and must never leak into the next run.
-            conn.execute("DELETE FROM runtime_state WHERE key IN ('fall_state','hydration_state','replay_state') OR key LIKE 'posture_tracker:%'" )
+            conn.execute("DELETE FROM runtime_state WHERE key IN ('fall_state','hydration_state','replay_state','high_risk_state','resident_proactive_last_check') OR key LIKE 'posture_tracker:%'" )
+
+    def high_risk_state(self) -> dict[str, Any]:
+        value = self.get_state("high_risk_state", {})
+        return value if isinstance(value, dict) else {}
+
+    def high_risk_active(self) -> bool:
+        return self.high_risk_state().get("status") in {"active", "awaiting_response", "confirmed"}
+
+    def begin_high_risk(self, *, stream_id: str, source_window_id: str, event_type: str,
+                        event_label: str, confidence: float, reason: str, question: str,
+                        started_at: str, response_deadline_at: str, next_question_at: str) -> dict[str, Any]:
+        current = self.high_risk_state()
+        if current.get("status") in {"active", "awaiting_response", "confirmed"}:
+            return current
+        state = {"status": "awaiting_response", "stream_id": stream_id, "source_window_id": source_window_id,
+                 "event_type": event_type, "event_label": event_label, "confidence": float(confidence),
+                 "reason": reason[:500], "question": question[:300], "question_count": 1,
+                 "started_at": started_at, "last_question_at": started_at,
+                 "response_deadline_at": response_deadline_at, "next_question_at": next_question_at,
+                 "response_received_at": None, "response_text": None, "focus_window_id": None,
+                 "main_agent_run_id": None, "cloud_confirmation": None, "action_executed": False}
+        self.set_state("high_risk_state", state)
+        return state
+
+    def update_high_risk(self, **updates: Any) -> dict[str, Any]:
+        state = self.high_risk_state()
+        state.update(updates)
+        self.set_state("high_risk_state", state)
+        return state
+
+    def finish_high_risk(self, *, status: str, reason: str) -> dict[str, Any]:
+        state = self.high_risk_state()
+        state.update({"status": status, "resolution_reason": reason[:500], "ended_at": now_iso()})
+        self.set_state("high_risk_state", state)
+        return state
 
     @staticmethod
     def _stream_timestamp_conn(conn, run_id: str, offset_ms: int, fallback: str) -> str:
@@ -147,6 +210,94 @@ class Store:
                 for row in self.db.fetch_all("SELECT * FROM agent_runs WHERE subject_id=? ORDER BY created_at DESC LIMIT ?",
                                              (self.settings.subject_id, limit))]
 
+    def latest_period_summary_end(self, summary_type: str | None = None) -> str | None:
+        if summary_type:
+            row = self.db.fetch_one("SELECT MAX(window_end) AS window_end FROM agent_period_summaries WHERE subject_id=? AND summary_type=?", (self.settings.subject_id, summary_type))
+        else:
+            row = self.db.fetch_one("SELECT MAX(window_end) AS window_end FROM agent_period_summaries WHERE subject_id=?", (self.settings.subject_id,))
+        return row["window_end"] if row and row["window_end"] else None
+
+    def period_summary_context(self, start: str, end: str) -> dict[str, Any]:
+        """Build a bounded, log-derived context for the periodic main-agent digest."""
+        def compact_event(item: dict[str, Any]) -> dict[str, Any]:
+            attrs = item.get("attributes_json") or item.get("attributes") or {}
+            if isinstance(attrs, str):
+                try:
+                    attrs = json.loads(attrs)
+                except json.JSONDecodeError:
+                    attrs = {}
+            return {"id": item.get("id"), "event_type": item.get("event_type"), "label": item.get("label"),
+                    "status": item.get("status"), "occurred_at": item.get("occurred_at"),
+                    "confidence": item.get("confidence"), "source_offset_ms": item.get("source_offset_ms"),
+                    "attributes": {key: attrs[key] for key in ("from_state", "to_state", "occurred_offset_ms", "confirmed_offset_ms", "session_status", "intent", "request_text", "reported_event_type", "reported_event_summary", "reminder_time", "reminder_text") if key in attrs}}
+
+        events, _ = self.list_events(start=start, end=end, limit=100)
+        gates = [row_json(row, ("change_reasons_json",)) for row in self.db.fetch_all(
+            "SELECT * FROM change_gate_results WHERE subject_id=? AND end_offset_ms>=0 AND created_at>=? AND created_at<=? ORDER BY created_at ASC LIMIT 200",
+            (self.settings.subject_id, start, end))]
+        descriptions = [row_json(row, ("facts_json", "objects_json", "actions_json", "changes_json", "warnings_json", "unknowns_json")) for row in self.db.fetch_all(
+            "SELECT * FROM visual_descriptions WHERE subject_id=? AND created_at>=? AND created_at<=? ORDER BY start_offset_ms ASC LIMIT 80",
+            (self.settings.subject_id, start, end))]
+        segments = [row_json(row, ("observed_actions_json", "not_observed_actions_json", "uncertainty_json", "source_description_ids_json")) for row in self.db.fetch_all(
+            "SELECT * FROM time_segments WHERE subject_id=? AND created_at>=? AND created_at<=? ORDER BY start_offset_ms ASC LIMIT 80",
+            (self.settings.subject_id, start, end))]
+        runs = [row_json(row, ("analysis_json", "policy_json")) for row in self.db.fetch_all(
+            "SELECT * FROM agent_runs WHERE subject_id=? AND created_at>=? AND created_at<=? ORDER BY created_at ASC LIMIT 80",
+            (self.settings.subject_id, start, end))]
+        transcripts = [dict(row) for row in self.db.fetch_all(
+            "SELECT id,started_at,ended_at,text,language,confidence FROM transcripts WHERE subject_id=? AND started_at>=? AND started_at<=? ORDER BY started_at ASC LIMIT 80",
+            (self.settings.subject_id, start, end))]
+        logs = [row_json(row, ("context_json",)) for row in self.db.fetch_all(
+            "SELECT id,ts,level,component,message,context_json FROM app_logs WHERE ts>=? AND ts<=? ORDER BY ts ASC LIMIT 160",
+            (start, end))]
+
+        compact_runs = []
+        for run in runs:
+            analysis = run.get("analysis_json") or {}
+            policy = run.get("policy_json") or {}
+            compact_runs.append({"id": run.get("id"), "created_at": run.get("created_at"), "status": run.get("status"),
+                                 "decision": run.get("decision"), "window_id": run.get("window_id"),
+                                 "situation_summary": analysis.get("situation_summary"), "situation_phase": analysis.get("situation_phase"),
+                                 "observed_facts": (analysis.get("observed_facts") or [])[:6], "unknowns": (analysis.get("unknowns") or [])[:6],
+                                 "decision_reasons": (analysis.get("decision_reasons") or [])[:6], "final_action": policy.get("final_action"),
+                                 "risk_level": policy.get("risk_level") or run.get("risk_level"), "attention_level": policy.get("attention_level") or run.get("attention_level"),
+                                 "confidence": run.get("confidence"), "error_code": run.get("error_code")})
+        compact_logs = [{"ts": item.get("ts"), "level": item.get("level"), "component": item.get("component"), "message": item.get("message"),
+                         "context": {key: (item.get("context_json") or {}).get(key) for key in ("window_id", "stream_id", "provider", "model", "error_code", "final_action", "attention_score") if key in (item.get("context_json") or {})}}
+                        for item in logs]
+        return {"window": {"start": start, "end": end}, "events": [compact_event(item) for item in events],
+                "change_gates": [{key: item.get(key) for key in ("window_id", "start_offset_ms", "end_offset_ms", "changed", "change_score", "threshold", "change_reasons_json", "method")} for item in gates],
+                "visual_descriptions": [{key: item.get(key) for key in ("window_id", "start_offset_ms", "end_offset_ms", "description_text", "actions_json", "changes_json", "warnings_json", "confidence", "warning_level")} for item in descriptions],
+                "time_segments": [{key: item.get(key) for key in ("start_offset_ms", "end_offset_ms", "summary", "observed_actions_json", "not_observed_actions_json", "uncertainty_json")} for item in segments],
+                "agent_runs": compact_runs, "transcripts": transcripts, "logs": compact_logs,
+                "source_counts": {"events": len(events), "change_gates": len(gates), "visual_descriptions": len(descriptions),
+                                   "time_segments": len(segments), "agent_runs": len(runs), "transcripts": len(transcripts), "logs": len(logs)},
+                "rules": ["只保留重要事件、人物／物品動作、語音重點、警示與未知", "不要重新描述固定場景", "沒有證據就標記 unknown"]}
+
+    def record_period_summary(self, *, window_start: str, window_end: str, summary: dict[str, Any],
+                              source_counts: dict[str, Any], status: str, model_call_id: str | None,
+                              summary_type: str = "ten_minute") -> dict[str, Any]:
+        dedup_key = f"period-summary:{self.settings.subject_id}:{summary_type}:{window_start}:{window_end}"
+        existing = self.db.fetch_one("SELECT * FROM agent_period_summaries WHERE dedup_key=?", (dedup_key,))
+        if existing:
+            return row_json(existing, ("key_events_json", "action_timeline_json", "stable_states_json", "unknowns_json", "source_counts_json"))
+        summary_id = make_id("period")
+        with self.db.transaction() as conn:
+            conn.execute("""INSERT INTO agent_period_summaries(
+                id,subject_id,window_start,window_end,summary_text,key_events_json,action_timeline_json,stable_states_json,
+                unknowns_json,risk_level,confidence,requires_follow_up,follow_up_reason,source_counts_json,summary_type,status,model_call_id,created_at,dedup_key
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+                summary_id, self.settings.subject_id, window_start, window_end, summary.get("summary_text", ""),
+                self.db.dumps(summary.get("key_events", [])), self.db.dumps(summary.get("action_timeline", [])), self.db.dumps(summary.get("stable_states", [])),
+                self.db.dumps(summary.get("unknowns", [])), summary.get("risk_level", "unknown"), float(summary.get("confidence", 0)),
+                int(bool(summary.get("requires_follow_up", False))), summary.get("follow_up_reason", ""), self.db.dumps(source_counts), summary_type, status, model_call_id, now_iso(), dedup_key,
+            ))
+        return row_json(self.db.fetch_one("SELECT * FROM agent_period_summaries WHERE id=?", (summary_id,)), ("key_events_json", "action_timeline_json", "stable_states_json", "unknowns_json", "source_counts_json"))
+
+    def agent_period_summaries(self, limit: int = 50) -> list[dict]:
+        return [row_json(row, ("key_events_json", "action_timeline_json", "stable_states_json", "unknowns_json", "source_counts_json"))
+                for row in self.db.fetch_all("SELECT * FROM agent_period_summaries WHERE subject_id=? ORDER BY window_end DESC LIMIT ?", (self.settings.subject_id, limit))]
+
     def add_agent_run_event(self, agent_run_id: str, *, stage: str, event_type: str,
                             message: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         event_id = make_id("agent_evt")
@@ -215,13 +366,14 @@ class Store:
         if existing:
             return row_json(existing, ("facts_json", "objects_json", "actions_json", "changes_json", "warnings_json", "unknowns_json"))
         with self.db.transaction() as conn:
-            conn.execute("""INSERT INTO visual_descriptions(id,subject_id,stream_id,description_type,window_id,start_offset_ms,end_offset_ms,description_text,facts_json,objects_json,actions_json,changes_json,warnings_json,unknowns_json,confidence,warning_level,model_call_id,scene_context_id,created_at,dedup_key)
-                           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (description_id, self.settings.subject_id, stream_id,
+            conn.execute("""INSERT INTO visual_descriptions(id,subject_id,stream_id,description_type,window_id,start_offset_ms,end_offset_ms,description_text,facts_json,objects_json,actions_json,changes_json,warnings_json,unknowns_json,confidence,warning_level,risk_event_type,risk_confirmed,model_call_id,scene_context_id,created_at,dedup_key)
+                           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (description_id, self.settings.subject_id, stream_id,
                             window.get("description_type", "detail"), window["window_id"], int(window.get("start_offset_ms", 0)), int(window.get("end_offset_ms", 0)),
                             description["description"], self.db.dumps(description.get("observed_facts", [])), self.db.dumps(description.get("visible_objects", [])),
                             self.db.dumps(description.get("person_actions", [])), self.db.dumps(description.get("changes", [])),
                             self.db.dumps(description.get("warnings", [])), self.db.dumps(description.get("unknowns", [])),
-                            float(description.get("confidence", 0)), description.get("warning_level", "none"), model_call_id,
+                            float(description.get("confidence", 0)), description.get("warning_level", "none"),
+                            description.get("risk_event_type", ""), int(bool(description.get("risk_confirmed", False))), model_call_id,
                             scene_context_id, now_iso(), dedup_key))
         return row_json(self.db.fetch_one("SELECT * FROM visual_descriptions WHERE id=?", (description_id,)),
                         ("facts_json", "objects_json", "actions_json", "changes_json", "warnings_json", "unknowns_json"))
@@ -318,6 +470,7 @@ class Store:
                                           prompt_version="vision-events.nemotron-omni.v1", schema_version="vision-observation.v1",
                                           status="valid", response=obs_dict)
             observed_at = self._stream_timestamp_conn(conn, run_id, observation.observed_at_offset_ms, ts)
+            observation_record = self._record_vision_observation_conn(conn, run_id, window_metadata, observation, call_id, observed_at)
             recognition_events = self._record_recognition_events_conn(conn, observation.event_candidates, call_id, run_id, window_metadata, observed_at)
 
             # VLM posture is an observation. The temporal tracker is the only
@@ -468,8 +621,34 @@ class Store:
                               "started_at": started_at.isoformat(), "ended_at": ended_at.isoformat(), "text": transcript_text,
                               "language": "zh-TW", "confidence": transcript_confidence, "retention_until": retention_until,
                               "model_call_id": call_id}
-        return {"evidence_id": evidence_id, "model_call_id": call_id, "events": changed, "recognition_events": recognition_events,
+        return {"evidence_id": evidence_id, "model_call_id": call_id, "observation": observation_record, "events": changed, "recognition_events": recognition_events,
                 "transcript": transcript, "state_tracker": tracker_snapshot}
+
+    def _record_vision_observation_conn(self, conn, stream_id: str, window: dict[str, Any],
+                                        observation: VisionObservation, model_call_id: str | None,
+                                        observed_at: str) -> dict[str, Any]:
+        window_id = str(window.get("window_id") or f"{stream_id}:{observed_at}")
+        dedup_key = f"vision-observation:{stream_id}:{window_id}:v1"
+        existing = conn.execute("SELECT * FROM vision_observations WHERE dedup_key=?", (dedup_key,)).fetchone()
+        if existing:
+            return row_json(dict(existing), ("observation_json",))
+        observation_id = make_id("obs")
+        conn.execute("""INSERT INTO vision_observations(
+            id,subject_id,stream_id,window_id,start_offset_ms,end_offset_ms,observed_at,summary_text,
+            warning_signal,observation_json,model_call_id,created_at,dedup_key
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+            observation_id, self.settings.subject_id, stream_id, window_id,
+            int(window.get("start_offset_ms", observation.observed_at_offset_ms)),
+            int(window.get("end_offset_ms", observation.observed_at_offset_ms)), observed_at,
+            observation.change_summary[:240], observation.warning_signal,
+            self.db.dumps(observation.model_dump()), model_call_id, now_iso(), dedup_key,
+        ))
+        return row_json(dict(conn.execute("SELECT * FROM vision_observations WHERE id=?", (observation_id,)).fetchone()), ("observation_json",))
+
+    def vision_observations(self, limit: int = 50) -> list[dict]:
+        return [row_json(row, ("observation_json",)) for row in self.db.fetch_all(
+            "SELECT * FROM vision_observations WHERE subject_id=? ORDER BY observed_at DESC, end_offset_ms DESC LIMIT ?",
+            (self.settings.subject_id, limit))]
 
     @staticmethod
     def _state_in_conn(conn, key: str, default: Any) -> Any:
@@ -670,6 +849,199 @@ class Store:
 
     def logs(self, limit: int = 100) -> list[dict]:
         return self.db.fetch_all("SELECT * FROM app_logs ORDER BY id DESC LIMIT ?", (limit,))
+
+    # --- Resident Interaction Agent persistence (two driver layers) ---
+    def record_resident_run(self, *, driver: str, trigger_type: str, trigger_id: str,
+                            conversation_id: str | None, status: str, action: str,
+                            input_json: dict[str, Any], output_json: dict[str, Any] | None = None,
+                            provider: str = "", model: str = "", latency_ms: int | None = None,
+                            error_code: str | None = None, dedup_key: str | None = None) -> dict:
+        run_id = make_id("resrun")
+        now = now_iso()
+        dedup_key = dedup_key or f"{driver}:{trigger_type}:{conversation_id or 'default'}:{self.settings.config_version}"
+        with self.db.transaction() as conn:
+            if conn.execute("SELECT 1 FROM resident_agent_runs WHERE dedup_key=?", (dedup_key,)).fetchone():
+                return self.resident_run_by_id(conn.execute("SELECT id FROM resident_agent_runs WHERE dedup_key=? ORDER BY created_at DESC LIMIT 1", (dedup_key,)).fetchone()["id"])
+            conn.execute("INSERT INTO resident_agent_runs(id,subject_id,conversation_id,driver,trigger_type,status,action,input_json,output_json,provider,model,latency_ms,error_code,created_at,completed_at,dedup_key) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                         (run_id, self.settings.subject_id, conversation_id, driver, trigger_type, status, action,
+                          self.db.dumps(input_json), self.db.dumps(output_json) if output_json is not None else None,
+                          provider, model, latency_ms, error_code, now, now, dedup_key))
+        return row_json(self.db.fetch_one("SELECT * FROM resident_agent_runs WHERE id=?", (run_id,)),
+                        ("input_json", "output_json"))
+
+    def resident_run_by_id(self, run_id: str) -> dict | None:
+        row = self.db.fetch_one("SELECT * FROM resident_agent_runs WHERE id=?", (run_id,))
+        return row_json(row, ("input_json", "output_json")) if row else None
+
+    def finish_resident_run(self, run_id: str, *, status: str, action: str,
+                            output_json: dict[str, Any] | None = None, error_code: str | None = None,
+                            latency_ms: int | None = None) -> dict | None:
+        now = now_iso()
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE resident_agent_runs SET status=?, action=?, output_json=?, error_code=?, latency_ms=?, completed_at=? WHERE id=?",
+                         (status, action, self.db.dumps(output_json) if output_json is not None else None, error_code, latency_ms, now, run_id))
+        return self.resident_run_by_id(run_id)
+
+    def resident_runs(self, *, driver: str | None = None, limit: int = 100) -> list[dict]:
+        where, params = ["subject_id=?"], [self.settings.subject_id]
+        if driver:
+            where.append("driver=?"); params.append(driver)
+        sql = "SELECT * FROM resident_agent_runs WHERE " + " AND ".join(where) + f" ORDER BY created_at DESC LIMIT {int(limit)}"
+        return [row_json(r, ("input_json", "output_json")) for r in self.db.fetch_all(sql, tuple(params))]
+
+    def add_resident_message(self, *, conversation_id: str, role: str, text: str,
+                             intent: str | None = None, run_id: str | None = None,
+                             asr_status: str | None = None, tts_artifact_id: str | None = None) -> dict:
+        msg_id = make_id("resmsg")
+        with self.db.transaction() as conn:
+            conn.execute("INSERT INTO resident_messages(id,subject_id,conversation_id,role,text,intent,run_id,asr_status,tts_artifact_id,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                         (msg_id, self.settings.subject_id, conversation_id, role, text, intent, run_id, asr_status, tts_artifact_id, now_iso()))
+        return row_json(self.db.fetch_one("SELECT * FROM resident_messages WHERE id=?", (msg_id,)), ())
+
+    def record_resident_request(self, *, conversation_id: str, run_id: str, text: str,
+                                intent: str, confidence: float, extra: dict[str, Any] | None = None) -> dict | None:
+        """Record an explicit resident request in the shared event timeline.
+
+        Ordinary conversation is deliberately excluded. The event is an
+        observed interaction request, not a completed action or a clinical
+        conclusion; downstream policy must decide whether anything happens.
+        """
+        labels = {
+            "question": "使用者詢問", "reminder": "使用者要求提醒", "confirmation": "使用者要求確認",
+            "clarification": "使用者要求澄清", "repeat": "使用者要求重複", "stop": "使用者要求停止",
+            "forget": "使用者要求忘記／刪除", "memory_query": "使用者查詢記憶", "help": "使用者要求協助",
+            "event_report": "使用者陳述事件", "preference_statement": "使用者陳述偏好",
+            "schedule_reminder": "使用者設定提醒", "proactive_settings": "使用者調整主動互動設定",
+        }
+        if intent not in labels or not text.strip():
+            return None
+        occurred_at = now_iso()
+        request_text = " ".join(text.split())[:1000]
+        event_id = make_id("rec")
+        attrs = {
+            "reason": f"{labels[intent]}：{request_text}", "request_text": request_text,
+            "intent": intent, "conversation_id": conversation_id, "run_id": run_id,
+            "source": "resident_interaction", "action_executed": False,
+        }
+        if extra:
+            attrs.update({key: value for key, value in extra.items() if value not in (None, "")})
+        dedup_key = f"resident-request:{self.settings.subject_id}:{run_id}"
+        with self.db.transaction() as conn:
+            conn.execute("""INSERT OR IGNORE INTO recognition_events(
+                id,subject_id,event_type,domain,label,status,occurred_at,confidence,attributes_json,
+                window_id,model_call_id,dedup_key,created_at,updated_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+                event_id, self.settings.subject_id, "user_request", "resident_interaction", labels[intent],
+                "observed", occurred_at, min(1.0, max(0.0, float(confidence))), self.db.dumps(attrs),
+                conversation_id, None, dedup_key, occurred_at, occurred_at,
+            ))
+        row = self.db.fetch_one("SELECT * FROM recognition_events WHERE dedup_key=?", (dedup_key,))
+        return row_json(row, ("attributes_json",)) if row else None
+
+    def add_resident_reminder(self, *, conversation_id: str, message: str, schedule_text: str,
+                              source_run_id: str) -> dict[str, Any]:
+        reminder_id = make_id("rem")
+        now = now_iso()
+        next_trigger_at = _parse_reminder_time(schedule_text)
+        dedup_key = f"resident-reminder:{self.settings.subject_id}:{source_run_id}"
+        with self.db.transaction() as conn:
+            conn.execute("""INSERT OR IGNORE INTO resident_reminders(
+                id,subject_id,conversation_id,message,schedule_text,next_trigger_at,status,source_run_id,triggered_at,created_at,updated_at,dedup_key
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""", (
+                reminder_id, self.settings.subject_id, conversation_id, message[:600], schedule_text[:120],
+                next_trigger_at, "pending", source_run_id, None, now, now, dedup_key,
+            ))
+        row = self.db.fetch_one("SELECT * FROM resident_reminders WHERE dedup_key=?", (dedup_key,))
+        return dict(row) if row else {}
+
+    def resident_reminders(self, *, status: str | None = None, limit: int = 100) -> list[dict]:
+        where, params = ["subject_id=?"], [self.settings.subject_id]
+        if status:
+            where.append("status=?"); params.append(status)
+        sql = "SELECT * FROM resident_reminders WHERE " + " AND ".join(where) + f" ORDER BY created_at DESC LIMIT {int(limit)}"
+        return self.db.fetch_all(sql, tuple(params))
+
+    def due_resident_reminders(self, *, at: str | None = None, limit: int = 20) -> list[dict]:
+        now = at or now_iso()
+        return self.db.fetch_all("SELECT * FROM resident_reminders WHERE subject_id=? AND status='pending' AND next_trigger_at IS NOT NULL AND next_trigger_at<=? ORDER BY next_trigger_at ASC LIMIT ?", (self.settings.subject_id, now, limit))
+
+    def mark_resident_reminder_triggered(self, reminder_id: str) -> dict | None:
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE resident_reminders SET status='triggered',triggered_at=?,updated_at=? WHERE id=? AND subject_id=?", (now_iso(), now_iso(), reminder_id, self.settings.subject_id))
+        return self.db.fetch_one("SELECT * FROM resident_reminders WHERE id=?", (reminder_id,))
+
+    def resident_messages(self, *, conversation_id: str | None = None, limit: int = 200) -> list[dict]:
+        where, params = ["subject_id=?"], [self.settings.subject_id]
+        if conversation_id:
+            where.append("conversation_id=?"); params.append(conversation_id)
+        sql = "SELECT * FROM resident_messages WHERE " + " AND ".join(where) + f" ORDER BY created_at ASC LIMIT {int(limit)}"
+        return self.db.fetch_all(sql, tuple(params))
+
+    def upsert_resident_memory(self, *, memory_type: str, title: str, content: str, confidence: float,
+                               requires_confirmation: bool = True, source_driver: str = "understanding",
+                               source_run_id: str | None = None) -> dict:
+        dedup_key = f"{source_driver}:{title}:{content[:200]}"
+        existing = self.db.fetch_one("SELECT * FROM resident_memories WHERE subject_id=? AND dedup_key=?", (self.settings.subject_id, dedup_key))
+        now = now_iso()
+        status = "pending" if requires_confirmation else "confirmed"
+        if existing:
+            mem_id = existing["id"]
+            with self.db.transaction() as conn:
+                conn.execute("UPDATE resident_memories SET confidence=?, memory_type=?, content_text=?, status=?, requires_confirmation=?, updated_at=? WHERE id=?",
+                             (confidence, memory_type, content, status, 0 if not requires_confirmation else 1, now, mem_id))
+        else:
+            mem_id = make_id("resmem")
+            with self.db.transaction() as conn:
+                conn.execute("INSERT INTO resident_memories(id,subject_id,memory_type,title,content_text,attributes_json,confidence,status,requires_confirmation,source_driver,source_run_id,confirmed_at,invalidated_at,created_at,updated_at,dedup_key) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                             (mem_id, self.settings.subject_id, memory_type, title, content, self.db.dumps({}), confidence, status, 0 if not requires_confirmation else 1, source_driver, source_run_id, None, None, now, now, dedup_key))
+        return self.resident_memory_by_id(mem_id)
+
+    def resolve_resident_memory(self, memory_id: str, action: str) -> dict | None:
+        mem = self.db.fetch_one("SELECT * FROM resident_memories WHERE id=? AND subject_id=?", (memory_id, self.settings.subject_id))
+        if not mem:
+            return None
+        now = now_iso()
+        with self.db.transaction() as conn:
+            if action == "confirm":
+                conn.execute("UPDATE resident_memories SET status='confirmed', requires_confirmation=0, confirmed_at=?, updated_at=? WHERE id=?", (now, now, memory_id))
+            elif action == "invalidate":
+                conn.execute("UPDATE resident_memories SET status='invalidated', invalidated_at=?, updated_at=? WHERE id=?", (now, now, memory_id))
+        return self.resident_memory_by_id(memory_id)
+
+    def resident_memory(self, *, status: str | None = None, source_driver: str | None = None, limit: int = 100) -> list[dict]:
+        where, params = ["subject_id=?"], [self.settings.subject_id]
+        if status:
+            where.append("status=?"); params.append(status)
+        if source_driver:
+            where.append("source_driver=?"); params.append(source_driver)
+        sql = "SELECT * FROM resident_memories WHERE " + " AND ".join(where) + f" ORDER BY updated_at DESC LIMIT {int(limit)}"
+        return [row_json(r, ("attributes_json",)) for r in self.db.fetch_all(sql, tuple(params))]
+
+    def resident_memory_by_id(self, memory_id: str) -> dict | None:
+        row = self.db.fetch_one("SELECT * FROM resident_memories WHERE id=?", (memory_id,))
+        return row_json(row, ("attributes_json",)) if row else None
+
+    def record_understanding_insight(self, *, run_id: str, observed_pattern: str, user_perspective: str,
+                                     preference_hypotheses: list[str] | None = None, state_hypotheses: list[str] | None = None,
+                                     should_initiate: bool = False, suggested_message: str = "", initiation_reasons: list[str] | None = None,
+                                     confidence: float, policy_json: dict[str, Any] | None = None, status: str = "proposed") -> dict:
+        ins_id = make_id("resins")
+        with self.db.transaction() as conn:
+            conn.execute("INSERT INTO resident_understanding_insights(id,subject_id,run_id,observed_pattern,user_perspective,preference_hypotheses_json,state_hypotheses_json,should_initiate,suggested_message,initiation_reasons_json,confidence,policy_json,status,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                         (ins_id, self.settings.subject_id, run_id, observed_pattern, user_perspective,
+                          self.db.dumps(preference_hypotheses or []), self.db.dumps(state_hypotheses or []),
+                          1 if should_initiate else 0, suggested_message, self.db.dumps(initiation_reasons or []), confidence,
+                          self.db.dumps(policy_json or {}), status, now_iso()))
+        return row_json(self.db.fetch_one("SELECT * FROM resident_understanding_insights WHERE id=?", (ins_id,)),
+                        ("preference_hypotheses_json", "state_hypotheses_json", "initiation_reasons_json", "policy_json"))
+
+    def understanding_insights(self, *, status: str | None = None, limit: int = 100) -> list[dict]:
+        where, params = ["subject_id=?"], [self.settings.subject_id]
+        if status:
+            where.append("status=?"); params.append(status)
+        sql = "SELECT * FROM resident_understanding_insights WHERE " + " AND ".join(where) + f" ORDER BY created_at DESC LIMIT {int(limit)}"
+        return [row_json(r, ("preference_hypotheses_json", "state_hypotheses_json", "initiation_reasons_json", "policy_json"))
+                for r in self.db.fetch_all(sql, tuple(params))]
 
     def _frigate_decision(self, detections: list[dict[str, Any]], explicit: bool | None = None) -> tuple[bool, str]:
         if explicit is not None:
