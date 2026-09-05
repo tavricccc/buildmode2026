@@ -4,3 +4,17 @@ __pycache__/
 *.egg-info/
 data/captures/
 
+# Environment secrets
+.env
+.env.*
+*.env
+**/.env
+!.env.example
+
+# Media & temporary test files
+*.mp4
+*.m4a
+*.webm
+*.wav
+*.mp3
+
