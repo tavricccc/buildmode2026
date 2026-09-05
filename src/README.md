@@ -1,5 +1,7 @@
 # Care Agent
 
+[![CI](https://github.com/tavricccc/buildmode2026/actions/workflows/ci.yml/badge.svg)](https://github.com/tavricccc/buildmode2026/actions/workflows/ci.yml)
+
 An eldercare monitoring pipeline that watches a single resident's home for
 falls and hydration, and spends as little as possible doing it.
 
