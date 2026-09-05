@@ -200,6 +200,51 @@ class CareContractsTest(unittest.TestCase):
         with wave.open(BytesIO(wav_bytes), "rb") as wav_file:
             self.assertEqual((wav_file.getnchannels(), wav_file.getsampwidth(), wav_file.getframerate(), wav_file.getnframes()), (1, 2, 16000, 16000))
 
+    def test_cloud_audio_is_disabled_by_default_and_never_promoted_to_observation(self):
+        settings = Settings(database_path=str(Path(self.tmp.name) / "cloud.db"), media_root=str(Path(self.tmp.name) / "cloud-media"),
+                             flow_model_provider="gmi_cloud", flow_model_base_url="https://provider.example/v1",
+                             flow_model_id="vision-model", flow_model_api_key="test-key", flow_model_audio_mode="auto")
+        captured = {}
+        original = adapter_module._http_json
+
+        def fake_http(method, url, **kwargs):
+            captured.update(kwargs)
+            return 200, {"choices": [{"message": {"content": json.dumps({
+                "observed_at_offset_ms": 0, "person_visible": True, "posture": "sitting",
+                "confidence": .9, "audio_present": True, "audio_events": ["alarm_sound"],
+                "speaker_emotion": "distressed", "speech_detected": True, "speech_transcript": "help",
+                "event_candidates": [{"event_type": "alarm_sound", "domain": "sound", "label": "alarm", "state": "started", "confidence": .9}],
+            }, ensure_ascii=False)}}]}
+
+        adapter_module._http_json = fake_http
+        try:
+            result = asyncio.run(VllmVisionAdapter(settings).analyze_images((b"fake-image",), audio_pcm=b"\x00\x00" * 16000))
+        finally:
+            adapter_module._http_json = original
+
+        self.assertEqual(result.status, "healthy")
+        self.assertEqual(captured["body"]["response_format"], {"type": "json_object"})
+        self.assertEqual(captured["body"]["context_length_exceeded_behavior"], "error")
+        content = captured["body"]["messages"][0]["content"]
+        self.assertFalse(any(item.get("type") == "audio_url" for item in content))
+        observation = result.payload["observation"]
+        self.assertFalse(observation["audio_present"])
+        self.assertEqual(observation["audio_events"], [])
+        self.assertFalse(observation["speech_detected"])
+        self.assertEqual(observation["speech_transcript"], "")
+        self.assertEqual(observation["event_candidates"], [])
+        self.assertIn("audio_not_available_to_active_model", observation["audio_uncertainty_reasons"])
+
+    def test_custom_cloud_provider_uses_configured_endpoint_and_portable_defaults(self):
+        settings = Settings(flow_model_provider="other_cloud", flow_model_base_url="https://other.example/v1",
+                             flow_model_id="other-vision", flow_model_api_key="test-key")
+        self.assertEqual(settings.inference_provider, "other_cloud")
+        self.assertEqual(settings.inference_base_url, "https://other.example/v1")
+        self.assertEqual(settings.inference_model, "other-vision")
+        self.assertEqual(settings.inference_api_key, "test-key")
+        self.assertEqual(settings.inference_response_format, "json_object")
+        self.assertFalse(settings.inference_audio_enabled)
+
     def test_exception_event_candidates_use_existing_event_contract_shape(self):
         observation = VisionObservation(observed_at_offset_ms=5000, person_visible=True, posture="sitting", vertical_transition="none", confidence=.8,
                                         drink_container="none", audio_present=True, audio_events=["door_knock"], speaker_emotion="neutral",

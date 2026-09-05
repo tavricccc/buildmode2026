@@ -200,6 +200,13 @@ class ReplayLoadRequest(BaseModel):
 class SetupSettingsPatch(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
+    flow_model_provider: str | None = Field(default=None, min_length=1, max_length=80)
+    flow_model_base_url: str | None = None
+    flow_model_id: str | None = Field(default=None, max_length=240)
+    flow_model_api_key: str | None = None
+    flow_model_response_format: Literal["auto", "json_object", "json_schema"] | None = None
+    flow_model_audio_mode: Literal["auto", "enabled", "disabled"] | None = None
+    flow_model_context_length_behavior: Literal["error", "truncate"] | None = None
     hydration_target_ml: int | None = Field(default=None, ge=100, le=10000)
     estimated_ml_per_session: int | None = Field(default=None, ge=20, le=2000)
     fall_confirm_window_sec: int | None = Field(default=None, ge=1, le=120)
@@ -216,6 +223,13 @@ class SetupSettingsPatch(BaseModel):
     def validate_url(cls, value: str | None) -> str | None:
         if value is not None and value and not value.startswith(("http://", "https://")):
             raise ValueError("minimax_base_url must be an http(s) URL")
+        return value
+
+    @field_validator("flow_model_base_url")
+    @classmethod
+    def validate_flow_model_url(cls, value: str | None) -> str | None:
+        if value is not None and value and not value.startswith(("http://", "https://")):
+            raise ValueError("flow_model_base_url must be an http(s) URL")
         return value
 
 

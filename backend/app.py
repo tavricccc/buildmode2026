@@ -72,6 +72,13 @@ jobs: dict[str, dict[str, Any]] = {}
 vlm_health: dict[str, Any] = {"status": "degraded" if settings.local_vlm_mode == "stub" else "unavailable", "detail": "not_probed"}
 minimax_health: dict[str, Any] = {"status": "unavailable", "detail": "not_probed"}
 main_agent_health: dict[str, Any] = {"status": "disabled" if not settings.main_agent_enabled else "unavailable", "detail": "not_started"}
+
+
+def flow_model_runtime_enabled() -> bool:
+    """Cloud flow models do not depend on the local_vlm mode switch."""
+    return settings.inference_provider != "local_vlm" or settings.local_vlm_mode in {"vllm", "real"}
+
+
 # One shared semaphore lets observation and main-agent calls run concurrently
 # while keeping the total number of in-flight Omni requests bounded.
 vllm_semaphore = asyncio.Semaphore(settings.vllm_max_concurrency)
@@ -162,7 +169,7 @@ async def handle_change_gate(session, image_bytes: tuple[bytes, ...], window: di
 
 
 async def handle_vllm_window(session, image_bytes: tuple[bytes, ...], window: dict[str, Any], audio_pcm: bytes | None) -> None:
-    if settings.local_vlm_mode not in {"vllm", "real"}:
+    if not flow_model_runtime_enabled():
         return
     scene_context = await ensure_scene_context(session, image_bytes, window)
     async with vllm_semaphore:
@@ -421,7 +428,7 @@ def service(name: str, status: str, detail: Any = None) -> dict[str, Any]:
 
 
 def status_payload() -> dict[str, Any]:
-    local_status = vlm_health["status"] if settings.local_vlm_mode in {"vllm", "real"} else "degraded"
+    local_status = vlm_health["status"] if flow_model_runtime_enabled() else "degraded"
     browser_capture = store.get_state("browser_capture", {}) or {}
     active_streams = media_bridge.active_snapshot()
     stream_active = bool(active_streams)
@@ -432,7 +439,7 @@ def status_payload() -> dict[str, Any]:
     microphone_status = "healthy" if stream_active or browser_capture.get("microphone_active") else "unavailable"
     if source_status not in {"healthy", "loaded", "playing", "paused"}:
         source_status = "degraded" if settings.active_source == "simulated" else "unavailable"
-    source_detail = replay.snapshot() if settings.active_source == "replay" else {"source": "browser_media", "active_streams": active_streams, "vllm_sampling": settings.local_vlm_mode in {"vllm", "real"}}
+    source_detail = replay.snapshot() if settings.active_source == "replay" else {"source": "browser_media", "active_streams": active_streams, "vllm_sampling": flow_model_runtime_enabled()}
     return {"app": "healthy", "environment": settings.app_env, "run_id": replay.run_id,
             "source": {"name": settings.active_source, "status": source_status, "detail": source_detail},
             "services": {
@@ -445,7 +452,7 @@ def status_payload() -> dict[str, Any]:
                 "microphone": service("microphone", microphone_status, browser_capture if microphone_status == "healthy" else "browser microphone not active"),
                 "vad": service("vad", "unavailable", "Silero runtime not configured"),
                 "whisper": service("whisper", "unavailable", settings.whisper_model),
-                "local_vlm": service("local_vlm", local_status, {"provider": settings.inference_provider, "mode": settings.local_vlm_mode, "model": settings.inference_model if settings.local_vlm_mode in {"vllm", "real"} else settings.local_vlm_model, "endpoint": settings.inference_base_url if settings.local_vlm_mode in {"vllm", "real"} else None, "quantization": settings.local_vlm_quantization, "change_gate": {"method": "local_pixel_delta_plus_audio", "threshold": settings.change_gate_threshold, "audio_delta_threshold": settings.change_gate_audio_delta_threshold, "min_changed_pairs": settings.change_gate_min_changed_pairs, "strong_score_multiplier": settings.change_gate_strong_score_multiplier, "model_calls": 0, "thinking": False}, "thinking": {"change_gate": False, "observation": settings.vllm_observation_enable_thinking, "main_agent": settings.vllm_main_agent_enable_thinking}, "sampling": {"fps": settings.vllm_sample_fps, "window_seconds": settings.vllm_window_seconds, "window_stride_seconds": settings.vllm_window_stride_seconds, "frames_per_window": settings.vllm_window_frames, "max_concurrency": settings.vllm_max_concurrency, "max_pending_windows": settings.vllm_max_pending_windows}, "detail_sampling": {"fps": settings.detail_sample_fps, "window_seconds": settings.detail_window_seconds, "window_frames": settings.detail_window_frames, "active_seconds": settings.detail_active_seconds}, "focus_sampling": {"fps": settings.vllm_sample_fps, "window_seconds": settings.focus_window_seconds, "window_frames": settings.focus_window_frames}, "detail": vlm_health.get("detail")}),
+                "local_vlm": service("local_vlm", local_status, {"provider": settings.inference_provider, "mode": settings.local_vlm_mode, "model": settings.inference_model if flow_model_runtime_enabled() else settings.local_vlm_model, "endpoint": settings.inference_base_url if flow_model_runtime_enabled() else None, "quantization": settings.local_vlm_quantization, "change_gate": {"method": "local_pixel_delta_plus_audio", "threshold": settings.change_gate_threshold, "audio_delta_threshold": settings.change_gate_audio_delta_threshold, "min_changed_pairs": settings.change_gate_min_changed_pairs, "strong_score_multiplier": settings.change_gate_strong_score_multiplier, "model_calls": 0, "thinking": False}, "thinking": {"change_gate": False, "observation": settings.vllm_observation_enable_thinking, "main_agent": settings.vllm_main_agent_enable_thinking}, "sampling": {"fps": settings.vllm_sample_fps, "window_seconds": settings.vllm_window_seconds, "window_stride_seconds": settings.vllm_window_stride_seconds, "frames_per_window": settings.vllm_window_frames, "max_concurrency": settings.vllm_max_concurrency, "max_pending_windows": settings.vllm_max_pending_windows}, "detail_sampling": {"fps": settings.detail_sample_fps, "window_seconds": settings.detail_window_seconds, "window_frames": settings.detail_window_frames, "active_seconds": settings.detail_active_seconds}, "focus_sampling": {"fps": settings.vllm_sample_fps, "window_seconds": settings.focus_window_seconds, "window_frames": settings.focus_window_frames}, "detail": vlm_health.get("detail")}),
                 "main_agent": service("main_agent", main_agent_health["status"], main_agent_health.get("detail") | {"provider": settings.inference_provider, "enabled": settings.main_agent_enabled, "pending": len(main_agent_tasks), "max_pending": settings.main_agent_max_pending, "parallel_limit": settings.vllm_max_concurrency, "interval_seconds": settings.main_agent_interval_seconds} if isinstance(main_agent_health.get("detail"), dict) else {"provider": settings.inference_provider, "enabled": settings.main_agent_enabled, "pending": len(main_agent_tasks), "max_pending": settings.main_agent_max_pending, "parallel_limit": settings.vllm_max_concurrency, "interval_seconds": settings.main_agent_interval_seconds, "detail": main_agent_health.get("detail")}),
                 "minimax": service("minimax", minimax_health["status"], minimax_health.get("detail") | {"configured": settings.minimax_configured, "model": settings.minimax_model} if isinstance(minimax_health.get("detail"), dict) else {"configured": settings.minimax_configured, "model": settings.minimax_model, "detail": minimax_health.get("detail")}),
                 "telegram": service("telegram", "healthy" if settings.telegram_configured else "unavailable", {"configured": settings.telegram_configured}),
@@ -532,7 +539,7 @@ async def lifespan(_: FastAPI):
     # Restore only non-secret settings. Secret values intentionally remain in
     # environment/process memory and are never persisted in SQLite.
     for saved in db.fetch_all("SELECT key,value_json,config_version FROM settings"):
-        if saved["key"] in {"minimax_api_key", "telegram_bot_token"}:
+        if saved["key"] in {"flow_model_api_key", "minimax_api_key", "telegram_bot_token"}:
             continue
         try:
             value = json.loads(saved["value_json"])
@@ -548,7 +555,7 @@ async def lifespan(_: FastAPI):
             conn.execute("INSERT OR IGNORE INTO replay_sources(id,display_name,event_type,duration_ms,source_uri,allowlisted) VALUES(?,?,?,?,?,1)",
                          (item["id"], item["display_name"], item["event_type"], item["duration_ms"], f"synthetic://{item['id']}"))
     mqtt_worker.start(asyncio.get_running_loop())
-    if settings.local_vlm_mode in {"vllm", "real"}:
+    if flow_model_runtime_enabled():
         vlm_probe = await vllm.probe()
         vlm_health.update({"status": vlm_probe.status, "detail": vlm_probe.payload | ({"error_code": vlm_probe.error_code} if vlm_probe.error_code else {})})
         if settings.main_agent_enabled:
@@ -1030,6 +1037,9 @@ async def get_settings_api():
             "local_vlm_model": settings.local_vlm_model, "local_vlm_quantization": settings.local_vlm_quantization, "whisper_model": settings.whisper_model,
             "local_vlm_mode": settings.local_vlm_mode, "vllm_base_url": settings.vllm_base_url, "vllm_model": settings.vllm_model,
             "flow_model_provider": settings.inference_provider, "flow_model_base_url": settings.inference_base_url, "flow_model_id": settings.inference_model,
+            "flow_model_api_key_configured": settings.inference_provider != "local_vlm" and bool(settings.inference_api_key), "flow_model_response_format": settings.inference_response_format,
+            "flow_model_audio_mode": settings.flow_model_audio_mode, "flow_model_audio_enabled": settings.inference_audio_enabled,
+            "flow_model_context_length_behavior": settings.inference_context_length_behavior,
             "vllm_sample_fps": settings.vllm_sample_fps, "vllm_window_seconds": settings.vllm_window_seconds, "vllm_window_stride_seconds": settings.vllm_window_stride_seconds, "vllm_window_frames": settings.vllm_window_frames,
             "hydration_target_ml": settings.hydration_target_ml, "estimated_ml_per_session": settings.estimated_ml_per_session,
             "fall_confirm_window_sec": settings.fall_confirm_window_sec, "fall_no_recovery_alert_sec": settings.fall_no_recovery_alert_sec,
@@ -1041,7 +1051,7 @@ async def get_settings_api():
 @app.patch("/api/settings")
 async def patch_settings(request: SetupSettingsPatch):
     values = request.model_dump(exclude_none=True)
-    secret_fields = {"minimax_api_key", "telegram_bot_token"}
+    secret_fields = {"flow_model_api_key", "minimax_api_key", "telegram_bot_token"}
     for key, value in values.items():
         if key in secret_fields:
             setattr(settings, key, value)

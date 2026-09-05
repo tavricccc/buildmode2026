@@ -12,8 +12,8 @@
 HTTPS browser MediaStream (camera + microphone)
   → continuous WebM over WSS /ws/media
   → backend in-memory sampler
-  → 2 FPS × 5 seconds = 10 ordered images + 5 seconds 16 kHz mono audio
-  → GMI Cloud MiniMaxAI/MiniMax-M3（有變化窗口；已獲使用者同意）
+  → 2 FPS × 5 seconds = 10 ordered images + optional 5 seconds 16 kHz mono audio
+  → configured flow model（預設 GMI Cloud MiniMaxAI/MiniMax-M3；audio 需 capability probe 通過）
   → L0 local change gate（每 5 秒只輸出有／無）
   → 有變化才進 L1 structured Observation / event_candidates
   → temporal posture tracker（跨窗口確認起身／坐下）
@@ -59,7 +59,7 @@ Frigate、MQTT 與 RTSP adapter 仍保留，等需要時再接回；它們不是
 - `fall`、`hydration` 優先使用既有事件欄位與 state machine；只有家庭聲音、人物活動、非人物物件等例外才建立 `recognition_events`。
 - `UNKNOWN` 是合法且重要的結果；不可用最後觀察位置冒充目前位置。
 - Default Silent；詢問、提醒、警告都要經過 attention／interruption policy。
-- 原始影像與音訊只在本機短暫保留；獲授權的有變化窗口會送至 GMI Cloud MiniMax M3，SQLite 保存必要 metadata、hash、confidence、窗口與 provenance，不保存 raw stream 或 API key。
+- 原始影像與音訊只在本機短暫保留；獲授權的有變化窗口會送至設定的 flow model endpoint，SQLite 保存必要 metadata、hash、confidence、窗口與 provenance，不保存 raw stream 或 API key。
 - 目前不做診斷、治療、自動通報或 L4 emergency executor。
 - Caregiver 預設收到 privacy-aggregated summary，不是完整生活紀錄。
 - Main Agent 會保存 facts、跨 frame 時序、existing-first mapping、Unknown/Hypothesis、attention score、policy gates 與 next action；模型建議不等於已執行 action。
@@ -75,7 +75,7 @@ npm start
 
 前端：[https://192.168.50.140:5173](https://192.168.50.140:5173)
 
-第一次使用自簽憑證時，請信任 [certs/lan.crt](certs/lan.crt)，再允許 camera／microphone 權限。前端串流後，VLM panel 應顯示 `10 frames / 5s`，並顯示 `audio`、`sound`、`emotion`。
+第一次使用自簽憑證時，請信任 [certs/lan.crt](certs/lan.crt)，再允許 camera／microphone 權限。前端串流後，VLM panel 應顯示 `10 frames / 5s`；`audio`、`sound`、`emotion` 只有 active model 通過 audio capability probe 或獨立 ASR 已啟用時才可顯示可用結果，否則應顯示 unavailable/unknown。
 
 ## 驗證
 

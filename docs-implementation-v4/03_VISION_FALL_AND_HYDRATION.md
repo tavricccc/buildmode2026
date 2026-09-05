@@ -17,7 +17,7 @@
 
 | 模式 | 內容 | 狀態 |
 |---|---|---|
-| `frames`(P0 預設) | 10 個 `image_url` content part(base64 JPEG)+ 一個 base64 WAV | **已實測可用**,10 張可通過 |
+| `frames`(P0 預設) | 10 個 `image_url` content part(base64 JPEG)；音訊只有在 capability probe 通過後才附送 | **影像已實測可用**,10 張可通過 |
 | `video` | 單一 `video_url` content part | provider 未文件化,須 probe 後才可啟用 |
 
 `video` 模式在 provider 支援時可減少 payload 體積並保留完整時序;但目前 GMI 對 M3 的 `video_url` wire format 沒有官方定義(見 `14`),故不得作為預設。兩種模式回傳同一份 `VisionObservation`,切換不影響狀態機。
@@ -90,5 +90,5 @@ Pending 永遠最多一筆:最多一個 running 和一個 latest pending,不累�
 以下需實測後回填,不得先寫入規格當作已知:
 
 1. **單次 round trip 延遲** — 決定基準心跳與片段長度是否可維持即時處理。
-2. **模型是否實際使用音軌** — 若確實理解音訊,`09` 的獨立 ASR 管線在 P0 可省略;若僅容器帶有音軌而模型忽略,`09` 維持原設計。
+2. **模型是否實際使用音軌** — 必須由 capability probe 明確 opt-in；未通過時 adapter 不送音訊，也不採信模型回傳的音訊欄位，需啟用 `09` 的獨立 ASR 管線。
 3. **`usage.prompt_tokens` 實測值** — 影片無官方 token 換算公式,成本模型只能由實測回填。

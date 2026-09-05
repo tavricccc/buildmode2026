@@ -108,7 +108,7 @@ frames 正確 12/12  順序與張數每次都對(同一批素材)
 
 **catalog 內沒有任何語音模型。** 83 個模型的名稱與 metadata 均不含 audio/speech/whisper/tts/omni,全為文字或視覺模型。`/v1/audio/transcriptions` 端點僅依 model 名稱轉發,沒有可用的 ASR target。
 
-→ 音訊要落地只能外接:另一家 ASR endpoint,或本地 whisper.cpp。v4 `09` 的獨立管線設計支援這條路,model slot 指向另一 endpoint 即可,domain code 不變。
+→ Adapter 預設停用 GMI M3 的音訊輸入與音訊欄位；音訊要落地只能外接:另一家 ASR endpoint,或本地 whisper.cpp。v4 `09` 的獨立管線設計支援這條路,model slot 指向另一 endpoint 即可,domain code 不變。只有其他 vision model 通過 probe 後，才以 `FLOW_MODEL_AUDIO_MODE=enabled` opt-in。
 
 ## 已知風險
 

@@ -20,7 +20,7 @@ def _secret_from_file(path: str) -> str:
         return value[7:].strip()
     if "=" in value:
         name, candidate = value.split("=", 1)
-        if name.strip().lower() in {"api_key", "gmi_api_key", "minimax_api_key"}:
+        if name.strip().lower() in {"api_key", "gmi_api_key", "minimax_api_key", "flow_model_api_key"}:
             return candidate.strip().strip("\"'")
     return value
 
@@ -64,6 +64,9 @@ class Settings:
     flow_model_id: str = field(default_factory=lambda: os.getenv("FLOW_MODEL_ID", ""))
     flow_model_api_key_file: str = field(default_factory=lambda: os.getenv("FLOW_MODEL_API_KEY_FILE", ""))
     flow_model_api_key: str = field(default_factory=lambda: os.getenv("FLOW_MODEL_API_KEY", "") or _secret_from_file(os.getenv("FLOW_MODEL_API_KEY_FILE", "")))
+    flow_model_response_format: str = field(default_factory=lambda: os.getenv("FLOW_MODEL_RESPONSE_FORMAT", "auto").strip().lower())
+    flow_model_audio_mode: str = field(default_factory=lambda: os.getenv("FLOW_MODEL_AUDIO_MODE", "auto").strip().lower())
+    flow_model_context_length_behavior: str = field(default_factory=lambda: os.getenv("FLOW_MODEL_CONTEXT_LENGTH_BEHAVIOR", "error").strip().lower())
     video_retention_seconds: int = field(default_factory=lambda: max(10, int(os.getenv("VIDEO_RETENTION_SECONDS", "60"))))
     detail_sample_fps: float = field(default_factory=lambda: float(os.getenv("DETAIL_SAMPLE_FPS", "5.0")))
     detail_window_seconds: float = field(default_factory=lambda: float(os.getenv("DETAIL_WINDOW_SECONDS", "2.0")))
@@ -115,25 +118,72 @@ class Settings:
 
     @property
     def inference_provider(self) -> str:
-        return "gmi_cloud" if self.flow_model_provider in {"gmi", "gmi_cloud", "minimax_cloud"} else "local_vlm"
+        provider = self.flow_model_provider.strip().lower()
+        if provider in {"gmi", "gmi_cloud", "minimax_cloud"}:
+            return "gmi_cloud"
+        if provider in {"", "local", "local_vlm", "vllm"}:
+            return "local_vlm"
+        # Keep explicitly configured cloud providers visible to the gateway.
+        # The adapter uses capabilities/format settings instead of treating
+        # every non-GMI provider as a local vLLM endpoint.
+        return provider
 
     @property
     def inference_base_url(self) -> str:
+        if self.inference_provider == "local_vlm":
+            return self.vllm_base_url
         if self.inference_provider == "gmi_cloud":
             return (self.flow_model_base_url or "https://api.gmi-serving.com/v1").rstrip("/")
-        return self.vllm_base_url
+        return self.flow_model_base_url.rstrip("/")
 
     @property
     def inference_model(self) -> str:
+        if self.inference_provider == "local_vlm":
+            return self.vllm_model
         if self.inference_provider == "gmi_cloud":
             return self.flow_model_id or self.minimax_model or "MiniMaxAI/MiniMax-M3"
-        return self.vllm_model
+        return self.flow_model_id
 
     @property
     def inference_api_key(self) -> str:
+        if self.inference_provider == "local_vlm":
+            return self.vllm_api_key
         if self.inference_provider == "gmi_cloud":
             return self.flow_model_api_key or self.minimax_api_key
-        return self.vllm_api_key
+        return self.flow_model_api_key
+
+    @property
+    def inference_response_format(self) -> str:
+        """Return the structured-output wire format for the active endpoint.
+
+        Cloud providers default to the portable json_object contract. Local
+        runtimes keep the existing json_schema path unless explicitly
+        overridden, while a provider-specific override supports probing a
+        compatible endpoint that has different guarantees.
+        """
+        configured = self.flow_model_response_format
+        if configured in {"json_object", "json_schema"}:
+            return configured
+        return "json_schema" if self.inference_provider == "local_vlm" else "json_object"
+
+    @property
+    def inference_audio_enabled(self) -> bool:
+        """Whether audio is sent to the active model and trusted in output.
+
+        ``auto`` is intentionally conservative for cloud endpoints: audio is
+        enabled only after an endpoint/model-specific probe opts in. The
+        existing local Omni path remains enabled by default.
+        """
+        mode = self.flow_model_audio_mode
+        if mode in {"on", "true", "enabled", "yes"}:
+            return True
+        if mode in {"off", "false", "disabled", "no"}:
+            return False
+        return self.inference_provider == "local_vlm"
+
+    @property
+    def inference_context_length_behavior(self) -> str:
+        return self.flow_model_context_length_behavior if self.flow_model_context_length_behavior in {"error", "truncate"} else "error"
 
     @property
     def vision_video_mode(self) -> bool:

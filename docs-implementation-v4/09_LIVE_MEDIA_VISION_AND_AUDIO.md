@@ -14,14 +14,14 @@ Local endpoint 和 cloud endpoint 使用完全相同的 media message、timeout�
 
 ## Audio
 
-P0 的音軌**隨影片片段一併送出**,不另外抽取:
+P0 的音訊在 host 端隨窗口擷取，但只有 active vision endpoint/model 通過 audio capability probe 並明確 opt-in 時，才隨 media message 送出；未通過時不得假設模型聽到音訊，也不採信其音訊欄位:
 
 ```text
-RTSP → bounded buffer → 5 秒片段(video + audio)
+RTSP → bounded buffer → 5 秒片段(video + optional audio)
   → active vision model → VisionObservation
 ```
 
-獨立的音訊管線維持規格但**列為 P1**,在 vision model 確認不理解音訊、或需要逐字稿供 Agent 使用時啟用:
+獨立的音訊管線維持規格但**列為 P1**；當 vision model 未通過 audio probe、或需要逐字稿供 Agent 使用時提前啟用:
 
 ```text
 Host microphone → bounded PCM buffer → VAD → speech segment
@@ -31,7 +31,7 @@ Host microphone → bounded PCM buffer → VAD → speech segment
 
 VAD 可以是非模型式 local gate;若使用模型式 VAD,也必須由 model slot 經 OpenAI-compatible endpoint,不能成為隱藏的 vendor SDK 例外。Segment duration、silence、language、prompt、retention 與 queue limit 可在前端設定。
 
-> **未決**:vision model 是否實際理解音軌內容,尚未實測(見 `03` 未決事項)。確認理解則 P0 不需獨立 ASR;確認忽略則 P1 的音訊管線需提前。在實測回填前,不得宣稱系統具備聲音事件偵測能力。
+> **Provider-specific**: vision model 是否實際理解音軌內容由 capability probe 決定。未通過 probe 時，adapter 預設不送音訊並將音訊／逐字稿欄位標為 unavailable/unknown；在獨立 ASR 啟用前，不得宣稱系統具備聲音事件偵測能力。
 
 ## 時間與缺漏
 

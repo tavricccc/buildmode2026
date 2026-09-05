@@ -85,9 +85,49 @@ class VllmVisionAdapter:
     """OpenAI-compatible image adapter for the local Nemotron Omni server."""
 
     PROMPT_VERSION = "vision-events.nemotron-omni.v1"
+    AUDIO_EVENT_TYPES = frozenset({
+        "doorbell", "door_knock", "door_open", "door_closed", "fridge_open", "fridge_closed",
+        "water_running", "toilet_flush", "washing_machine", "microwave", "rice_cooker",
+        "range_hood", "dishes", "impact_sound", "cough", "tv_audio", "speech_activity", "alarm_sound",
+    })
 
     def __init__(self, settings: Settings):
         self.settings = settings
+
+    def _response_format(self, name: str, schema: dict[str, Any]) -> dict[str, Any]:
+        if self.settings.inference_response_format == "json_object":
+            return {"type": "json_object"}
+        return {"type": "json_schema", "json_schema": {"name": name, "strict": True, "schema": schema}}
+
+    def _request_options(self, *, name: str, schema: dict[str, Any]) -> dict[str, Any]:
+        options = {"response_format": self._response_format(name, schema)}
+        # GMI and configured cloud endpoints must fail loudly on overflow;
+        # local runtimes may reject this provider-specific option.
+        if self.settings.inference_provider != "local_vlm":
+            options["context_length_exceeded_behavior"] = self.settings.inference_context_length_behavior
+        return options
+
+    @classmethod
+    def _without_model_audio(cls, observation: VisionObservation, *, reason: str) -> VisionObservation:
+        """Remove audio-derived claims when the active model did not receive audio."""
+        candidates = [
+            item for item in observation.event_candidates
+            if item.domain != "sound" and item.event_type not in cls.AUDIO_EVENT_TYPES
+        ]
+        audio_reasons = list(dict.fromkeys([*observation.audio_uncertainty_reasons, reason]))[:20]
+        transcript_reasons = list(dict.fromkeys([*observation.transcript_uncertainty_reasons, reason]))[:20]
+        return observation.model_copy(update={
+            "audio_present": False,
+            "audio_events": [],
+            "speaker_emotion": "unknown",
+            "audio_confidence": None,
+            "audio_uncertainty_reasons": audio_reasons,
+            "speech_detected": False,
+            "speech_transcript": "",
+            "transcript_confidence": None,
+            "transcript_uncertainty_reasons": transcript_reasons,
+            "event_candidates": candidates,
+        })
 
     async def probe(self) -> AdapterResult:
         started = time.perf_counter()
@@ -333,13 +373,14 @@ class VllmVisionAdapter:
                                enable_thinking: bool = False) -> AdapterResult:
         started = time.perf_counter()
         request_content = list(content)
+        send_audio = audio_pcm if audio_pcm and self.settings.inference_audio_enabled else None
         transient_audio = None
-        if audio_pcm:
-            transient_audio, audio_uri = self._write_transient_audio(audio_pcm)
+        if send_audio:
+            transient_audio, audio_uri = self._write_transient_audio(send_audio)
             request_content.append({"type": "audio_url", "audio_url": {"url": audio_uri}})
         body = {"model": self.settings.inference_model, "messages": [{"role": "user", "content": request_content}],
                 "temperature": 0.0, "max_tokens": max_tokens, "chat_template_kwargs": {"enable_thinking": enable_thinking},
-                "response_format": {"type": "json_object" if self.settings.inference_provider == "gmi_cloud" else "json_schema", **({} if self.settings.inference_provider == "gmi_cloud" else {"json_schema": {"name": name, "strict": True, "schema": schema}})}}
+                **self._request_options(name=name, schema=schema)}
         headers = {"Authorization": f"Bearer {self.settings.inference_api_key}"} if self.settings.inference_api_key else None
         try:
             status, payload = await asyncio.to_thread(_http_json, "POST", f"{self.settings.inference_base_url}/chat/completions", headers=headers, body=body, timeout=timeout)
@@ -505,7 +546,7 @@ class VllmVisionAdapter:
             return AdapterResult("invalid", {"error": type(exc).__name__}, "VLLM_INVALID_FOCUS_REVIEW", result.latency_ms)
 
     def _observation_prompt(self, frame_count: int, scene_context: dict[str, Any] | None,
-                            *, media_kind: str = "frames") -> str:
+                            *, media_kind: str = "frames", audio_enabled: bool | None = None) -> str:
         """Prompt shared by the frames and video wire formats.
 
         Both wire formats carry the same window and must return the same
@@ -515,6 +556,12 @@ class VllmVisionAdapter:
         intro = (f"以下是依時間排序的 {frame_count} 張連續攝影機 frame，"
                  if media_kind == "frames"
                  else f"以下是一段 {self.settings.vllm_window_seconds:g} 秒的連續攝影機影片（約 {frame_count} 個取樣時點），")
+        audio_enabled = self.settings.inference_audio_enabled if audio_enabled is None else audio_enabled
+        audio_instruction = (
+            "本次 request 提供了模型可處理的音訊；只有確實辨識到聲音時才填 audio_present、audio_events、speaker_emotion 或 speech_transcript。"
+            if audio_enabled else
+            "本次 request 沒有提供模型可處理的音訊；audio_present 必須為 false，audio_events、speech_transcript 必須為空，speaker_emotion 必須為 unknown，不得猜測聲音事件。"
+        )
         prompt = (
             f"你是照護影像事件觀察器。{intro}"
             "請把它們視為同一個事件窗口，並只輸出一個 JSON object，不要 markdown、不要推理文字。"
@@ -525,7 +572,7 @@ class VllmVisionAdapter:
             "audio_present(boolean), audio_events(array of concise environment/sound event labels), speaker_emotion(calm|happy|sad|angry|fearful|distressed|neutral|unknown), audio_confidence(0..1), audio_uncertainty_reasons(array)。"
             "若聽到清楚的人聲或 speech_activity，speech_detected=true 並把可辨識內容放入 speech_transcript；沒有清楚語音時 speech_detected=false、speech_transcript=\"\"、transcript_confidence=0。不要猜測聽不清楚的字，transcript_uncertainty_reasons 說明原因。"
             "event_candidates(array)：優先使用 fall/hydration 既有事件欄位；只有家庭聲音、人物活動、非人物物件等例外才新增候選。可用 event_type 包含 doorbell、door_knock、door_open、door_closed、fridge_open、fridge_closed、water_running、toilet_flush、washing_machine、microwave、rice_cooker、range_hood、dishes、impact_sound、cough、tv_audio、speech_activity、alarm_sound、person_present、person_walking、person_sitting、person_lying、person_entered、person_left、person_inactive、object_cup、object_bottle、object_phone、object_remote、object_bag、object_pet、object_vehicle、smoke、fire。只有有證據且 confidence >= 0.55 才列出，否則留在 uncertainty。"
-            "若 request 提供 audio_url，audio_present 必須為 true；即使沒有辨識到聲音事件，audio_events 可以是空陣列並在 audio_uncertainty_reasons 說明。"
+            + audio_instruction +
             "輸出 change_detected(boolean)、change_confidence(0..1)、change_reasons(array) 與 change_summary(string)：只在相對於前一窗口有姿勢、人物、物件、聲音、光線或場景狀態變化時為 true；change_summary 必須用一句繁體中文簡短說明『觀察到的變化內容』，不要只寫『有變化』，沒有變化時填空字串。"
             "輸出 warning_signal(none|possible|high)：只有有潛在危險或需進一步注意的證據才提高，不要把一般人物出現當警示。"
             "這不是單張判讀：只有跨 frame 的變化才支持 vertical_transition；不要僅因單張 lying 確認跌倒。"
@@ -541,24 +588,25 @@ class VllmVisionAdapter:
             return AdapterResult("invalid", {"error": "empty_frame_window"}, "VLLM_EMPTY_FRAME_WINDOW")
         frame_count = len(images)
         encoded_images = [base64.b64encode(image).decode("ascii") for image in images]
-        prompt = self._observation_prompt(frame_count, scene_context, media_kind="frames")
+        send_audio = audio_pcm if audio_pcm and self.settings.inference_audio_enabled else None
+        prompt = self._observation_prompt(frame_count, scene_context, media_kind="frames", audio_enabled=send_audio is not None)
         content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
         content.extend({"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{encoded}"}} for encoded in encoded_images)
         transient_audio = None
-        if audio_pcm:
-            transient_audio, audio_uri = self._write_transient_audio(audio_pcm)
+        if send_audio:
+            transient_audio, audio_uri = self._write_transient_audio(send_audio)
             content.append({"type": "audio_url", "audio_url": {"url": audio_uri}})
-        response_format = {"type": "json_object"} if self.settings.inference_provider == "gmi_cloud" else {"type": "json_schema", "json_schema": {"name": "vision_observation", "strict": True, "schema": self._schema()}}
         body = {"model": self.settings.inference_model, "messages": [{"role": "user", "content": content}], "temperature": 0.0, "max_tokens": 512,
-                "chat_template_kwargs": {"enable_thinking": self.settings.vllm_observation_enable_thinking if enable_thinking is None else enable_thinking}, "response_format": response_format}
+                "chat_template_kwargs": {"enable_thinking": self.settings.vllm_observation_enable_thinking if enable_thinking is None else enable_thinking},
+                **self._request_options(name="vision_observation", schema=self._schema())}
         headers = {"Authorization": f"Bearer {self.settings.inference_api_key}"} if self.settings.inference_api_key else None
         try:
             status, payload = await asyncio.to_thread(_http_json, "POST", f"{self.settings.inference_base_url}/chat/completions", headers=headers, body=body, timeout=60)
             content = payload.get("choices", [{}])[0].get("message", {}).get("content", "")
             raw = self._extract_json(content)
             observation = VisionObservation.model_validate(self._normalize_observation(raw))
-            if audio_pcm and not observation.audio_present:
-                observation = observation.model_copy(update={"audio_present": True, "audio_uncertainty_reasons": [*observation.audio_uncertainty_reasons, "audio track was supplied but the model returned no audio event"]})
+            if send_audio is None:
+                observation = self._without_model_audio(observation, reason="audio_not_available_to_active_model")
             if status >= 300:
                 return AdapterResult("degraded", {"observation": observation.model_dump()}, "VLLM_HTTP_ERROR", int((time.perf_counter() - started) * 1000))
             return AdapterResult("healthy", {"observation": observation.model_dump()}, None, int((time.perf_counter() - started) * 1000))
@@ -631,30 +679,31 @@ class VllmVisionAdapter:
         if video_bytes is None and not images:
             return AdapterResult("invalid", {"error": "empty_frame_window"}, "VLLM_EMPTY_FRAME_WINDOW")
         frame_count = len(images) if images else self.settings.vllm_window_frames
+        send_audio = audio_pcm if audio_pcm and self.settings.inference_audio_enabled else None
         if video_bytes is None:
             window_seconds = max(0.1, float(self.settings.vllm_window_seconds))
             sample_fps = fps or (frame_count / window_seconds if frame_count else self.settings.vllm_sample_fps)
             try:
-                video_bytes = await asyncio.to_thread(self._encode_window_video, images, audio_pcm, sample_fps)
+                video_bytes = await asyncio.to_thread(self._encode_window_video, images, send_audio, sample_fps)
             except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
                 return AdapterResult("invalid", {"error": type(exc).__name__, "detail": str(exc)[-240:]},
                                      "VISION_VIDEO_ENCODE_FAILED", int((time.perf_counter() - started) * 1000))
         encoded = base64.b64encode(video_bytes).decode("ascii")
-        prompt = self._observation_prompt(frame_count, scene_context, media_kind="video")
+        send_audio = audio_pcm if audio_pcm and self.settings.inference_audio_enabled else None
+        prompt = self._observation_prompt(frame_count, scene_context, media_kind="video", audio_enabled=send_audio is not None)
         content: list[dict[str, Any]] = [{"type": "text", "text": prompt},
                                          {"type": "video_url", "video_url": {"url": f"data:{mime_type};base64,{encoded}"}}]
-        response_format = {"type": "json_object"} if self.settings.inference_provider == "gmi_cloud" else {"type": "json_schema", "json_schema": {"name": "vision_observation", "strict": True, "schema": self._schema()}}
         body = {"model": self.settings.inference_model, "messages": [{"role": "user", "content": content}],
                 "temperature": 0.0, "max_tokens": 512,
                 "chat_template_kwargs": {"enable_thinking": self.settings.vllm_observation_enable_thinking if enable_thinking is None else enable_thinking},
-                "response_format": response_format}
+                **self._request_options(name="vision_observation", schema=self._schema())}
         headers = {"Authorization": f"Bearer {self.settings.inference_api_key}"} if self.settings.inference_api_key else None
         try:
             status, payload = await asyncio.to_thread(_http_json, "POST", f"{self.settings.inference_base_url}/chat/completions", headers=headers, body=body, timeout=90)
             message = payload.get("choices", [{}])[0].get("message", {}).get("content", "")
             observation = VisionObservation.model_validate(self._normalize_observation(self._extract_json(message)))
-            if audio_pcm and not observation.audio_present:
-                observation = observation.model_copy(update={"audio_present": True, "audio_uncertainty_reasons": [*observation.audio_uncertainty_reasons, "audio track was muxed into the video but the model returned no audio event"]})
+            if send_audio is None:
+                observation = self._without_model_audio(observation, reason="audio_not_available_to_active_model")
             result = {"observation": observation.model_dump(), "wire_format": "video", "video_bytes": len(video_bytes)}
             if status >= 300:
                 return AdapterResult("degraded", result, "VLLM_HTTP_ERROR", int((time.perf_counter() - started) * 1000))
@@ -730,8 +779,9 @@ class VllmVisionAdapter:
             encoded_images = [base64.b64encode(image).decode("ascii") for image in images]
             content.extend({"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{encoded}"}} for encoded in encoded_images)
         transient_audio = None
-        if audio_pcm and images:
-            transient_audio, audio_uri = self._write_transient_audio(audio_pcm)
+        send_audio = audio_pcm if audio_pcm and self.settings.inference_audio_enabled else None
+        if send_audio and images:
+            transient_audio, audio_uri = self._write_transient_audio(send_audio)
             content.append({"type": "audio_url", "audio_url": {"url": audio_uri}})
         body = {
             "model": self.settings.inference_model,
@@ -739,7 +789,7 @@ class VllmVisionAdapter:
             "temperature": 0.0,
             "max_tokens": 1800,
             "chat_template_kwargs": {"enable_thinking": self.settings.vllm_main_agent_enable_thinking},
-            "response_format": {"type": "json_object"} if self.settings.inference_provider == "gmi_cloud" else {"type": "json_schema", "json_schema": {"name": "main_agent_judgment", "strict": True, "schema": self._main_agent_schema()}},
+            **self._request_options(name="main_agent_judgment", schema=self._main_agent_schema()),
         }
         headers = {"Authorization": f"Bearer {self.settings.inference_api_key}"} if self.settings.inference_api_key else None
         try:

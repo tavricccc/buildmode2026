@@ -312,7 +312,7 @@ class Store:
         with self.db.transaction() as conn:
             evidence_id = self.add_evidence(conn, int(window_metadata.get("start_offset_ms", observation.observed_at_offset_ms)), run_id, f"{source_type}_window",
                                              {"frame_indexes": observation.supporting_frame_indexes, "frame_count": window_metadata.get("frame_count", 1), "window_id": window_metadata.get("window_id"), "window_start_offset_ms": window_metadata.get("start_offset_ms", observation.observed_at_offset_ms), "window_end_offset_ms": window_metadata.get("end_offset_ms", observation.observed_at_offset_ms), "run_id": run_id}, int(window_metadata.get("end_offset_ms", observation.observed_at_offset_ms)))
-            model_name = self.settings.inference_model if self.settings.local_vlm_mode in {"vllm", "real"} else self.settings.local_vlm_model
+            model_name = self.settings.inference_model if self.settings.inference_provider != "local_vlm" or self.settings.local_vlm_mode in {"vllm", "real"} else self.settings.local_vlm_model
             call_id = self.add_model_call(conn, provider=self.settings.inference_provider, model=model_name,
                                           purpose="vision_events", input_hash=json_hash({"run_id": run_id, "window": window_metadata, **obs_dict}),
                                           prompt_version="vision-events.nemotron-omni.v1", schema_version="vision-observation.v1",
