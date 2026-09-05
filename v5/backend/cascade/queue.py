@@ -54,6 +54,7 @@ class LayerQueue:
     def offer(self, job: QueuedJob) -> tuple[bool, str]:
         """Try to enqueue. Returns ``(accepted, reason)``."""
         with self._not_empty:
+            superseded = False
             if len(self._pending) >= self.max_pending:
                 routine_indexes = [i for i, existing in enumerate(self._pending)
                                    if not existing.high_risk]
@@ -66,11 +67,15 @@ class LayerQueue:
                 index = routine_indexes[0] if routine_indexes else 0
                 existing = self._pending.pop(index)
                 self.dropped += 1
+                superseded = True
                 self._notify_drop(existing, "superseded_by_newer_window")
             self._pending.append(job)
             self.accepted += 1
             self._not_empty.notify()
-            return True, "queued"
+            # Accepting into a free slot and accepting by evicting an older
+            # window are different events for anything reading this reason,
+            # so they keep the two names the depth-one queue used.
+            return True, "replaced_pending" if superseded else "queued"
 
     def take(self, timeout: float | None = None) -> QueuedJob | None:
         """Block until a pending job exists, then move it to the running slot."""

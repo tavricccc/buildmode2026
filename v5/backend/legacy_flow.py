@@ -429,7 +429,8 @@ class LegacyFlow:
     @staticmethod
     def _resident_intent(text: str) -> str:
         value = text.strip().lower()
-        if any(token in value for token in ("停止", "不要說", "安靜", "先不用")):
+        # 停止 / 不要說 / 先不用 are imperatives: they outrank everything.
+        if any(token in value for token in ("停止", "不要說", "先不用")):
             return "stop"
         if any(token in value for token in ("忘記", "刪掉", "刪除")):
             return "forget"
@@ -439,6 +440,11 @@ class LegacyFlow:
             return "help"
         if any(token in value for token in ("請記得", "我喜歡", "我偏好", "我的習慣", "不要提醒")):
             return "preference_statement"
+        # 安靜 only reaches here as an adjective. 「請記得我喜歡安靜的提醒」
+        # states a preference for quiet reminders and was being filed as a
+        # demand for silence; 「安靜」 on its own still means stop.
+        if "安靜" in value:
+            return "stop"
         if "?" in text or "？" in text or any(token in value for token in ("什麼", "為什麼", "怎麼", "哪裡", "現在在做")):
             return "question"
         return "conversation"
