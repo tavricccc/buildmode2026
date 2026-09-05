@@ -7,6 +7,8 @@ import signal
 import sys
 import threading
 
+import os
+
 from .api.server import serve, stop
 from .app import AppContext
 from .config import AppConfig
@@ -19,6 +21,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--source", default=None,
                         help="replay scenario id to start immediately (e.g. 'fall')")
     parser.add_argument("--rtsp", default=None, help="RTSP URI to start immediately")
+    parser.add_argument("--tls", action="store_true", help="enable HTTPS with LAN certificates")
+    parser.add_argument("--no-tls", action="store_true", help="force plain HTTP")
     parser.add_argument("--stubs", action="store_true",
                         help="force the offline stub backends even if keys are configured")
     args = parser.parse_args(argv)
@@ -29,9 +33,19 @@ def main(argv: list[str] | None = None) -> int:
     if args.port:
         config.port = args.port
 
+    if not args.no_tls:
+        if args.tls or args.port == 8200 or os.environ.get("CARE_TLS_CERT_FILE"):
+            from pathlib import Path
+            cert = Path("d:/Longcare/certs/lan.crt")
+            key = Path("d:/Longcare/certs/lan.key")
+            if cert.is_file() and key.is_file():
+                config.tls_cert_file = str(cert)
+                config.tls_key_file = str(key)
+
     ctx = AppContext(config, use_stubs=True if args.stubs else None)
     server = serve(ctx)
-    print(f"[care-agent-v5] http://{config.host}:{config.port}  "
+    scheme = "https" if server.tls_enabled else "http"
+    print(f"[care-agent-v5] {scheme}://{config.host}:{config.port}  "
           f"config={ctx.policy.version}  db={config.db_path}", flush=True)
 
     if args.rtsp:

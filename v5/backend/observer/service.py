@@ -65,6 +65,13 @@ class ObserverScheduler:
             self._thread.join(timeout=5)
             self._thread = None
 
+    def reset(self) -> None:
+        """Clear the in-memory status without starting an immediate run."""
+        with self._run_lock:
+            self.last_started_at_ms = None
+            self.last_completed_at_ms = None
+            self.last_error = None
+
     def status(self) -> dict[str, Any]:
         running = self._thread is not None and self._thread.is_alive()
         next_at = ((self.last_started_at_ms or now_ms()) + self.interval_sec * 1000

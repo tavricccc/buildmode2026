@@ -165,6 +165,7 @@ class TestStore(unittest.TestCase):
         self.assertEqual(self.applied, [
             "001_v5_initial.sql", "002_legacy_flow.sql",
             "002_observer_runs.sql", "003_observation_history.sql",
+            "004_social_work_reports.sql",
         ])
         self.assertEqual(migrate(self.db), [])
 

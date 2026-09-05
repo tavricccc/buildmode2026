@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import re
 import time
+from pathlib import Path
 from typing import Any, Callable
 
 from ..domain.enums import L2Outcome
@@ -22,6 +23,7 @@ from ..l2.gemini_client import GeminiClient, GeminiError
 from ..l3.minimax_client import MiniMaxClient, MiniMaxError
 from ..media import ffmpeg
 from ..media.replay_source import ScriptedSource
+from ..reporting import auto_generate_social_work_log, build_status_report
 from ..secretstore import SECRET_KEYS
 
 
@@ -100,6 +102,115 @@ def get_observations(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
 def get_logs(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
     return 200, {"logs": ctx.repos.recent_logs(min(request.q_int("limit", 100), 500),
                                                request.q("level") or None)}
+
+
+@route("GET", "/api/audit")
+def get_audit(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    """Bounded, redacted operational audit; never exposes secrets or hidden reasoning."""
+    limit = min(request.q_int("limit", 100), 500)
+    tables = [str(row["name"]) for row in ctx.db.query(
+        "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")]
+    counts = {name: int(ctx.db.query_one(f"SELECT COUNT(*) AS n FROM {name}")["n"])
+              for name in tables if re.match(r"^[a-z_]+$", name)}
+    calls = []
+    for row in ctx.repos.recent_model_calls(limit=limit):
+        calls.append({**row, "response_text": ctx.secrets.redact(str(row.get("response_text") or ""))[:4000]})
+    return 200, {
+        "database": {"path": str(ctx.config.db_path), "tables": counts},
+        "logs": ctx.repos.recent_logs(limit),
+        "pipeline_runs": ctx.repos.list_runs(limit=limit),
+        "observations": ctx.repos.list_observations(ctx.config.subject_id, limit),
+        "model_calls": calls,
+        "agent_runs": ctx.repos.list_agent_runs(limit),
+        "memories": ctx.repos.list_memories(ctx.config.subject_id, limit=limit),
+        "social_work_records": ctx.repos.list_social_work_records(ctx.config.subject_id, 0, limit),
+        "note": "Only persisted inputs, structured outputs and error records are shown; hidden chain-of-thought is not stored or displayed.",
+    }
+
+
+@route("GET", "/api/audit/log-files")
+def get_audit_log_files(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    root = Path(__file__).resolve().parents[2]
+    files = []
+    for path in sorted(root.glob("*.log"), key=lambda item: item.stat().st_mtime, reverse=True):
+        files.append({"name": path.name, "size_bytes": path.stat().st_size,
+                      "modified_at_ms": int(path.stat().st_mtime * 1000)})
+    return 200, {"files": files[:100]}
+
+
+@route("GET", "/api/audit/log-files/{name}")
+def get_audit_log_file(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    root = Path(__file__).resolve().parents[2]
+    name = request.params["name"]
+    if not re.fullmatch(r"[A-Za-z0-9._-]+\.log", name):
+        raise ApiError(404, "not_found", "log file not found")
+    path = (root / name).resolve()
+    if path.parent != root.resolve() or not path.is_file():
+        raise ApiError(404, "not_found", "log file not found")
+    tail = path.read_text(encoding="utf-8", errors="replace")[-50_000:]
+    return 200, {"name": name, "tail": ctx.secrets.redact(tail), "truncated": path.stat().st_size > len(tail.encode("utf-8"))}
+
+
+@route("GET", "/api/social-work/records")
+def get_social_work_records(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    since = request.q_int("since_ms", 0)
+    return 200, {"records": ctx.repos.list_social_work_records(
+        ctx.config.subject_id, since, min(request.q_int("limit", 100), 500))}
+
+
+@route("POST", "/api/social-work/records")
+def post_social_work_record(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    record_type = str(request.body.get("record_type", "case_note"))
+    if record_type not in {"visit", "phone", "case_note", "follow_up", "resource_referral"}:
+        raise ApiError(400, "bad_request", "unknown record_type")
+    content = str(request.body.get("content", "")).strip()
+    if not content:
+        raise ApiError(400, "bad_request", "content is required")
+    tags = request.body.get("tags", [])
+    if not isinstance(tags, list):
+        tags = []
+    record_id = ctx.repos.save_social_work_record(
+        ctx.config.subject_id, record_type,
+        int(request.body.get("occurred_at_ms", now_ms())), str(request.body.get("author", "")), content,
+        [str(tag)[:60] for tag in tags if str(tag).strip()],
+    )
+    return 201, {"record_id": record_id}
+
+
+@route("POST", "/api/social-work/auto-generate")
+def post_auto_generate_social_work(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    hours = request.q_int("hours", int(request.body.get("hours", 24)))
+    record_type = str(request.body.get("record_type", "case_note"))
+    author = str(request.body.get("author", "AI 社工助理 (事件自動彙整)"))
+    result = auto_generate_social_work_log(
+        ctx, window_hours=hours, record_type=record_type, author=author,
+    )
+    return 201, result
+
+
+@route("GET", "/api/reports/status")
+def get_status_reports(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    return 200, {"reports": ctx.repos.list_status_reports(
+        ctx.config.subject_id, min(request.q_int("limit", 50), 200))}
+
+
+@route("POST", "/api/reports/status")
+def post_status_report(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    try:
+        draft = build_status_report(ctx, str(request.body.get("report_type", "daily_status")),
+                                    request.q_int("days", int(request.body.get("days", 7))))
+    except (ValueError, TypeError):
+        raise ApiError(400, "bad_request", "invalid report type or days") from None
+    report_id = ctx.repos.save_status_report(
+        ctx.config.subject_id, draft["report_type"], draft["window_start_ms"], draft["window_end_ms"],
+        draft["title"], draft["body"], draft["sources"])
+    return 201, {"report_id": report_id, **draft}
+
+
+@route("POST", "/api/reset/history")
+def reset_history(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    """Clear runtime history; configuration and secrets are preserved."""
+    return 200, ctx.reset_history()
 
 
 # ---------------------------------------------------------------------

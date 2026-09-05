@@ -19,6 +19,8 @@ export function SettingsPage() {
   const [note, setNote] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [resetMessage, setResetMessage] = useState<string | null>(null);
+  const [resetBusy, setResetBusy] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -83,6 +85,21 @@ export function SettingsPage() {
     void api.saveProviders({ [slot]: patch })
       .then(load)
       .catch((exc) => setMessage(`Provider 設定未儲存：${errorText(exc)}`));
+  };
+
+  const resetHistory = async () => {
+    if (!window.confirm("確定清除所有分析、事件、健康量測、Observer、互動與系統日誌嗎？Policy 設定與 Secrets 會保留。")) return;
+    setResetBusy(true);
+    setResetMessage(null);
+    try {
+      const result = await api.resetHistory();
+      const total = Object.values(result.deleted).reduce((sum, count) => sum + count, 0);
+      setResetMessage(`已清除 ${total} 筆歷史紀錄；Policy 設定與 Secrets 已保留。`);
+    } catch (exc) {
+      setResetMessage(`重置失敗：${errorText(exc)}`);
+    } finally {
+      setResetBusy(false);
+    }
   };
 
   return (
@@ -187,6 +204,17 @@ export function SettingsPage() {
             ))}
           </tbody>
         </table>
+      </Card>
+
+      <Card title="清除歷史紀錄" aside={<span className="muted" style={{ fontSize: 12 }}>不可復原</span>}>
+        <p className="muted" style={{ marginTop: 0 }}>
+          停止目前來源並清除分析視窗、事件、模型呼叫、健康量測、Observer、互動記錄與系統日誌。
+          Policy 版本、Secrets 與資料庫結構會保留。
+        </p>
+        <button className="action" disabled={resetBusy} onClick={() => void resetHistory()}>
+          {resetBusy ? "重置中…" : "清除歷史紀錄並重置"}
+        </button>
+        {resetMessage && <p className="banner" role="status" style={{ marginTop: ".7rem" }}>{resetMessage}</p>}
       </Card>
     </div>
   );

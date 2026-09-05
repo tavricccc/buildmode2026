@@ -14,6 +14,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
+from .care_logging import CareLogger
 from .domain.ids import content_hash
 from .domain.model_call import ModelCall
 from .domain.timeutil import now_ms
@@ -152,9 +153,11 @@ class LegacyFlow:
                         float(candidate.get("confidence", 0.5)), run_id, True,
                     )
             self.repos.finish_agent_run(run_id, "completed", reply, latency_ms=call.latency_ms)
+            CareLogger.get().info("interaction", f"Resident turn: \"{text[:60]}\" -> intent={reply.get('intent')}, reply=\"{reply.get('reply_text', '')[:60]}\"")
             return {"status": "completed", "agent_run_id": run_id, **reply}
         except Exception as exc:  # noqa: BLE001
             latency = int((time.perf_counter() - started) * 1000)
+            CareLogger.get().error("interaction", f"Resident turn failed: {type(exc).__name__}: {exc}")
             fallback = {"reply_text": "抱歉，我現在沒辦法好好回覆，請稍後再試。",
                         "intent": "unknown", "should_speak": True, "confidence": 0.0}
             self.repos.finish_agent_run(run_id, "failed", fallback, type(exc).__name__, latency)
@@ -205,16 +208,20 @@ class LegacyFlow:
     def _generate_json(self, *, purpose: str, prompt_version: str, system: str,
                        prompt: str, frames: list[bytes] | None = None,
                        audio_pcm: bytes | None = None, max_output_tokens: int = 1000) -> tuple[dict[str, Any], ModelCall]:
-        if not isinstance(self.client, LocalVllmClient):
-            raise LocalVllmError("provider_not_local_vllm", "legacy flow requires the local vLLM provider")
-        parts = [self.client.text_part(prompt)]
-        if frames:
-            parts.extend(self.client.frame_parts(frames))
-        if audio_pcm:
-            parts.append(self.client.audio_part(audio_pcm))
+        if self.client is None or not hasattr(self.client, "generate"):
+            raise RuntimeError("no model client configured for legacy flow")
+        provider = "local_vllm" if isinstance(self.client, LocalVllmClient) else getattr(self.client, "provider", "gemini")
+        if hasattr(self.client, "text_part"):
+            parts = [self.client.text_part(prompt)]
+            if frames and hasattr(self.client, "frame_parts"):
+                parts.extend(self.client.frame_parts(frames))
+            if audio_pcm and hasattr(self.client, "audio_part"):
+                parts.append(self.client.audio_part(audio_pcm))
+        else:
+            parts = [{"text": prompt}]
         started = time.perf_counter()
         call = ModelCall(
-            provider="local_vllm", model=self.client.model, purpose=purpose,
+            provider=provider, model=getattr(self.client, "model", self.model), purpose=purpose,
             layer="l2_gemini", prompt_version=prompt_version, schema_version=f"{purpose}.v1",
             input_hash=content_hash(prompt, str(len(frames or []))),
         )
@@ -234,11 +241,13 @@ class LegacyFlow:
                 # Match the original one-repair rule, but never retry a
                 # transport error as if it were malformed model output.
                 call.attempts = 2
+                repair_msg = (
+                    f"只修正 JSON 格式，不改變判斷。錯誤：{first_error}\n"
+                    f"原始輸出：{response.text[:2400]}\n請重新輸出 JSON。"
+                )
+                repair_part = self.client.text_part(repair_msg) if hasattr(self.client, "text_part") else {"text": repair_msg}
                 repair = self.client.generate(
-                    [self.client.text_part(
-                        f"只修正 JSON 格式，不改變判斷。錯誤：{first_error}\n"
-                        f"原始輸出：{response.text[:2400]}\n請重新輸出 JSON。"
-                    )],
+                    [repair_part],
                     system_instruction=system,
                     max_output_tokens=max_output_tokens,
                 )
@@ -332,13 +341,50 @@ class LegacyFlow:
 
     @staticmethod
     def _interaction_system() -> str:
-        return ("你是長者照護系統的 Resident Interaction Agent。回覆要短、尊重、繁體中文。"
-                "stop/forget/help 等 intent 必須明確；memory_candidates 永遠需要人工確認。"
-                "不要做醫療診斷，不要假裝已經執行外部行動。只輸出 JSON。")
+        return (
+            "你是長者照護系統中溫暖貼心的「住民陪伴照護助理」。"
+            "你的任務是以親切、自然、具備同理心且尊重的繁體中文與長輩對話，如同細心的照服員或家人一般關心他們的生活起居。\n"
+            "原則：\n"
+            "1. 自然對話：具體回答長輩的問題，表達真誠關懷與陪伴，絕不使用機械化、泛化的固定罐頭語句。\n"
+            "2. 意圖識別（intent）：conversation (日常閒聊與分享), question (詢問問題), help (求助或需要協助), stop (要求停止發話或保持安靜), forget (要求刪除/遺忘紀錄), preference_statement (表明生活喜好或習慣), schedule_reminder (設定提醒)。\n"
+            "3. 記憶萃取：長輩若在對話中表達生活偏好或習慣，萃取成 memory_candidates（requires_confirmation=true）。\n"
+            "4. 安全防線：不做醫療診斷，不宣稱已完成未授權的外部實體操作；若有緊急或危險情況，溫暖安撫並說明會通知照護人員。\n"
+            "5. 請只輸出合法的 JSON 物件。"
+        )
 
     @staticmethod
     def _interaction_prompt(context: dict[str, Any]) -> str:
-        return "最重要的輸入是 context.current_user_input，必須直接回答這一輪內容；conversation_history 與背景事件只能輔助，不能取代當輪問題。請輸出 resident-interaction-reply.v1：reply_text、intent、tone、should_speak、confidence、memory_candidates、reported_event_type、reported_event_summary、reminder_time、reminder_text、safety_notes。不要回覆等待下一句或泛化的準備好幫忙文字。context=" + json.dumps(context, ensure_ascii=False, default=str)
+        history = context.get("conversation_history", [])
+        history_lines = []
+        for msg in history[-8:]:
+            role_label = "長輩" if msg.get("role") == "user" else "照護助理"
+            history_lines.append(f"{role_label}: {msg.get('text', '')}")
+        history_text = "\n".join(history_lines) if history_lines else "（這是本次對話的第一句）"
+
+        current_input = context.get("current_user_input", "")
+        memories = context.get("confirmed_memories", [])
+        memories_text = "、".join(f"{m.get('title')}: {m.get('content')}" for m in memories[:6]) if memories else "無特定偏好紀錄"
+
+        return (
+            f"【長輩對照護助理說】：\"{current_input}\"\n\n"
+            f"【近期對話歷史】：\n{history_text}\n\n"
+            f"【已知長輩偏好】：{memories_text}\n\n"
+            "請針對長輩當前的話語，給予溫暖、自然、具體且貼切的回應。直接回答問題，不要回覆準備好幫忙或等待提問等敷衍文字。\n"
+            "輸出 JSON 格式 (resident-interaction-reply.v1)：\n"
+            "{\n"
+            "  \"reply_text\": \"給長輩的溫暖自然口語回覆\",\n"
+            "  \"intent\": \"conversation | question | help | stop | forget | preference_statement | schedule_reminder\",\n"
+            "  \"tone\": \"warm\",\n"
+            "  \"should_speak\": true,\n"
+            "  \"confidence\": 0.95,\n"
+            "  \"memory_candidates\": [],\n"
+            "  \"reported_event_type\": null,\n"
+            "  \"reported_event_summary\": null,\n"
+            "  \"reminder_time\": null,\n"
+            "  \"reminder_text\": null,\n"
+            "  \"safety_notes\": []\n"
+            "}"
+        )
 
     @staticmethod
     def _understanding_system() -> str:
@@ -370,12 +416,55 @@ class LegacyFlow:
 
     @staticmethod
     def _stub_interaction(text: str) -> dict[str, Any]:
-        lowered = text.lower()
-        intent = "stop" if any(x in text for x in ("停止", "不要說")) else ("forget" if "忘記" in text else "conversation")
-        return {"reply_text": "好的，我收到你說的內容了。" if intent == "conversation" else ("好的，我先停止說話。" if intent == "stop" else "我會把忘記要求交給後端處理。"),
-                "intent": intent, "tone": "calm", "should_speak": intent != "stop", "confidence": 0.35,
-                "memory_candidates": [], "safety_notes": [], "reported_event_type": None,
-                "reported_event_summary": None, "reminder_time": None, "reminder_text": None}
+        lowered = text.lower().strip()
+        intent = LegacyFlow._resident_intent(text)
+        candidates: list[dict[str, Any]] = []
+
+        if intent == "stop":
+            reply = "好的，我先保持安靜，您有需要隨時再叫我喔。"
+        elif intent == "forget":
+            reply = "我已收到您的要求，會交給後端系統處理遺忘紀錄。"
+        elif intent == "help":
+            reply = "我在這裡！請慢慢說，需要我幫忙聯繫照服員或家人嗎？"
+        elif intent == "schedule_reminder":
+            reply = "沒問題，我會記下這個提醒需求。請問您希望我什麼時候提醒您呢？"
+        elif intent == "preference_statement":
+            reply = "好的，我已經把您的習慣與喜好記下來了，之後會特別留意！"
+            candidates.append({
+                "memory_type": "preference",
+                "title": "住民提醒偏好" if any(k in text for k in ("提醒", "安靜")) else "住民生活偏好",
+                "content": text,
+                "confidence": 0.85,
+                "requires_confirmation": True,
+            })
+        elif any(k in lowered for k in ("早", "午安", "晚安", "你好", "您好", "嗨", "哈囉")):
+            reply = "您好！今天精神感覺如何？有什麼想和我聊聊或需要幫忙的嗎？"
+        elif any(k in lowered for k in ("痛", "暈", "不舒服", "累", "酸", "難過")):
+            reply = "聽到您身體有些不太舒服，請先坐下或躺著多休息。若感覺沒有好轉，請告訴我，我會通知照護團隊來協助您。"
+        elif any(k in lowered for k in ("水", "渴", "喝水")):
+            reply = "多補充水分對健康很有幫助喔！建議您喝杯溫開水，慢慢喝別嗆著了。"
+        elif any(k in lowered for k in ("名字", "你是誰", "叫什麼")):
+            reply = "我是您的長照陪伴小助理，平時會陪您聊聊天、留意生活起居與安全。很高興能為您服務！"
+        elif any(k in lowered for k in ("天氣", "冷", "熱", "下雨", "晴天")):
+            reply = "外出或在室內都要多留意溫差變化喔，天冷記得加件外套，多喝點溫水保暖！"
+        elif intent == "question":
+            reply = f"您剛才提到的問題我收到了。這段時間我都在身旁陪伴您，您想多聊聊這個話題嗎？"
+        else:
+            reply = "謝謝您和我說話，我都在這裡聽您說。您現在感覺還好嗎？今天有沒有什麼想分享的事？"
+
+        return {
+            "reply_text": reply,
+            "intent": intent,
+            "tone": "warm",
+            "should_speak": intent != "stop",
+            "confidence": 0.85,
+            "memory_candidates": candidates,
+            "safety_notes": [],
+            "reported_event_type": None,
+            "reported_event_summary": None,
+            "reminder_time": None,
+            "reminder_text": None,
+        }
 
     @staticmethod
     def _normalise_reply(raw: dict[str, Any], text: str) -> dict[str, Any]:
@@ -407,20 +496,16 @@ class LegacyFlow:
                                "content": text, "confidence": 0.9,
                                "requires_confirmation": True})
         reply_text = str(raw.get("reply_text") or raw.get("response") or "").strip()
-        generic = any(token in reply_text for token in (
-            "等待下一句", "等待您的問題", "等待您的指示", "請提出問題",
-            "準備好為您提供幫助", "隨時為您提供幫助", "我聽到了",
-        ))
-        if not reply_text or generic:
+        if not reply_text:
             reply_text = LegacyFlow._fallback_reply(text, intent)
         reported_type = raw.get("reported_event_type") if intent in {"event_report", "emergency_response"} else None
         reported_summary = raw.get("reported_event_summary") if reported_type else None
         reminder_time = raw.get("reminder_time") if intent == "schedule_reminder" else None
         reminder_text = raw.get("reminder_text") if intent == "schedule_reminder" else None
         return {"reply_text": reply_text[:1200],
-                "intent": intent, "tone": str(raw.get("tone", "calm"))[:30],
+                "intent": intent, "tone": str(raw.get("tone", "warm"))[:30],
                 "should_speak": bool(raw.get("should_speak", intent != "stop")),
-                "confidence": max(0.0, min(1.0, float(raw.get("confidence", 0.35) or 0.0))),
+                "confidence": max(0.0, min(1.0, float(raw.get("confidence", 0.85) or 0.0))),
                 "memory_candidates": candidates[:8],
                 "reported_event_type": reported_type, "reported_event_summary": reported_summary,
                 "reminder_time": reminder_time, "reminder_text": reminder_text,

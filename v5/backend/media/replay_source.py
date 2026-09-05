@@ -157,12 +157,14 @@ class ReplaySource:
         fps: float = 4.0,
         width: int = 640,
         loop: bool = False,
+        realtime: bool = False,
     ) -> None:
         self.path = str(path)
         self.source_id = source_id
         self.fps = fps
         self.width = width
         self.loop = loop
+        self.realtime = realtime
         self._proc: subprocess.Popen[bytes] | None = None
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
@@ -192,10 +194,19 @@ class ReplaySource:
         self._proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         assert self._proc.stdout is not None
         seq = 0
+        started = time.monotonic()
         for jpeg in ffmpeg.iter_mjpeg(self._proc.stdout):
             if self._stop.is_set():
                 break
             seq += 1
+            # A demo upload is treated as a camera: each sampled frame enters
+            # the downstream queue at its video-time offset, rather than all
+            # decoded frames being injected as fast as FFmpeg can read them.
+            if self.realtime:
+                due = started + (seq - 1) / max(self.fps, 0.1)
+                self._stop.wait(max(0.0, due - time.monotonic()))
+                if self._stop.is_set():
+                    break
             self._emitted += 1
             sink(
                 FramePacket(
@@ -226,8 +237,10 @@ class ReplaySource:
         return {
             "source_id": self.source_id,
             "kind": self.source_kind,
-            "running": self._proc is not None and self._proc.poll() is None,
+            "running": (self._thread is not None and self._thread.is_alive()) or
+                       (self._proc is not None and self._proc.poll() is None),
             "frames_emitted": self._emitted,
             "error": self._error,
             "path": self.path,
+            "realtime": self.realtime,
         }

@@ -60,7 +60,8 @@ export function DashboardPage({ status, realtime, onNavigate }: {
   if (!status) return <Card title="照護總覽"><Empty>正在連線至後端…</Empty></Card>;
 
   const unsafe = events.some((event) => event.event_type === "fall" && ["suspect", "confirmed"].includes(event.status));
-  const sourceStarved = status.cascade.starved_since_ms !== null;
+  const browserMediaRunning = status.browser_media.some((session) => session.running);
+  const sourceStarved = status.cascade.starved_since_ms !== null && !browserMediaRunning;
   const stateLabel = sourceStarved ? "目前無法判斷" : unsafe ? "需要注意" : "目前安全";
   const stateTone = sourceStarved ? "warn" : unsafe ? "bad" : "ok";
   const currentPosture = observer?.metrics.current_posture ?? "未知";
@@ -71,7 +72,7 @@ export function DashboardPage({ status, realtime, onNavigate }: {
       <div><span className="eyebrow">單一住戶照護</span><h1>{status.subject_id}</h1></div>
       <div className={`resident-state ${stateTone}`}><ShieldCheck size={26} weight="fill" /><div><span>目前狀態</span><b>{stateLabel}</b></div></div>
       <div className="resident-meta"><span>最後成功觀察</span><b>{status.cascade.windows_seen ? `第 ${status.cascade.windows_seen} 個視窗` : "尚無觀察"}</b></div>
-      <button className="source-quick" onClick={() => onNavigate("source")}><VideoCamera size={19} /><div><span>{status.source.kind ?? "影像來源"}</span><b>{status.source.running ? "分析中" : "未啟動"}</b></div><CaretRight size={16} /></button>
+      <button className="source-quick" onClick={() => onNavigate("source")}><VideoCamera size={19} /><div><span>{browserMediaRunning ? "瀏覽器攝影機" : status.source.kind ?? "影像來源"}</span><b>{status.source.running || browserMediaRunning ? "分析中" : "未啟動"}</b></div><CaretRight size={16} /></button>
     </header>
 
     {sourceStarved && <div className="global-alert"><b>影像來源已停止提供畫面</b><span>安全狀態不可由舊資料推斷，請檢查即時影像。</span></div>}

@@ -148,7 +148,9 @@ class BrowserMediaSession:
     def close(self) -> dict[str, Any]:
         if self._stop.is_set():
             return self.health()
-        self._stop.set()
+        # Close stdin first and let FFmpeg reach EOF. The reader threads must
+        # drain stdout before the stop event is set, otherwise the final
+        # decoded frames of an uploaded file can be discarded during flush.
         with self._write_lock:
             for process in (self._video, self._audio_process):
                 if process.stdin:
@@ -162,6 +164,7 @@ class BrowserMediaSession:
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait(timeout=3)
+        self._stop.set()
         for thread in self._threads:
             thread.join(timeout=2)
         return self.health()

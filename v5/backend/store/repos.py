@@ -123,7 +123,7 @@ class Repositories:
     def save_run(self, run: PipelineRun) -> str:
         placeholders = ",".join("?" for _ in range(34))
         self.db.execute(
-            f"""INSERT OR REPLACE INTO pipeline_runs
+            f"""INSERT INTO pipeline_runs
                (run_id, subject_id, window_started_at_ms, window_ended_at_ms, config_version,
                 l1_decision, l1_confidence, l1_detector_id, l1_latency_ms, l1_health,
                 l2_outcome, l2_reason, l2_model, l2_call_id, l2_latency_ms, l2_repaired,
@@ -131,7 +131,41 @@ class Repositories:
                 l3_outcome, l3_reason, l3_model, l3_call_id, l3_latency_ms, l3_risk_level, l3_error,
                 evidence_id, clip_path, change_detected, change_score, change_reasons,
                 event_ids, action_ids, created_at)
-               VALUES ({placeholders})""",
+               VALUES ({placeholders})
+               ON CONFLICT(run_id) DO UPDATE SET
+                 subject_id=excluded.subject_id,
+                 window_started_at_ms=excluded.window_started_at_ms,
+                 window_ended_at_ms=excluded.window_ended_at_ms,
+                 config_version=excluded.config_version,
+                 l1_decision=excluded.l1_decision,
+                 l1_confidence=excluded.l1_confidence,
+                 l1_detector_id=excluded.l1_detector_id,
+                 l1_latency_ms=excluded.l1_latency_ms,
+                 l1_health=excluded.l1_health,
+                 l2_outcome=excluded.l2_outcome,
+                 l2_reason=excluded.l2_reason,
+                 l2_model=excluded.l2_model,
+                 l2_call_id=excluded.l2_call_id,
+                 l2_latency_ms=excluded.l2_latency_ms,
+                 l2_repaired=excluded.l2_repaired,
+                 l2_escalation_required=excluded.l2_escalation_required,
+                 l2_escalation_reasons=excluded.l2_escalation_reasons,
+                 l2_error=excluded.l2_error,
+                 l3_outcome=excluded.l3_outcome,
+                 l3_reason=excluded.l3_reason,
+                 l3_model=excluded.l3_model,
+                 l3_call_id=excluded.l3_call_id,
+                 l3_latency_ms=excluded.l3_latency_ms,
+                 l3_risk_level=excluded.l3_risk_level,
+                 l3_error=excluded.l3_error,
+                 evidence_id=excluded.evidence_id,
+                 clip_path=excluded.clip_path,
+                 change_detected=excluded.change_detected,
+                 change_score=excluded.change_score,
+                 change_reasons=excluded.change_reasons,
+                 event_ids=excluded.event_ids,
+                 action_ids=excluded.action_ids,
+                 created_at=excluded.created_at""",
             (
                 run.run_id, run.subject_id, run.window_started_at_ms, run.window_ended_at_ms,
                 run.config_version,
@@ -649,6 +683,63 @@ class Repositories:
         )
         return [_row(row) for row in reversed(rows)]
 
+    # -- social-work records and status reports ------------------------
+
+    def save_social_work_record(self, subject_id: str, record_type: str,
+                                occurred_at_ms: int, author: str, content: str,
+                                tags: list[str] | None = None) -> str:
+        record_id = new_id("sw")
+        self.db.execute(
+            """INSERT INTO social_work_records
+               (record_id, subject_id, record_type, occurred_at_ms, author, content, tags_json, created_at)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (record_id, subject_id, record_type, occurred_at_ms, author[:120], content[:6000],
+             _json((tags or [])[:20]), iso()),
+        )
+        return record_id
+
+    def list_social_work_records(self, subject_id: str, since_ms: int = 0,
+                                 limit: int = 100) -> list[dict[str, Any]]:
+        rows = self.db.query(
+            "SELECT * FROM social_work_records WHERE subject_id=? AND occurred_at_ms>=? "
+            "ORDER BY occurred_at_ms DESC LIMIT ?", (subject_id, since_ms, limit))
+        out = []
+        for row in rows:
+            item = _row(row)
+            try:
+                item["tags"] = json.loads(item.pop("tags_json") or "[]")
+            except json.JSONDecodeError:
+                item["tags"] = []
+            out.append(item)
+        return out
+
+    def save_status_report(self, subject_id: str, report_type: str, window_start_ms: int,
+                           window_end_ms: int, title: str, body: str,
+                           sources: dict[str, Any]) -> str:
+        report_id = new_id("rpt")
+        self.db.execute(
+            """INSERT INTO status_reports
+               (report_id, subject_id, report_type, window_start_ms, window_end_ms, title, body, sources_json, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
+            (report_id, subject_id, report_type, window_start_ms, window_end_ms,
+             title[:240], body[:12000], _json(sources), iso()),
+        )
+        return report_id
+
+    def list_status_reports(self, subject_id: str, limit: int = 50) -> list[dict[str, Any]]:
+        rows = self.db.query(
+            "SELECT * FROM status_reports WHERE subject_id=? ORDER BY window_end_ms DESC LIMIT ?",
+            (subject_id, limit))
+        out = []
+        for row in rows:
+            item = _row(row)
+            try:
+                item["sources"] = json.loads(item.pop("sources_json") or "{}")
+            except json.JSONDecodeError:
+                item["sources"] = {}
+            out.append(item)
+        return out
+
     # -- config ----------------------------------------------------------
 
     def save_config_version(self, version: str, payload: dict[str, Any], note: str = "",
@@ -708,3 +799,24 @@ class Repositories:
         return self.db.execute(
             "DELETE FROM app_logs WHERE log_id NOT IN "
             "(SELECT log_id FROM app_logs ORDER BY created_at DESC LIMIT ?)", (keep,))
+
+    def clear_history(self) -> dict[str, int]:
+        """Delete runtime history while preserving policy/configuration data.
+
+        The reset action is intentionally explicit about its boundary: config
+        versions and schema migrations remain, while observations, events,
+        model audit rows, interaction history and derived rollups are removed.
+        Foreign-key dependants are deleted before their parent rows.
+        """
+        tables = (
+            "notification_deliveries", "event_runs", "hydration_sessions",
+            "analyses", "actions", "observations", "observer_findings",
+            "observer_runs", "daily_summaries", "events", "pipeline_runs",
+            "evidence", "model_calls", "agent_runs", "memories",
+            "interaction_messages", "health_samples", "transcripts", "app_logs",
+        )
+        deleted: dict[str, int] = {}
+        with self.db.transaction() as tx:
+            for table in tables:
+                deleted[table] = max(0, int(tx.execute(f"DELETE FROM {table}").rowcount))
+        return deleted

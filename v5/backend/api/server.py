@@ -17,6 +17,7 @@ import json
 import mimetypes
 import socket
 import threading
+import time
 import traceback
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -24,10 +25,11 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from ..care_logging import CareLogger
 from ..domain.timeutil import iso
 from .routes import ROUTES, ApiError, Request
 from ..media.browser_source import BrowserMediaSession
-from .ws import OP_BINARY, OP_CLOSE, OP_PING, OP_PONG, accept_key, encode_frame, read_frame
+from .ws import OP_BINARY, OP_CLOSE, OP_PING, OP_PONG, OP_TEXT, accept_key, encode_frame, read_frame
 
 MAX_BODY_BYTES = 8 * 1024 * 1024
 
@@ -38,7 +40,22 @@ class CareHTTPServer(ThreadingHTTPServer):
 
     def __init__(self, address: tuple[str, int], ctx: Any) -> None:
         self.ctx = ctx
+        self.tls_enabled = False
         super().__init__(address, CareRequestHandler)
+        self._setup_tls()
+
+    def _setup_tls(self) -> None:
+        cert = getattr(self.ctx.config, "tls_cert_file", "")
+        key = getattr(self.ctx.config, "tls_key_file", "")
+        if cert and key and Path(cert).is_file() and Path(key).is_file():
+            try:
+                import ssl
+                context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                context.load_cert_chain(certfile=cert, keyfile=key)
+                self.socket = context.wrap_socket(self.socket, server_side=True)
+                self.tls_enabled = True
+            except Exception:
+                self.tls_enabled = False
 
 
 class CareRequestHandler(BaseHTTPRequestHandler):
@@ -64,13 +81,11 @@ class CareRequestHandler(BaseHTTPRequestHandler):
                 pass
 
     def log_message(self, fmt: str, *args: Any) -> None:
-        # The default logger writes to stderr on every request, which buries
-        # the pipeline's own logs. Errors still surface via log_error.
-        return
+        CareLogger.get().debug("http", fmt % args)
 
     def log_error(self, fmt: str, *args: Any) -> None:
         try:
-            self.ctx.repos.log("warn", "http", fmt % args)
+            CareLogger.get().warn("http", fmt % args)
         except Exception:  # noqa: BLE001
             pass
 
@@ -134,6 +149,7 @@ class CareRequestHandler(BaseHTTPRequestHandler):
 
     def _dispatch(self, method: str, parsed: Any) -> None:
         path = parsed.path.rstrip("/") or "/"
+        t0 = time.perf_counter()
         try:
             for route_method, pattern, handler in ROUTES:
                 if route_method != method:
@@ -149,6 +165,10 @@ class CareRequestHandler(BaseHTTPRequestHandler):
                     params=match.groupdict(),
                 )
                 result = handler(self.ctx, request)
+                status = result[0]
+                latency_ms = int((time.perf_counter() - t0) * 1000)
+                level = "debug" if path in {"/api/status", "/api/logs"} else "info"
+                CareLogger.get().log(level, "http", f"{method} {path} -> {status} ({latency_ms}ms)")
                 if len(result) == 3:
                     status, payload, content_type = result
                     self._send(status, payload, content_type)
@@ -160,13 +180,19 @@ class CareRequestHandler(BaseHTTPRequestHandler):
             if method == "GET" and not path.startswith("/api"):
                 self._serve_static(path)
                 return
+            latency_ms = int((time.perf_counter() - t0) * 1000)
+            CareLogger.get().warn("http", f"{method} {path} -> 404 not found ({latency_ms}ms)")
             self._send(404, {"error": {"code": "not_found", "message": f"no route for {method} {path}"}})
         except ApiError as exc:
+            latency_ms = int((time.perf_counter() - t0) * 1000)
+            CareLogger.get().warn("http", f"{method} {path} -> {exc.status} [{exc.code}] {exc.message} ({latency_ms}ms)")
             self._send(exc.status, {"error": {"code": exc.code, "message": exc.message}})
         except BrokenPipeError:
             pass
         except Exception as exc:  # noqa: BLE001
             detail = self.ctx.secrets.redact(f"{type(exc).__name__}: {exc}")
+            latency_ms = int((time.perf_counter() - t0) * 1000)
+            CareLogger.get().error("http", f"{method} {path} -> 500 {detail} ({latency_ms}ms)")
             self.log_error("unhandled: %s", traceback.format_exc(limit=4))
             self._send(500, {"error": {"code": "internal_error", "message": detail,
                                        "at": iso()}})
@@ -305,6 +331,17 @@ class CareRequestHandler(BaseHTTPRequestHandler):
                     break
                 if opcode == OP_PING:
                     sock.sendall(encode_frame(payload, OP_PONG))
+                elif opcode == OP_TEXT:
+                    try:
+                        msg = json.loads(payload.decode("utf-8", errors="replace"))
+                    except Exception:
+                        msg = {}
+                    if msg.get("type") == "media.upload.complete":
+                        stats = session.close()
+                        sock.sendall(encode_frame(json.dumps({
+                            "type": "media.stream.completed", "payload": stats,
+                        }).encode("utf-8")))
+                        break
                 elif opcode == OP_BINARY:
                     if len(payload) > MAX_BODY_BYTES:
                         break
