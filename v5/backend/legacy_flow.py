@@ -434,6 +434,11 @@ class LegacyFlow:
             return "stop"
         if any(token in value for token in ("忘記", "刪掉", "刪除")):
             return "forget"
+        # A negated reminder is a preference about reminders, not a request
+        # for one. 「不要提醒我吃藥」 contains 提醒我, and reading it as
+        # schedule_reminder inverted what the resident actually asked for.
+        if any(token in value for token in ("不要提醒", "不用提醒", "別提醒", "不需要提醒")):
+            return "preference_statement"
         if any(token in value for token in ("提醒我", "設定提醒", "定時提醒")):
             return "schedule_reminder"
         if any(token in value for token in ("救命", "幫我", "需要幫忙", "求助")):
