@@ -1,0 +1,19 @@
+{
+  "schema_version": "replay_manifest.v1",
+  "replays": [
+    {
+      "id": "fall-demo",
+      "display_name": "Fall demo clip (synthetic)",
+      "duration_seconds": 30,
+      "kind": "fall",
+      "path": "data/captures/fall-demo.mp4"
+    },
+    {
+      "id": "hydration-demo",
+      "display_name": "Hydration demo clip (synthetic)",
+      "duration_seconds": 30,
+      "kind": "hydration",
+      "path": "data/captures/hydration-demo.mp4"
+    }
+  ]
+}

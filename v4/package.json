@@ -1,0 +1,21 @@
+{
+  "name": "care-agent-v4",
+  "version": "0.1.0",
+  "description": "Care Agent v4 — hardware-neutral, OpenAI-compatible Model Gateway monorepo",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "frontend"
+  ],
+  "scripts": {
+    "start": "bun run scripts/start.ts",
+    "dev": "bun run scripts/dev_orchestrator.ts",
+    "migrate": "bun run scripts/migrate.ts",
+    "verify": "bun run scripts/verify.ts",
+    "setup:backend": "bash scripts/bootstrap_venv.sh"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.1.0",
+    "typescript": "^5.5.0"
+  }
+}
