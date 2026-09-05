@@ -22,12 +22,28 @@ from ..api.server import serve, stop
 from ..api.ws import accept_key, encode_frame
 from ..app import AppContext
 from ..config import AppConfig
+from ..domain.enums import EventStatus, EventType
+from ..domain.timeutil import now_ms
 
 
 def free_port() -> int:
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         return sock.getsockname()[1]
+
+
+def client_frame(payload: bytes, opcode: int = 0x1) -> bytes:
+    """Build one masked browser-to-server WebSocket frame."""
+    mask = os.urandom(4)
+    masked = bytes(value ^ mask[index % 4] for index, value in enumerate(payload))
+    length = len(payload)
+    if length < 126:
+        header = bytes([0x80 | opcode, 0x80 | length])
+    elif length < (1 << 16):
+        header = bytes([0x80 | opcode, 0x80 | 126]) + struct.pack(">H", length)
+    else:
+        header = bytes([0x80 | opcode, 0x80 | 127]) + struct.pack(">Q", length)
+    return header + mask + masked
 
 
 class ApiTestCase(unittest.TestCase):
@@ -97,6 +113,48 @@ class TestReadEndpoints(ApiTestCase):
         status, payload = self.call("GET", "/api/nope")
         self.assertEqual(status, 404)
         self.assertEqual(payload["error"]["code"], "not_found")
+
+    def test_audit_exposes_bounded_operational_records(self):
+        status, payload = self.call("GET", "/api/audit?limit=10")
+        self.assertEqual(status, 200)
+        self.assertIn("pipeline_runs", payload)
+        self.assertIn("database", payload)
+        self.assertIn("model_calls", payload)
+
+    def test_social_work_record_can_generate_an_auditable_report(self):
+        status, created = self.call("POST", "/api/social-work/records", {
+            "record_type": "visit", "author": "worker-a", "content": "Completed a scheduled home visit.",
+            "tags": ["visit", "follow-up"],
+        })
+        self.assertEqual(status, 201)
+        status, report = self.call("POST", "/api/reports/status?days=7", {
+            "report_type": "daily_status", "days": 7,
+        })
+        self.assertEqual(status, 201)
+        self.assertIn(created["record_id"], report["sources"]["social_work_record_ids"])
+        status, reports = self.call("GET", "/api/reports/status")
+        self.assertEqual(status, 200)
+        self.assertTrue(reports["reports"])
+
+    def test_auto_generate_social_work_log_from_events(self):
+        self.call("POST", "/api/pipeline/cascade-test", {"scenario": "fall"})
+        status, payload = self.call("POST", "/api/social-work/auto-generate", {
+            "hours": 24,
+            "author": "測試社工",
+        })
+        self.assertEqual(status, 201, payload)
+        self.assertTrue(payload["record_id"].startswith("sw_"))
+        self.assertTrue(payload["report_id"].startswith("rpt_"))
+        self.assertIn("Subjective", payload["body"])
+        self.assertIn("Objective", payload["body"])
+        self.assertIn("Assessment", payload["body"])
+        self.assertIn("Plan", payload["body"])
+        self.assertGreaterEqual(payload["stats"]["events_count"], 1)
+
+        # Verify it can be retrieved from social work records and reports
+        s_rec, rec_data = self.call("GET", "/api/social-work/records")
+        self.assertEqual(s_rec, 200)
+        self.assertTrue(any(r["record_id"] == payload["record_id"] for r in rec_data["records"]))
 
     def test_a_bad_query_value_is_rejected_rather_than_ignored(self):
         status, payload = self.call("GET", "/api/pipeline/runs?l2_outcome=nonsense")
@@ -182,6 +240,12 @@ class TestCascadeThroughHttp(ApiTestCase):
         self.assertEqual(status, 200)
         self.assertTrue(active["recent"])
 
+    def test_l2_observation_survives_final_run_update(self):
+        self.call("POST", "/api/pipeline/cascade-test", {"scenario": "fall"})
+        status, payload = self.call("GET", "/api/observations?limit=10")
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["observations"])
+
     def test_an_event_exposes_its_full_cascade_trace(self):
         for _ in range(3):
             self.call("POST", "/api/pipeline/cascade-test", {"scenario": "fall"})
@@ -236,6 +300,38 @@ class TestSettings(ApiTestCase):
         with caught.exception:
             self.assertEqual(caught.exception.code, 400)
 
+    def test_history_reset_clears_runtime_data_but_preserves_settings_and_secrets(self):
+        self.call("POST", "/api/pipeline/cascade-test", {"scenario": "fall"})
+        self.call("POST", "/api/social-work/records", {
+            "record_type": "case_note", "author": "reset-test", "content": "temporary note",
+        })
+        self.call("POST", "/api/reports/status?days=1", {
+            "report_type": "daily_status", "days": 1,
+        })
+        self.call("POST", "/api/secrets",
+                  {"key": "GEMINI_API_KEY", "value": "reset-preserve-canary"})
+        _, before = self.call("GET", "/api/settings")
+        status, payload = self.call("POST", "/api/reset/history")
+        self.assertEqual(status, 200, payload)
+        self.assertIn("config_versions", payload["preserved"])
+        self.assertGreaterEqual(payload["deleted"].get("pipeline_runs", 0), 1)
+        self.assertGreaterEqual(payload["deleted"].get("pipeline_steps", 0), 1)
+        self.assertGreaterEqual(payload["deleted"].get("social_work_records", 0), 1)
+        self.assertGreaterEqual(payload["deleted"].get("status_reports", 0), 1)
+
+        _, events = self.call("GET", "/api/events")
+        _, runs = self.call("GET", "/api/pipeline/runs")
+        _, records = self.call("GET", "/api/social-work/records")
+        _, reports = self.call("GET", "/api/reports/status")
+        _, after = self.call("GET", "/api/settings")
+        self.assertEqual(events["events"], [])
+        self.assertEqual(runs["runs"], [])
+        self.assertEqual(records["records"], [])
+        self.assertEqual(reports["reports"], [])
+        self.assertEqual(after["policy"]["version"], before["policy"]["version"])
+        self.assertTrue(after["secrets"]["GEMINI_API_KEY"]["configured"])
+        self.call("POST", "/api/secrets", {"key": "GEMINI_API_KEY", "value": ""})
+
 
 class TestWebSocket(ApiTestCase):
     def test_handshake_and_push(self):
@@ -281,6 +377,39 @@ class TestWebSocket(ApiTestCase):
         status, payload = self.call("GET", "/ws")
         self.assertEqual(status, 400)
         self.assertEqual(payload["error"]["code"], "bad_upgrade")
+
+    def test_browser_upload_can_close_after_backend_flushes_media(self):
+        sock = socket.create_connection(("127.0.0.1", self.ctx.config.port), timeout=15)
+        self.addCleanup(sock.close)
+        key = base64.b64encode(os.urandom(16)).decode()
+        sock.sendall(
+            f"GET /ws/media?camera_id=test-upload&media_type=video/webm HTTP/1.1\r\n"
+            f"Host: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+            f"Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n".encode()
+        )
+        header = b""
+        while b"\r\n\r\n" not in header:
+            header += sock.recv(1)
+        self.assertIn(b"101 Switching Protocols", header)
+
+        def receive_json():
+            frame_header = sock.recv(2)
+            self.assertTrue(frame_header)
+            length = frame_header[1] & 0x7F
+            if length == 126:
+                length = struct.unpack(">H", sock.recv(2))[0]
+            elif length == 127:
+                length = struct.unpack(">Q", sock.recv(8))[0]
+            payload = b""
+            while len(payload) < length:
+                payload += sock.recv(length - len(payload))
+            return json.loads(payload.decode())
+
+        self.assertEqual(receive_json()["type"], "media.stream.ready")
+        sock.sendall(client_frame(json.dumps({"type": "media.upload.complete"}).encode()))
+        completed = receive_json()
+        self.assertEqual(completed["type"], "media.stream.completed")
+        self.assertFalse(completed["payload"]["running"])
 
 
 if __name__ == "__main__":

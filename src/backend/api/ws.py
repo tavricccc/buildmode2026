@@ -163,6 +163,14 @@ class Broadcaster:
         with self._lock:
             return [m for m in self._history if m["seq"] > after_seq]
 
+    def reset(self) -> None:
+        """Forget telemetry backlog after the application's history reset."""
+        with self._lock:
+            self._history.clear()
+            self._sequence = 0
+            self.sent = 0
+            self.dropped = 0
+
     def metrics(self) -> dict[str, Any]:
         return {
             "clients": self.client_count(),

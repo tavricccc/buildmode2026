@@ -230,6 +230,28 @@ class Cascade:
         })
         return identity
 
+    def reset(self) -> None:
+        """Reset in-memory pipeline state after workers have been stopped."""
+        self.frames.buffer.clear()
+        self.gate.reset()
+        self.l2_queue.reset()
+        self.l3_queue.reset()
+        with self._state_lock:
+            self.tracked = {
+                EventType.fall: TrackedEvent(EventType.fall),
+                EventType.hydration: TrackedEvent(EventType.hydration),
+            }
+            self._last_l2_call_ms = 0
+            self._last_heartbeat_ms = 0
+            self._last_audio_level = None
+            self._last_change_gate = None
+            self._last_escalation_ms = {}
+            self._escalations_today = 0
+            self._escalation_day = day_key()
+            self._starved_since_ms = 0
+            self._starved_logged = False
+            self.windows_seen = 0
+
     # -- L1 sampling -----------------------------------------------------
 
     def _sample_loop(self) -> None:

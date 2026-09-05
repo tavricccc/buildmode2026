@@ -113,7 +113,7 @@ The care API uses port 8200 so it does not collide with local vLLM on port
 provider choices are available from Settings.
 
 ```bash
-bun run verify           # compile check + 128 tests + frontend typecheck
+bun run verify           # compile check + backend tests + frontend typecheck
 bun run probe:gemini     # measure what this Gemini deployment can do
 bun run probe:minimax    # measure what this MiniMax deployment can do
 ```
@@ -157,8 +157,8 @@ backend/
   api/           REST routes, the HTTP server, the RFC 6455 upgrade
   notify/        Telegram delivery and acknowledgement
   observer/      daily rollups and baseline comparison
-  tests/         128 tests, including docs/04_SETUP_DEPLOY_VERIFY.md's required-scenario list
-frontend/        React + TypeScript care dashboard, trends and maintenance UI
+  tests/         backend contract, API, debug, interaction and reporting tests
+frontend/        React + TypeScript care, interaction, reporting and maintenance UI
 scripts/         bun orchestration and the capability probes
 data/replays/    annotated scenarios — no camera or video file needed
 ```
@@ -179,7 +179,7 @@ L1 completely.
 
 ## What is verified, and how
 
-`bun run verify` runs 128 tests. The scenario classes in
+`bun run verify` runs the backend contract, API, debug, interaction and reporting tests. The scenario classes in
 `backend/tests/test_cascade.py` map one-to-one onto docs/04_SETUP_DEPLOY_VERIFY.md's 必測情境 list,
 and run the real cascade against the real SQLite schema with only the
 model backends stubbed:

@@ -33,3 +33,4 @@ src/node_modules/
 GMIAPI.txt
 *API.txt
 *.key
+*.log

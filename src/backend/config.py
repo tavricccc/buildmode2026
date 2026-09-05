@@ -35,6 +35,9 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
+
+
+
 @dataclass
 class ProviderConfig:
     """One model slot. L2 and L3 are configured independently by design.
@@ -82,6 +85,14 @@ class AppConfig:
     )
     #: Gemini's documented inline_data ceiling; larger media needs Files API.
     inline_limit_bytes: int = 20 * 1024 * 1024
+    #: Optional TLS material. When both CARE_TLS_CERT_FILE and
+    #: CARE_TLS_KEY_FILE are set and the files exist, the care HTTP
+    #: server wraps the listening socket with ssl.SSLContext so the
+    #: dashboard can be reached over HTTPS (matches the legacy v4 wiring
+    #: at certs/lan.crt). Leaving either empty keeps the server on
+    #: plain HTTP, which is the v5 default.
+    tls_cert_file: str = field(default_factory=lambda: _env("CARE_TLS_CERT_FILE", ""))
+    tls_key_file: str = field(default_factory=lambda: _env("CARE_TLS_KEY_FILE", ""))
     static_dir: Path = field(default_factory=lambda: REPO_ROOT / "frontend" / "dist")
 
     def __post_init__(self) -> None:

@@ -1,7 +1,9 @@
 import type {
   ActivePipeline, CareAction, CareEvent, CareReviewPayload, CareSummary, CascadeTestResult,
   DebugStatus, EventDetail, PipelineRun,
+  AgentRun, AuditPayload, BrowserMediaHealth, InteractionMessage, MemoryRecord,
   ObserverRecord, ObserverSchedulerStatus, RunStats, SettingsPayload, SetupState,
+  SocialWorkRecord, StatusReport,
   StatisticsPayload, Status,
 } from "../types/api";
 
@@ -45,6 +47,38 @@ export const api = {
   observerStatus: () => call<{ scheduler: ObserverSchedulerStatus; latest: ObserverRecord | null }>("/api/observer/status"),
   observerRecords: (limit = 50) => call<{ records: ObserverRecord[] }>(`/api/observer/records?limit=${limit}`),
   statistics: (days = 30) => call<StatisticsPayload>(`/api/statistics?days=${days}`),
+  agentRuns: (limit = 50) => call<{ runs: AgentRun[] }>(`/api/agent/runs?limit=${limit}`),
+  memories: (limit = 50) => call<{ memories: MemoryRecord[] }>(`/api/memory?limit=${limit}`),
+  setMemoryStatus: (id: string, status: "confirmed" | "invalidated") => post<{ memory_id: string; status: string }>(`/api/memory/${encodeURIComponent(id)}/status`, { status }),
+  interactionMessages: () => call<{ messages: InteractionMessage[] }>("/api/interaction/messages"),
+  interactionTurn: (text: string) => post<Record<string, unknown>>("/api/interaction/turn", { text }),
+  interactionUnderstanding: () => post<Record<string, unknown>>("/api/interaction/understanding"),
+  socialWorkRecords: (limit = 100) => call<{ records: SocialWorkRecord[] }>(`/api/social-work/records?limit=${limit}`),
+  addSocialWorkRecord: (body: { record_type: string; occurred_at_ms: number; author: string; content: string; tags: string[] }) => post<{ record_id: string }>("/api/social-work/records", body),
+  autoGenerateSocialWorkRecord: (hours = 24, record_type = "case_note", author = "AI 社工助理 (事件自動彙整)") =>
+    post<{
+      record_id: string;
+      report_id: string;
+      title: string;
+      body: string;
+      window_hours: number;
+      window_start_ms: number;
+      window_end_ms: number;
+      sources: Record<string, unknown>;
+      stats: {
+        events_count: number;
+        falls_count: number;
+        hydration_events_count: number;
+        observations_count: number;
+        health_metrics_count: number;
+        interactions_count: number;
+      };
+    }>("/api/social-work/auto-generate", { hours, record_type, author }),
+  statusReports: () => call<{ reports: StatusReport[] }>("/api/reports/status"),
+  generateStatusReport: (report_type: string, days: number) => post<StatusReport>(`/api/reports/status?days=${days}`, { report_type, days }),
+  audit: (limit = 100) => call<AuditPayload>(`/api/audit?limit=${limit}`),
+  auditLogFiles: () => call<{ files: Array<{ name: string; size_bytes: number; modified_at_ms: number }> }>("/api/audit/log-files"),
+  auditLogFile: (name: string) => call<{ name: string; tail: string; truncated: boolean }>(`/api/audit/log-files/${encodeURIComponent(name)}`),
 
   settings: () => call<SettingsPayload>("/api/settings"),
   saveSettings: (policy: unknown, note: string) =>
@@ -63,6 +97,8 @@ export const api = {
   stopSource: () => post<unknown>("/api/source/stop"),
   runObserver: () => post<unknown>("/api/observer/run"),
   analyzeAll: (days: 1 | 3 | 7 | 30) => post<CareReviewPayload>("/api/observer/analyze-all", { days }),
+  resetHistory: () => post<{ deleted: Record<string, number>; preserved: string[] }>("/api/reset/history"),
+  mediaStreams: () => call<{ active: BrowserMediaHealth[]; source: Status["source"] }>("/api/media/streams"),
   sourceSnapshotUrl: () => `/api/source/snapshot?t=${Date.now()}`,
   debugStatus: () => call<DebugStatus>("/api/debug/scenarios"),
   generateDebugHistory: (days: number, profile: string, seed: number) =>

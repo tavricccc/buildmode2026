@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  ChartLineUp, Database, GearSix, House, Pulse, SlidersHorizontal, VideoCamera, Wrench, FlowArrow,
+  ChartLineUp, ChatCircleText, Database, FileText, GearSix, House, Pulse, SlidersHorizontal,
+  VideoCamera, Wrench, FlowArrow,
 } from "@phosphor-icons/react";
 import { api } from "./api/client";
 import { RealtimeClient } from "./api/ws";
@@ -11,9 +12,12 @@ import { SettingsPage } from "./settings/Page";
 import { SetupPage } from "./setup/Wizard";
 import { SourcePage } from "./source/Page";
 import { StatisticsPage } from "./statistics/Page";
+import { InteractionPage } from "./interaction/Page";
+import { ReportsPage } from "./reports/Page";
+import { AuditPage } from "./audit/Page";
 import type { Status } from "./types/api";
 
-export type AppTab = "dashboard" | "source" | "statistics" | "operations" | "maintenance" | "setup" | "settings";
+export type AppTab = "dashboard" | "source" | "statistics" | "interaction" | "reports" | "audit" | "operations" | "maintenance" | "setup" | "settings";
 
 const CARE_NAV: { id: AppTab; label: string; icon: typeof House }[] = [
   { id: "dashboard", label: "照護總覽", icon: House },
@@ -24,6 +28,9 @@ const CARE_NAV: { id: AppTab; label: string; icon: typeof House }[] = [
 const ADMIN_NAV: { id: AppTab; label: string; icon: typeof House }[] = [
   { id: "operations", label: "運作監看", icon: FlowArrow },
   { id: "maintenance", label: "系統維護", icon: GearSix },
+  { id: "interaction", label: "住民互動", icon: ChatCircleText },
+  { id: "reports", label: "社工報告", icon: FileText },
+  { id: "audit", label: "稽核後台", icon: Database },
   { id: "setup", label: "初始設定", icon: Wrench },
   { id: "settings", label: "系統設定", icon: SlidersHorizontal },
 ];
@@ -81,10 +88,13 @@ export default function App() {
       <main className="workspace">
         {offline && <div className="global-alert"><b>目前無法確認照護狀態</b><span>{offline}</span></div>}
         {tab === "dashboard" && <DashboardPage status={status} realtime={realtime} onNavigate={setTab} />}
-        {tab === "source" && <SourcePage status={status} />}
+        <div hidden={tab !== "source"}><SourcePage status={status} /></div>
         {tab === "statistics" && <StatisticsPage />}
         {tab === "operations" && <OperationsPage status={status} realtime={realtime} />}
         {tab === "maintenance" && <MaintenancePage status={status} realtime={realtime} />}
+        {tab === "interaction" && <InteractionPage />}
+        {tab === "reports" && <ReportsPage />}
+        {tab === "audit" && <AuditPage />}
         {tab === "setup" && <SetupPage onDone={() => setTab("dashboard")} />}
         {tab === "settings" && <SettingsPage />}
       </main>

@@ -101,8 +101,10 @@ bun start -- --stubs --source fall
 
 - **照護總覽**：預設首頁。顯示住民目前狀態、健康量測、活動、飲水、跌倒事件與近期照護動作，可切換 1、3、7、30 天。
 - **趨勢與統計**：查看每日活動與飲水走勢、健康量測歷史，以及 Observer 的逐筆觀察紀錄。
-- **即時影像**：選擇 RTSP、模擬情境或本機錄影，並顯示 Ring Buffer 中最新的取樣影格。
-- **系統維護**：查看 L1–L3 Pipeline、模型延遲、Policy 決策、系統日誌與 Cascade Trace。
+- **即時影像**：選擇瀏覽器攝影機、上傳影片、RTSP、模擬情境或本機錄影，並顯示分析中的取樣影格。
+- **住民互動**：保留 interaction driver 的對話、understanding insight 與待確認記憶。
+- **社工報告**：輸入人工紀錄，或產生保留來源 ID、等待人工覆核的 SOAP 草稿。
+- **運作監看／系統維護／稽核後台**：分開查看即時 pipeline、歷史 Run/Policy/Log 與遮罩後的技術資料。
 - **初始設定／系統設定**：檢查執行環境與資料來源，切換 provider、寫入 secrets、調整 policy 或回溯設定版本。
 
 照護總覽的期間切換同時套用在摘要、事件、健康量測走勢與 L3 分析。按「交給 L3 分析全部資料」時，後端會整理所選期間的每日彙總、健康量測、事件、Policy 動作、Observer 紀錄與 Pipeline 統計，再交給目前設定的 L3 provider。傳送內容有 30 天上限，不含 secrets、原始 SQLite 檔案或長時間原始影像。L3 回傳摘要、建議、正向訊號、注意事項與資料限制；結果只供判讀，不會直接觸發通知。
@@ -116,13 +118,17 @@ bun start -- --stubs --source fall
 | 類別 | 端點 |
 | --- | --- |
 | 狀態與設定 | `GET /api/status`、`GET /api/setup/state` |
-| Pipeline | `GET /api/pipeline/runs`、`GET /api/observations`、`GET /api/logs` |
+| Pipeline | `GET /api/pipeline/runs`、`GET /api/pipeline/active`、`GET /api/observations`、`GET /api/logs` |
 | 事件與行動 | `GET /api/events`、`GET /api/events/{id}`、`GET /api/actions` |
 | 飲水摘要 | `GET /api/hydration/summary` |
 | 健康與趨勢 | `GET /api/health/current`、`GET /api/statistics?days=7` |
-| L3 期間分析 | `POST /api/observer/analyze-all` |
+| 照護與 L3 | `GET /api/care/summary`、`POST /api/observer/analyze-all` |
+| 住民互動 | `GET/POST /api/interaction/*`、`GET/POST /api/memory/*` |
+| 社工與報告 | `GET/POST /api/social-work/records`、`POST /api/social-work/auto-generate`、`GET/POST /api/reports/status` |
+| 稽核與 reset | `GET /api/audit*`、`POST /api/reset/history` |
 | Provider 與 secrets | `GET`／`PUT /api/settings`、`POST /api/settings/providers`、`POST /api/settings/rollback`、`POST /api/secrets` |
 | 來源與影像 | `POST /api/source/start`、`POST /api/source/stop`、`GET /api/source/snapshot`、`GET /api/replay/scenarios`、`GET /api/media/streams` |
+| Debug（僅 debug mode） | `GET/POST /api/debug/*` |
 | 即時更新 | `WS /ws`、`WS /ws/media` |
 
 backend 另外保留一組相容 Longcare 舊流程的端點：`/api/agent/*`、`/api/memory/*`、`/api/interaction/*` 與 `/api/transcripts`。健康、Observer 與統計端點已由新版照護總覽及趨勢頁直接使用；其中手動期間分析走目前設定的 L3 slot。完整列表見 [API Reference](docs/api-reference.md)。
@@ -142,7 +148,7 @@ bun run build
 
 `bun run verify` 會執行 Python 編譯檢查、backend unittest、前端型別檢查，以及 FFmpeg 檢查。`bun run build` 會建立前端 production bundle。需要實際雲端金鑰的 provider probes 是另外的能力測試，不會由離線 stub 流程代替。
 
-目前 repository 的驗證結果為 128 個測試通過，前端 typecheck 與 production build 也通過。測試範圍、DoD 與 provider probes 請參閱 [Verification and Testing](docs/verification-and-testing.md)。
+目前整合工作樹的驗證結果為 142 個測試通過，前端 typecheck 與 production build 也通過。測試範圍、DoD 與 provider probes 請參閱 [Verification and Testing](docs/verification-and-testing.md) 及 [v5/local-vLLM 整合邊界](docs/v5-local-vllm-integration.md)。
 
 ## 隱私與目前限制
 

@@ -112,6 +112,18 @@ class LayerQueue:
         with self._not_empty:
             self._not_empty.notify_all()
 
+    def reset(self) -> None:
+        """Drop pending work and reset counters after a history reset."""
+        with self._not_empty:
+            self._pending.clear()
+            self._running = 0
+            self._running_labels.clear()
+            self.accepted = 0
+            self.dropped = 0
+            self.rejected = 0
+            self.completed = 0
+            self._not_empty.notify_all()
+
     def _notify_drop(self, job: QueuedJob, reason: str) -> None:
         if self._on_drop is not None:
             try:

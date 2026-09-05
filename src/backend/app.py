@@ -34,6 +34,7 @@ from .media.replay_source import ReplaySource, ScriptedSource
 from .media.rtsp_source import RtspSource
 from .notify.telegram import TelegramNotifier
 from .observer.service import ObserverScheduler
+from .care_logging import CareLogger, setup_system_logging
 from .store import Database, Repositories, migrate
 
 
@@ -46,6 +47,8 @@ class AppContext:
         self.db = Database(self.config.db_path)
         self.migrations_applied = migrate(self.db)
         self.repos = Repositories(self.db)
+        self.logger = setup_system_logging(self.repos)
+        self.logger.info("app", f"Care Agent v5 starting (subject={self.config.subject_id}, db={self.config.db_path})")
 
         self.policy = self._load_policy()
         self.l2_config: ProviderConfig = default_l2()
@@ -310,6 +313,29 @@ class AppContext:
                 pass
             self.source = None
 
+    def reset_history(self) -> dict[str, Any]:
+        """Stop live inputs and clear runtime history, preserving settings."""
+        with self._source_lock:
+            self.stop_source()
+        for session in list(self.browser_sessions.values()):
+            try:
+                session.close()
+            except Exception:  # noqa: BLE001
+                pass
+        self.browser_sessions.clear()
+        self.cascade.stop()
+        self.cascade.reset()
+        self.source_terminal = None
+        self.observer.reset()
+        deleted = self.repos.clear_history()
+        self.broadcaster.reset()
+        self.broadcaster.publish("history.reset", {
+            "preserved": ["config_versions", "schema_migrations", "secrets"],
+            "deleted": deleted,
+        })
+        return {"deleted": deleted,
+                "preserved": ["config_versions", "schema_migrations", "secrets"]}
+
     def shutdown(self) -> None:
         if self.debug_simulator is not None:
             self.debug_simulator.stop_stream()
@@ -318,6 +344,7 @@ class AppContext:
                 session.close()
             except Exception:  # noqa: BLE001
                 pass
+        self.logger.info("app", "Care Agent v5 shutting down")
         self.browser_sessions.clear()
         self.stop_source()
         self.observer.stop()

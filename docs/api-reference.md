@@ -192,11 +192,20 @@ Care Agent 後端提供標準 REST API 與 WebSocket 即時資料流（預設監
 
 ---
 
-## 7. 下一階段 API（規劃中）
+## 7. 照護摘要、運作監看與 Debug API
 
-以下端點尚未實作。詳細契約見 [長照端介入建議](caregiver-intervention-workflow.md)、[運作監看](operator-console.md) 與 [Debug Mode](debug-and-simulation.md)。
+以下端點已在目前 runtime 實作；Production 與 Debug 的可用範圍不同。詳細契約見 [長照端介入建議](caregiver-intervention-workflow.md)、[運作監看](operator-console.md) 與 [Debug Mode](debug-and-simulation.md)。
 
-- `GET /api/care/summary`：回傳合併事件、L3、Policy、通知、Observer 與來源健康度後的單一照護摘要。
-- `GET /api/pipeline/active`：回傳重新連線時仍在執行或等待的 Runs 與 steps。
+- `GET /api/care/summary`：回傳事件、L3、Policy、通知、Observer 與來源健康度的單一照護摘要。
+- `GET /api/pipeline/active`：回傳目前與近期保存的 pipeline steps。
 - WebSocket `pipeline.step`：推送每個分析步驟的等待、執行、略過、降級、成功與失敗狀態。
-- `/api/debug/*`：只在 Debug mode 註冊；Production 必須回傳 404。
+- Debug mode 提供 `GET /api/debug/scenarios`、`POST /api/debug/history/generate`、`POST /api/debug/scenarios/trigger`、`POST /api/debug/stream/start`、`POST /api/debug/stream/stop`；Production 對這些路由回傳 404。
+
+## 8. 住民互動、社工紀錄與稽核
+
+- `GET/POST /api/interaction/*`：住民互動與背景 understanding；背景推論不得直接對住民發話。
+- `GET/POST /api/social-work/records`：人工社工紀錄，與模型產出分開保存。
+- `POST /api/social-work/auto-generate`：依事件、飲水、觀察、健康量測與互動紀錄產生可供人工覆核的 SOAP 草稿。
+- `GET/POST /api/reports/status`：查詢或產生日常狀態、追蹤與個案摘要報告。
+- `GET /api/audit` 與 `GET /api/audit/log-files*`：回傳有界、遮罩後的操作紀錄；不保存或顯示 hidden chain-of-thought。
+- `POST /api/reset/history`：清除 runtime history，保留設定版本、schema migrations 與 secrets。

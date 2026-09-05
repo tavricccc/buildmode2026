@@ -123,6 +123,7 @@ export interface Status {
   runtime: { mode: "production" | "debug"; debug: boolean };
   subject_id: string;
   config_version: string;
+  browser_media: BrowserMediaHealth[];
   source: {
     running?: boolean; kind?: string; frames_emitted?: number; scenario?: string;
     source_id?: string; reconnects?: number; last_frame_age_ms?: number | null;
@@ -193,6 +194,27 @@ export interface DebugStatus {
   stream: { running: boolean; profile?: string; seed?: number; interval_sec?: number; events?: number; last_scenario?: string };
   scenarios: { id: string; name: string }[];
 }
+
+export interface BrowserMediaHealth {
+  source_id: string;
+  kind: "browser_webm";
+  camera_id: string;
+  media_type: string;
+  running: boolean;
+  bytes_received: number;
+  chunks_received: number;
+  frames_emitted: number;
+  audio_bytes: number;
+  error: string | null;
+  started_at_ms: number;
+}
+
+export interface InteractionMessage { message_id: string; role: "user" | "assistant"; text: string; intent: string; created_at: string; }
+export interface MemoryRecord { memory_id: string; memory_type: string; title: string; content: string; confidence: number; status: "pending" | "confirmed" | "invalidated"; requires_confirmation: number; created_at: string; updated_at: string; }
+export interface AgentRun { agent_run_id: string; agent_name: string; trigger_type: string; status: string; input_context: Record<string, unknown>; output: Record<string, unknown>; error_code: string | null; latency_ms: number | null; created_at: string; completed_at: string | null; }
+export interface SocialWorkRecord { record_id: string; record_type: string; occurred_at_ms: number; author: string; content: string; tags: string[]; created_at: string; }
+export interface StatusReport { report_id: string; report_type: string; window_start_ms: number; window_end_ms: number; title: string; body: string; sources: Record<string, string[]>; created_at: string; }
+export interface AuditPayload { database: { path: string; tables: Record<string, number> }; logs: Array<{ log_id: string; level: string; source: string; message: string; context_json: string; created_at: string }>; pipeline_runs: PipelineRun[]; observations: Array<{ observation_id: string; observed_at_ms: number; summary: string; confidence: number; payload: Record<string, unknown> }>; model_calls: Array<Record<string, unknown>>; agent_runs: AgentRun[]; memories: MemoryRecord[]; social_work_records: SocialWorkRecord[]; note: string; }
 
 export type ObserverState = "stable" | "attention" | "insufficient_evidence" | "anomaly" | "failed";
 

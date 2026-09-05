@@ -1,6 +1,6 @@
 # Debug Mode 與模擬資料系統
 
-> 狀態：規劃中。本文件定義 Debug runtime、資料產生器及 Replay 正常結束行為。
+> 狀態：Debug runtime、資料產生器與 Replay lifecycle 已落地；完整 Evaluation provider 驗證仍需另行執行。
 
 ## 模式與隔離
 
