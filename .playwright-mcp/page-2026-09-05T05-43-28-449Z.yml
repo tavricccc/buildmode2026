@@ -1,0 +1,1901 @@
+- generic [active] [ref=f8e2]:
+  - alert [ref=f8e1]
+  - complementary
+  - generic [ref=f8e3]:
+    - paragraph [ref=f8e8]:
+      - text: "MiniMax Week: M3, M2.7, Speech 2.8, and Music 3.0 are free for 14 days."
+      - link "Build now" [ref=f8e9] [cursor=pointer]:
+        - /url: https://www.gmicloud.ai/minimax-week
+    - banner [ref=f8e10]:
+      - generic [ref=f8e11]:
+        - link [ref=f8e12] [cursor=pointer]:
+          - /url: /
+        - button "Sign in" [ref=f8e28] [cursor=pointer]
+    - main [ref=f8e29]:
+      - generic [ref=f8e32]:
+        - generic [ref=f8e37]:
+          - generic [ref=f8e39] [cursor=pointer]:
+            - img "MiniMaxAI/MiniMax-M3" [ref=f8e42]
+            - generic [ref=f8e45]: Free
+            - generic [ref=f8e46]:
+              - generic [ref=f8e47]:
+                - img "Minimax" [ref=f8e49]
+                - generic [ref=f8e51]: Minimax
+              - generic [ref=f8e52]:
+                - paragraph [ref=f8e53]: MiniMaxAI/MiniMax-M3
+                - generic [ref=f8e54]: LLM
+          - generic [ref=f8e58] [cursor=pointer]:
+            - img "MiniMaxAI/MiniMax-M2.7" [ref=f8e61]
+            - generic [ref=f8e63]: Free
+            - generic [ref=f8e65]:
+              - img "Minimax" [ref=f8e67]
+              - generic [ref=f8e69]: Minimax
+          - generic [ref=f8e71] [cursor=pointer]:
+            - generic [ref=f8e76]: Free
+            - generic [ref=f8e78]:
+              - img "Minimax" [ref=f8e80]
+              - generic [ref=f8e82]: MiniMax
+          - generic [ref=f8e84] [cursor=pointer]:
+            - img "minimax-tts-speech-2.8-turbo" [ref=f8e87]
+            - generic [ref=f8e89]: Free
+            - generic [ref=f8e91]:
+              - img "Minimax" [ref=f8e93]
+              - generic [ref=f8e95]: MiniMax
+          - generic [ref=f8e97] [cursor=pointer]:
+            - img "minimax-tts-speech-2.8-hd" [ref=f8e100]
+            - generic [ref=f8e102]: Free
+            - generic [ref=f8e104]:
+              - img "Minimax" [ref=f8e106]
+              - generic [ref=f8e108]: MiniMax
+          - generic [ref=f8e110] [cursor=pointer]:
+            - img "minimax-audio-voice-clone-speech-2.8-hd" [ref=f8e113]
+            - generic [ref=f8e115]: Free
+            - generic [ref=f8e117]:
+              - img "Minimax" [ref=f8e119]
+              - generic [ref=f8e121]: MiniMax
+        - generic [ref=f8e123]:
+          - generic [ref=f8e124]:
+            - heading "Models" [level=2] [ref=f8e125]
+            - paragraph [ref=f8e126]: Discover popular models available on GMI Cloud.
+          - generic [ref=f8e127]:
+            - complementary [ref=f8e128]:
+              - generic [ref=f8e129]:
+                - button "All 293" [ref=f8e130] [cursor=pointer]:
+                  - generic [ref=f8e131]: All
+                  - generic [ref=f8e132]: "293"
+                - button "3D 1" [ref=f8e133] [cursor=pointer]:
+                  - generic [ref=f8e134]: 3D
+                  - generic [ref=f8e135]: "1"
+                - button "LLM 129" [ref=f8e136] [cursor=pointer]:
+                  - generic [ref=f8e137]: LLM
+                  - generic [ref=f8e138]: "129"
+                - button "Image 40" [ref=f8e139] [cursor=pointer]:
+                  - generic [ref=f8e140]: Image
+                  - generic [ref=f8e141]: "40"
+                - button "Video 100" [ref=f8e142] [cursor=pointer]:
+                  - generic [ref=f8e143]: Video
+                  - generic [ref=f8e144]: "100"
+                - button "Audio 23" [ref=f8e145] [cursor=pointer]:
+                  - generic [ref=f8e146]: Audio
+                  - generic [ref=f8e147]: "23"
+                - group [ref=f8e149]:
+                  - group [ref=f8e150]
+                  - textbox "Search by model name" [ref=f8e154]
+            - generic [ref=f8e156]:
+              - generic [ref=f8e161] [cursor=pointer]:
+                - generic [ref=f8e162]: Google
+                - paragraph [ref=f8e165]: Gemini 3.8 Flash
+                - generic [aria-hidden]:
+                  - generic: LLM
+              - generic [ref=f8e167] [cursor=pointer]:
+                - generic [ref=f8e170]: 50% off
+                - generic [ref=f8e171]:
+                  - generic [ref=f8e172]: ZAI
+                  - paragraph [ref=f8e175]: "ZAI: GLM-5.3 Flash"
+                  - generic [aria-hidden]:
+                    - generic: LLM
+                    - generic: Text-to-Text
+              - generic [ref=f8e180] [cursor=pointer]:
+                - generic [ref=f8e181]: Qwen
+                - paragraph [ref=f8e184]: Qwen3.8 27B
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-to-Text
+              - generic [ref=f8e189] [cursor=pointer]:
+                - generic [ref=f8e190]: Stepfun
+                - paragraph [ref=f8e193]: "StepFun: Step-3.7-Flash"
+                - generic [aria-hidden]:
+                  - generic: LLM
+              - generic [ref=f8e198] [cursor=pointer]:
+                - generic [ref=f8e199]: Google
+                - paragraph [ref=f8e202]: Gemini 3.7 Flash
+                - generic [aria-hidden]:
+                  - generic: LLM
+              - generic [ref=f8e207] [cursor=pointer]:
+                - generic [ref=f8e208]: Nvidia
+                - paragraph [ref=f8e211]: nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-Image-to-Text
+              - generic [ref=f8e216] [cursor=pointer]:
+                - generic [ref=f8e217]: Qwen
+                - paragraph [ref=f8e220]: Qwen3.8 Max
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-to-Text
+              - generic [ref=f8e222] [cursor=pointer]:
+                - generic [ref=f8e225]: 20% off
+                - generic [ref=f8e226]:
+                  - generic [ref=f8e227]: DeepSeek
+                  - paragraph [ref=f8e230]: DeepSeek-V4-Flash-0731
+                  - generic [aria-hidden]:
+                    - generic: LLM
+                    - generic: Text-to-Text
+              - generic [ref=f8e235] [cursor=pointer]:
+                - generic [ref=f8e236]: Anthropic
+                - paragraph [ref=f8e239]: Claude Opus 5
+                - generic [aria-hidden]:
+                  - generic: LLM
+              - generic [ref=f8e244] [cursor=pointer]:
+                - generic [ref=f8e245]: Google
+                - paragraph [ref=f8e248]: Gemini 3.6 Flash
+                - generic [aria-hidden]:
+                  - generic: LLM
+              - generic [ref=f8e253] [cursor=pointer]:
+                - generic [ref=f8e254]: Google
+                - paragraph [ref=f8e257]: Gemini 3.5 Flash-Lite
+                - generic [aria-hidden]:
+                  - generic: LLM
+              - generic [ref=f8e262] [cursor=pointer]:
+                - generic [ref=f8e263]: Kimi
+                - paragraph [ref=f8e266]: "moonshotai/Kimi: K3"
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-to-Text
+              - generic [ref=f8e271] [cursor=pointer]:
+                - generic [ref=f8e272]: Grok
+                - paragraph [ref=f8e275]: Grok 4.5
+                - generic [aria-hidden]:
+                  - generic: LLM
+              - generic [ref=f8e280] [cursor=pointer]:
+                - generic [ref=f8e281]: OpenAI
+                - paragraph [ref=f8e284]: GPT-5.6-Luna
+                - generic [aria-hidden]:
+                  - generic: LLM
+              - generic [ref=f8e289] [cursor=pointer]:
+                - generic [ref=f8e290]: OpenAI
+                - paragraph [ref=f8e293]: GPT-5.6-Terra
+                - generic [aria-hidden]:
+                  - generic: LLM
+              - generic [ref=f8e298] [cursor=pointer]:
+                - generic [ref=f8e299]: OpenAI
+                - paragraph [ref=f8e302]: GPT-5.6-Sol
+                - generic [aria-hidden]:
+                  - generic: LLM
+              - generic [ref=f8e304] [cursor=pointer]:
+                - generic [ref=f8e307]: 10% off
+                - generic [ref=f8e308]:
+                  - generic [ref=f8e309]: Tencent
+                  - paragraph [ref=f8e312]: tencent/Hy3
+                  - generic [aria-hidden]:
+                    - generic: LLM
+                    - generic: Text-to-Text
+              - generic [ref=f8e317] [cursor=pointer]:
+                - generic [ref=f8e318]: Anthropic
+                - paragraph [ref=f8e321]: Claude Sonnet 5
+                - generic [aria-hidden]:
+                  - generic: LLM
+              - generic [ref=f8e326] [cursor=pointer]:
+                - generic [ref=f8e327]: Kimi
+                - paragraph [ref=f8e330]: "moonshotai/Kimi: K2.7-Code-Highspeed"
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-to-Text
+              - generic [ref=f8e332] [cursor=pointer]:
+                - generic [ref=f8e335]: 25% off
+                - generic [ref=f8e336]:
+                  - generic [ref=f8e337]: ZAI
+                  - paragraph [ref=f8e340]: zai-org/GLM-5.2-FP8
+                  - generic [aria-hidden]:
+                    - generic: LLM
+                    - generic: Text-to-Text
+              - generic [ref=f8e345] [cursor=pointer]:
+                - generic [ref=f8e346]: Anthropic
+                - paragraph [ref=f8e349]: Claude Fable 5
+                - generic [aria-hidden]:
+                  - generic: LLM
+              - generic [ref=f8e351] [cursor=pointer]:
+                - generic [ref=f8e354]: Free
+                - generic [ref=f8e355]:
+                  - generic [ref=f8e356]: Minimax
+                  - paragraph [ref=f8e359]: MiniMaxAI/MiniMax-M3
+                  - generic [aria-hidden]:
+                    - generic: LLM
+              - generic [ref=f8e364] [cursor=pointer]:
+                - generic [ref=f8e365]: Anthropic
+                - paragraph [ref=f8e368]: Claude Opus 4.8
+                - generic [aria-hidden]:
+                  - generic: LLM
+              - generic [ref=f8e373] [cursor=pointer]:
+                - generic [ref=f8e374]: Qwen
+                - paragraph [ref=f8e377]: Qwen3.7 Max
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-to-Text
+              - generic [ref=f8e382] [cursor=pointer]:
+                - generic [ref=f8e383]: Google
+                - paragraph [ref=f8e386]: Gemini 3.5 Flash
+                - generic [aria-hidden]:
+                  - generic: LLM
+              - generic [ref=f8e388] [cursor=pointer]:
+                - generic [ref=f8e391]: 30% off
+                - generic [ref=f8e392]:
+                  - generic [ref=f8e393]: XiaomiMiMo
+                  - paragraph [ref=f8e396]: MiMo-V2.5-Pro
+                  - generic [aria-hidden]:
+                    - generic: LLM
+              - generic [ref=f8e401] [cursor=pointer]:
+                - generic [ref=f8e402]: OpenAI
+                - paragraph [ref=f8e405]: GPT-5.5
+                - generic [aria-hidden]:
+                  - generic: LLM
+              - generic [ref=f8e407] [cursor=pointer]:
+                - generic [ref=f8e410]: 40% off
+                - generic [ref=f8e411]:
+                  - generic [ref=f8e412]: DeepSeek
+                  - paragraph [ref=f8e415]: DeepSeek-V4-Pro
+                  - generic [aria-hidden]:
+                    - generic: LLM
+                    - generic: Text-to-Text
+              - generic [ref=f8e420] [cursor=pointer]:
+                - generic [ref=f8e421]: Anthropic
+                - paragraph [ref=f8e424]: Claude Opus 4.7
+                - generic [aria-hidden]:
+                  - generic: LLM
+              - generic [ref=f8e426] [cursor=pointer]:
+                - generic [ref=f8e429]: 35% off
+                - generic [ref=f8e430]:
+                  - generic [ref=f8e431]: ZAI
+                  - paragraph [ref=f8e434]: "ZAI: GLM-5.1"
+                  - generic [aria-hidden]:
+                    - generic: LLM
+              - generic [ref=f8e436] [cursor=pointer]:
+                - generic [ref=f8e439]: 40% off
+                - generic [ref=f8e440]:
+                  - generic [ref=f8e441]: ZAI
+                  - paragraph [ref=f8e444]: "ZAI: GLM-5"
+                  - generic [aria-hidden]:
+                    - generic: LLM
+              - generic [ref=f8e449] [cursor=pointer]:
+                - generic [ref=f8e450]: OpenAI
+                - paragraph [ref=f8e453]: GPT-5.4-nano
+                - generic [aria-hidden]:
+                  - generic: LLM
+              - generic [ref=f8e458] [cursor=pointer]:
+                - generic [ref=f8e459]: OpenAI
+                - paragraph [ref=f8e462]: GPT-5.4-mini
+                - generic [aria-hidden]:
+                  - generic: LLM
+              - generic [ref=f8e464] [cursor=pointer]:
+                - generic [ref=f8e467]: Free
+                - generic [ref=f8e468]:
+                  - generic [ref=f8e469]: Minimax
+                  - paragraph [ref=f8e472]: MiniMaxAI/MiniMax-M2.7
+                  - generic [aria-hidden]:
+                    - generic: LLM
+              - generic [ref=f8e477] [cursor=pointer]:
+                - generic [ref=f8e478]: Google
+                - paragraph [ref=f8e481]: Gemini 3.1 Flash-Lite
+                - generic [aria-hidden]:
+                  - generic: LLM
+              - generic [ref=f8e486] [cursor=pointer]:
+                - generic [ref=f8e487]: OpenAI
+                - paragraph [ref=f8e490]: GPT-5.4-pro
+                - generic [aria-hidden]:
+                  - generic: LLM
+              - generic [ref=f8e495] [cursor=pointer]:
+                - generic [ref=f8e496]: OpenAI
+                - paragraph [ref=f8e499]: GPT-5.4
+                - generic [aria-hidden]:
+                  - generic: LLM
+              - generic [ref=f8e504] [cursor=pointer]:
+                - generic [ref=f8e505]: Google
+                - paragraph [ref=f8e508]: Gemini-3.1-Pro
+                - generic [aria-hidden]:
+                  - generic: LLM
+              - generic [ref=f8e513] [cursor=pointer]:
+                - generic [ref=f8e514]: Anthropic
+                - paragraph [ref=f8e517]: Claude Sonnet 4.6
+                - generic [aria-hidden]:
+                  - generic: LLM
+              - generic [ref=f8e522] [cursor=pointer]:
+                - generic [ref=f8e523]: Anthropic
+                - paragraph [ref=f8e526]: Claude Haiku 4.5
+                - generic [aria-hidden]:
+                  - generic: LLM
+              - generic [ref=f8e531] [cursor=pointer]:
+                - generic [ref=f8e532]: ZAI
+                - paragraph [ref=f8e535]: "ZAI: GLM-4.7-Flash"
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-to-Text
+                  - generic: GLM
+              - generic [ref=f8e540] [cursor=pointer]:
+                - generic [ref=f8e541]: Anthropic
+                - paragraph [ref=f8e544]: Claude Opus 4.1
+                - generic [aria-hidden]:
+                  - generic: LLM
+              - generic [ref=f8e549] [cursor=pointer]:
+                - generic [ref=f8e550]: Anthropic
+                - paragraph [ref=f8e553]: Claude 3.7 Sonnet
+                - generic [aria-hidden]:
+                  - generic: LLM
+              - generic [ref=f8e558] [cursor=pointer]:
+                - generic [ref=f8e559]: Anthropic
+                - paragraph [ref=f8e562]: Claude Sonnet 4
+                - generic [aria-hidden]:
+                  - generic: LLM
+              - generic [ref=f8e567] [cursor=pointer]:
+                - generic [ref=f8e568]: Anthropic
+                - paragraph [ref=f8e571]: Claude Opus 4
+                - generic [aria-hidden]:
+                  - generic: LLM
+              - generic [ref=f8e576] [cursor=pointer]:
+                - generic [ref=f8e577]: Anthropic
+                - paragraph [ref=f8e580]: Claude Opus 4.5
+                - generic [aria-hidden]:
+                  - generic: LLM
+              - generic [ref=f8e585] [cursor=pointer]:
+                - generic [ref=f8e586]: Anthropic
+                - paragraph [ref=f8e589]: Claude Sonnet 4.5
+                - generic [aria-hidden]:
+                  - generic: LLM
+              - generic [ref=f8e594] [cursor=pointer]:
+                - generic [ref=f8e595]: MiniMaxAI
+                - paragraph [ref=f8e598]: MiniMax-M2.1
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-to-Text
+                  - generic: MiniMax
+              - generic [ref=f8e603] [cursor=pointer]:
+                - generic [ref=f8e604]: ZAI
+                - paragraph [ref=f8e607]: "ZAI: GLM-4.7-FP8"
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-to-Text
+                  - generic: GLM
+              - generic [ref=f8e612] [cursor=pointer]:
+                - generic [ref=f8e613]: DeepSeek
+                - paragraph [ref=f8e616]: DeepSeek-V3.2-Speciale
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: DeepSeek
+                  - generic: Text-to-Text
+              - generic [ref=f8e621] [cursor=pointer]:
+                - generic [ref=f8e622]: Moonshot
+                - paragraph [ref=f8e625]: Kimi-K2-Thinking
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-to-Text
+              - generic [ref=f8e630] [cursor=pointer]:
+                - generic [ref=f8e631]: MiniMaxAI
+                - paragraph [ref=f8e634]: MiniMax-M2
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-to-Text
+                  - generic: MiniMax
+              - generic [ref=f8e639] [cursor=pointer]:
+                - generic [ref=f8e640]: DeepSeek
+                - paragraph [ref=f8e643]: DeepSeek V3.1
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: DeepSeek
+                  - generic: Text-to-Text
+              - generic [ref=f8e648] [cursor=pointer]:
+                - generic [ref=f8e649]: ZAI
+                - paragraph [ref=f8e652]: GLM-4.6
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-to-Text
+                  - generic: GLM
+              - generic [ref=f8e657] [cursor=pointer]:
+                - generic [ref=f8e658]: DeepSeek
+                - paragraph [ref=f8e661]: DeepSeek-V3.2-Exp
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: DeepSeek
+                  - generic: Text-to-Text
+              - generic [ref=f8e666] [cursor=pointer]:
+                - generic [ref=f8e667]: allenai
+                - paragraph [ref=f8e670]: "allenai: olmOCR-2-7B-1025-FP8"
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-to-Text
+              - generic [ref=f8e675] [cursor=pointer]:
+                - generic [ref=f8e676]: Anthropic
+                - paragraph [ref=f8e679]: Claude Opus 4.6
+                - generic [aria-hidden]:
+                  - generic: LLM
+              - generic [ref=f8e684] [cursor=pointer]:
+                - generic [ref=f8e685]: DeepSeek
+                - paragraph [ref=f8e688]: deepseek-ai/DeepSeek-R1-0528
+                - generic [aria-hidden]:
+                  - generic: LLM
+              - generic [ref=f8e690] [cursor=pointer]:
+                - generic [ref=f8e693]: 28% off
+                - generic [ref=f8e694]:
+                  - generic [ref=f8e695]: DeepSeek
+                  - paragraph [ref=f8e698]: deepseek-ai/DeepSeek-V3.2
+                  - generic [aria-hidden]:
+                    - generic: LLM
+              - generic [ref=f8e703] [cursor=pointer]:
+                - generic [ref=f8e704]: deepseek
+                - paragraph [ref=f8e707]: "DeepSeek: DeepSeek Prover V2 671B"
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: DeepSeek
+                  - generic: Text-to-Text
+              - generic [ref=f8e712] [cursor=pointer]:
+                - generic [ref=f8e713]: deepseek
+                - paragraph [ref=f8e716]: DeepSeek R1
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: DeepSeek
+                  - generic: Text-to-Text
+              - generic [ref=f8e721] [cursor=pointer]:
+                - generic [ref=f8e722]: deepseek
+                - paragraph [ref=f8e725]: DeepSeek R1 Distill Llama 70B
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-to-Text
+              - generic [ref=f8e730] [cursor=pointer]:
+                - generic [ref=f8e731]: deepseek
+                - paragraph [ref=f8e734]: DeepSeek R1 Distill Llama 8B
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: DeepSeek
+                  - generic: Text-to-Text
+              - generic [ref=f8e739] [cursor=pointer]:
+                - generic [ref=f8e740]: deepseek
+                - paragraph [ref=f8e743]: DeepSeek R1 Distill Qwen 14B
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-to-Text
+              - generic [ref=f8e748] [cursor=pointer]:
+                - generic [ref=f8e749]: deepseek
+                - paragraph [ref=f8e752]: DeepSeek R1 Distill Qwen 1.5B
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-to-Text
+              - generic [ref=f8e757] [cursor=pointer]:
+                - generic [ref=f8e758]: deepseek
+                - paragraph [ref=f8e761]: DeepSeek R1 Distill Qwen 32B
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: DeepSeek
+                  - generic: Text-to-Text
+              - generic [ref=f8e766] [cursor=pointer]:
+                - generic [ref=f8e767]: deepseek
+                - paragraph [ref=f8e770]: DeepSeek R1 Distill Qwen 7B
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-to-Text
+              - generic [ref=f8e775] [cursor=pointer]:
+                - generic [ref=f8e776]: DeepSeek
+                - paragraph [ref=f8e779]: DeepSeek V3 0324
+                - generic [aria-hidden]:
+                  - generic: LLM
+              - generic [ref=f8e784] [cursor=pointer]:
+                - generic [ref=f8e785]: DeepSeek
+                - paragraph [ref=f8e788]: DeepSeek-V3.1-Terminus
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: DeepSeek
+                  - generic: Text-to-Text
+              - generic [ref=f8e790] [cursor=pointer]:
+                - generic [ref=f8e793]: 20% off
+                - generic [ref=f8e794]:
+                  - generic [ref=f8e795]: DeepSeek
+                  - paragraph [ref=f8e798]: DeepSeek-V4-Flash
+                  - generic [aria-hidden]:
+                    - generic: LLM
+                    - generic: Text-to-Text
+              - generic [ref=f8e803] [cursor=pointer]:
+                - generic [ref=f8e804]: DeepSeek
+                - paragraph [ref=f8e807]: DeepSeek-V4-Flash-0731-B300
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-to-Text
+                  - generic: DeepSeek
+              - generic [ref=f8e812] [cursor=pointer]:
+                - generic [ref=f8e813]: DeepSeek
+                - paragraph [ref=f8e816]: DeepSeek-V4-Flash-0731-dev
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-to-Text
+                  - generic: DeepSeek
+              - generic [ref=f8e821] [cursor=pointer]:
+                - generic [ref=f8e822]: DeepSeek
+                - paragraph [ref=f8e825]: DeepSeek-V4-Pro
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-to-Text
+                  - generic: GLM
+              - generic [ref=f8e827] [cursor=pointer]:
+                - generic [ref=f8e830]: 15% off
+                - generic [ref=f8e831]:
+                  - generic [ref=f8e832]: DeepSeek
+                  - paragraph [ref=f8e835]: DeepSeek-V4-Pro-0813
+                  - generic [aria-hidden]:
+                    - generic: LLM
+                    - generic: Text-to-Text
+              - generic [ref=f8e840] [cursor=pointer]:
+                - generic [ref=f8e841]: Google
+                - paragraph [ref=f8e844]: Gemini 3 Flash
+              - generic [ref=f8e849] [cursor=pointer]:
+                - generic [ref=f8e850]: Google
+                - paragraph [ref=f8e853]: Gemma 4 26B A4B IT
+                - generic [aria-hidden]:
+                  - generic: LLM
+              - generic [ref=f8e858] [cursor=pointer]:
+                - generic [ref=f8e859]: Google
+                - paragraph [ref=f8e862]: Gemma 4 31B IT
+                - generic [aria-hidden]:
+                  - generic: LLM
+              - generic [ref=f8e867] [cursor=pointer]:
+                - generic [ref=f8e868]: zai
+                - paragraph [ref=f8e871]: GLM-4.5-Air-FP8
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-to-Text
+              - generic [ref=f8e876] [cursor=pointer]:
+                - generic [ref=f8e877]: zai
+                - paragraph [ref=f8e880]: GLM-4.5-FP8
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-to-Text
+                  - generic: GLM
+              - generic [ref=f8e885] [cursor=pointer]:
+                - generic [ref=f8e886]: OpenAI
+                - paragraph [ref=f8e889]: GPT-6-Astra
+                - generic [aria-hidden]:
+                  - generic: LLM
+              - generic [ref=f8e894] [cursor=pointer]:
+                - generic [ref=f8e895]: OpenAI
+                - paragraph [ref=f8e898]: GPT OSS 120b
+                - generic [aria-hidden]:
+                  - generic: LLM
+              - generic [ref=f8e903] [cursor=pointer]:
+                - generic [ref=f8e904]: OpenAI
+                - paragraph [ref=f8e907]: GPT OSS 20b
+                - generic [aria-hidden]:
+                  - generic: Text-to-Text
+              - generic [ref=f8e912] [cursor=pointer]:
+                - generic [ref=f8e913]: Grok
+                - paragraph [ref=f8e916]: Grok 4.6
+                - generic [aria-hidden]:
+                  - generic: LLM
+              - generic [ref=f8e921] [cursor=pointer]:
+                - generic [ref=f8e922]: Moonshot
+                - paragraph [ref=f8e925]: Kimi-K2.7-code-v1
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-to-Text
+                  - generic: ...
+              - generic [ref=f8e930] [cursor=pointer]:
+                - generic [ref=f8e931]: meta
+                - paragraph [ref=f8e934]: Llama 3.1 70B Instruct
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Llama3
+                  - generic: Text-to-Text
+              - generic [ref=f8e939] [cursor=pointer]:
+                - generic [ref=f8e940]: meta
+                - paragraph [ref=f8e943]: Llama-3.1-8B-Instruct
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Llama3
+              - generic [ref=f8e948] [cursor=pointer]:
+                - generic [ref=f8e949]: meta
+                - paragraph [ref=f8e952]: Llama 3.3 70B Instruct
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Llama3
+                  - generic: Text-to-Text
+              - generic [ref=f8e957] [cursor=pointer]:
+                - generic [ref=f8e958]: meta
+                - paragraph [ref=f8e961]: Llama-4 Maverick 17B 128E Instruct FP8
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Llama4
+                  - generic: ...
+              - generic [ref=f8e966] [cursor=pointer]:
+                - generic [ref=f8e967]: meta
+                - paragraph [ref=f8e970]: Llama-4 Scout 17B 16E Instruct
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Llama4
+                  - generic: ...
+              - generic [ref=f8e972] [cursor=pointer]:
+                - generic [ref=f8e975]: 15% off
+                - generic [ref=f8e976]:
+                  - generic [ref=f8e977]: XiaomiMiMo
+                  - paragraph [ref=f8e980]: MiMo-V2.5
+                  - generic [aria-hidden]:
+                    - generic: LLM
+              - generic [ref=f8e985] [cursor=pointer]:
+                - generic [ref=f8e986]: Minimax
+                - paragraph [ref=f8e989]: MiniMaxAI/MiniMax-M2.5
+                - generic [aria-hidden]:
+                  - generic: LLM
+              - generic [ref=f8e994] [cursor=pointer]:
+                - generic [ref=f8e995]: Minimax
+                - paragraph [ref=f8e998]: "MiniMax AI: MiniMax-M2.5 (H200)"
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-to-Text
+                  - generic: ...
+              - generic [ref=f8e1003] [cursor=pointer]:
+                - generic [ref=f8e1004]: Kimi
+                - paragraph [ref=f8e1007]: moonshotai/Kimi-K2.5
+                - generic [aria-hidden]:
+                  - generic: LLM
+              - generic [ref=f8e1009] [cursor=pointer]:
+                - generic [ref=f8e1012]: 10% off
+                - generic [ref=f8e1013]:
+                  - generic [ref=f8e1014]: Kimi
+                  - paragraph [ref=f8e1017]: "moonshotai/Kimi: K2.6"
+                  - generic [aria-hidden]:
+                    - generic: LLM
+                    - generic: Text-to-Text
+              - generic [ref=f8e1022] [cursor=pointer]:
+                - generic [ref=f8e1023]: Kimi
+                - paragraph [ref=f8e1026]: "moonshotai/Kimi: K2.7-Code"
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-to-Text
+              - generic [ref=f8e1031] [cursor=pointer]:
+                - generic [ref=f8e1032]: Kimi
+                - paragraph [ref=f8e1035]: moonshotai/Kimi-K2-Instruct-0905
+                - generic [aria-hidden]:
+                  - generic: LLM
+              - generic [ref=f8e1040] [cursor=pointer]:
+                - generic [ref=f8e1041]: Kimi
+                - paragraph [ref=f8e1044]: moonshotai/Kimi-K2-Thinking
+                - generic [aria-hidden]:
+                  - generic: LLM
+              - generic [ref=f8e1049] [cursor=pointer]:
+                - generic [ref=f8e1050]: Nvidia
+                - paragraph [ref=f8e1053]: Nemotron 3 ultra
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-Image-to-Text
+              - generic [ref=f8e1058] [cursor=pointer]:
+                - generic [ref=f8e1059]: laion
+                - paragraph [ref=f8e1062]: "OpenAI: CLIP Vit Large Patch14"
+                - generic [aria-hidden]:
+                  - generic: Embedding
+                  - generic: CLIP
+              - generic [ref=f8e1067] [cursor=pointer]:
+                - generic [ref=f8e1068]: Zhipu
+                - paragraph [ref=f8e1071]: "Proxy: zai-org/GLM-4.7"
+                - generic [aria-hidden]:
+                  - generic: LLM
+              - generic [ref=f8e1076] [cursor=pointer]:
+                - generic [ref=f8e1077]: Qwen
+                - paragraph [ref=f8e1080]: Qwen3 235B A22B FP8
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-to-Text
+                  - generic: Qwen
+              - generic [ref=f8e1085] [cursor=pointer]:
+                - generic [ref=f8e1086]: Qwen
+                - paragraph [ref=f8e1089]: Qwen3 235B A22B Instruct 2507 FP8
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-to-Text
+              - generic [ref=f8e1094] [cursor=pointer]:
+                - generic [ref=f8e1095]: Qwen
+                - paragraph [ref=f8e1098]: Qwen3 235B A22B Thinking 2507 FP8
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-to-Text
+                  - generic: ...
+              - generic [ref=f8e1103] [cursor=pointer]:
+                - generic [ref=f8e1104]: Qwen
+                - paragraph [ref=f8e1107]: Qwen3-30B-A3B
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Qwen
+                  - generic: Text-to-Text
+              - generic [ref=f8e1112] [cursor=pointer]:
+                - generic [ref=f8e1113]: Qwen
+                - paragraph [ref=f8e1116]: Qwen3 32B FP8
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-to-Text
+                  - generic: Qwen
+              - generic [ref=f8e1121] [cursor=pointer]:
+                - generic [ref=f8e1122]: Qwen
+                - paragraph [ref=f8e1125]: Qwen3.5 122B A10B
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-to-Text
+              - generic [ref=f8e1130] [cursor=pointer]:
+                - generic [ref=f8e1131]: Qwen
+                - paragraph [ref=f8e1134]: Qwen3.5 27B
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-to-Text
+              - generic [ref=f8e1139] [cursor=pointer]:
+                - generic [ref=f8e1140]: Qwen
+                - paragraph [ref=f8e1143]: Qwen3.5 35B A3B
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-to-Text
+              - generic [ref=f8e1148] [cursor=pointer]:
+                - generic [ref=f8e1149]: Qwen
+                - paragraph [ref=f8e1152]: Qwen3.5 397B A17B
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-to-Text
+              - generic [ref=f8e1157] [cursor=pointer]:
+                - generic [ref=f8e1158]: Qwen
+                - paragraph [ref=f8e1161]: Qwen3.6-35B-A3B
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-to-Text
+              - generic [ref=f8e1166] [cursor=pointer]:
+                - generic [ref=f8e1167]: Qwen
+                - paragraph [ref=f8e1170]: Qwen3.6 Plus
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-to-Text
+              - generic [ref=f8e1175] [cursor=pointer]:
+                - generic [ref=f8e1176]: Qwen
+                - paragraph [ref=f8e1179]: Qwen3.6 Plus 2026-04-02
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-to-Text
+              - generic [ref=f8e1184] [cursor=pointer]:
+                - generic [ref=f8e1185]: Qwen
+                - paragraph [ref=f8e1188]: Qwen3.8 Flash
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-to-Text
+              - generic [ref=f8e1193] [cursor=pointer]:
+                - generic [ref=f8e1194]: Qwen
+                - paragraph [ref=f8e1197]: Qwen3-Coder-30B-A3B-Instruct-FP8
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-to-Text
+              - generic [ref=f8e1202] [cursor=pointer]:
+                - generic [ref=f8e1203]: Qwen
+                - paragraph [ref=f8e1206]: Qwen3 Coder 480B A35B Instruct FP8
+                - generic [aria-hidden]:
+                  - generic: Text-to-Text
+              - generic [ref=f8e1211] [cursor=pointer]:
+                - generic [ref=f8e1212]: Qwen
+                - paragraph [ref=f8e1215]: Qwen3 Next 80B A3B Instruct
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-to-Text
+              - generic [ref=f8e1220] [cursor=pointer]:
+                - generic [ref=f8e1221]: Qwen
+                - paragraph [ref=f8e1224]: Qwen3 Next 80B A3B Thinking
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-to-Text
+              - generic [ref=f8e1229] [cursor=pointer]:
+                - generic [ref=f8e1230]: Qwen
+                - paragraph [ref=f8e1233]: Qwen3 Next 80B A3B Thinking
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-to-Text
+                  - generic: ...
+              - generic [ref=f8e1235] [cursor=pointer]:
+                - generic [ref=f8e1238]: 75% off
+                - generic [ref=f8e1239]:
+                  - generic [ref=f8e1240]: Qwen
+                  - paragraph [ref=f8e1243]: Qwen/Qwen3-235B-A22B-Instruct-2507-FP8
+                  - generic [aria-hidden]:
+                    - generic: LLM
+              - generic [ref=f8e1248] [cursor=pointer]:
+                - generic [ref=f8e1249]: Qwen
+                - paragraph [ref=f8e1252]: Qwen/Qwen3-235B-A22B-Thinking-2507-FP8
+                - generic [aria-hidden]:
+                  - generic: LLM
+              - generic [ref=f8e1257] [cursor=pointer]:
+                - generic [ref=f8e1258]: Qwen
+                - paragraph [ref=f8e1261]: Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8
+                - generic [aria-hidden]:
+                  - generic: LLM
+              - generic [ref=f8e1266] [cursor=pointer]:
+                - generic [ref=f8e1267]: Qwen
+                - paragraph [ref=f8e1270]: "Qwen: Qwen3-VL-235B-A22B-Instruct-FP8"
+                - generic [aria-hidden]:
+                  - generic: Text-to-Text
+              - generic [ref=f8e1275] [cursor=pointer]:
+                - generic [ref=f8e1276]: tencent
+                - paragraph [ref=f8e1279]: "Tencent: HunyuanOCR"
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-to-Text
+              - generic [ref=f8e1284] [cursor=pointer]:
+                - generic [ref=f8e1285]: Tencent
+                - paragraph [ref=f8e1288]: tencent/hy3-preview
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-to-Text
+              - generic [ref=f8e1293] [cursor=pointer]:
+                - generic [ref=f8e1294]: Tencent
+                - paragraph [ref=f8e1297]: tencent/hy4-preview
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-to-Text
+              - generic [ref=f8e1302] [cursor=pointer]:
+                - generic [ref=f8e1303]: Wan
+                - paragraph [ref=f8e1306]: wan2.2-lightning-I2V-8H100
+                - generic [aria-hidden]:
+                  - generic: Text-Image-to-Text
+              - generic [ref=f8e1311] [cursor=pointer]:
+                - generic [ref=f8e1312]: ZAI
+                - paragraph [ref=f8e1315]: "ZAI: GLM-5.1"
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-to-Text
+                  - generic: GLM
+              - generic [ref=f8e1320] [cursor=pointer]:
+                - generic [ref=f8e1321]: ZAI
+                - paragraph [ref=f8e1324]: "ZAI: GLM-5.3"
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-to-Text
+              - generic [ref=f8e1329] [cursor=pointer]:
+                - generic [ref=f8e1330]: ZAI
+                - paragraph [ref=f8e1333]: "ZAI: GLM-5 (H200)"
+                - generic [aria-hidden]:
+                  - generic: LLM
+                  - generic: Text-to-Text
+                  - generic: GLM
+              - generic [ref=f8e1341] [cursor=pointer]:
+                - generic [ref=f8e1342]: HeyGen
+                - paragraph [ref=f8e1345]: heygen-avatar-4
+                - generic [aria-hidden]:
+                  - generic: video-generation
+                  - generic: Avatar
+                  - generic: ...
+              - generic [ref=f8e1353] [cursor=pointer]:
+                - generic [ref=f8e1354]: Aliyun
+                - paragraph [ref=f8e1357]: wan3.0-video-prime
+                - generic [aria-hidden]:
+                  - generic: Wan
+              - generic [ref=f8e1365] [cursor=pointer]:
+                - generic [ref=f8e1366]: Vertex-interactions
+                - paragraph [ref=f8e1369]: gemini-omni-1.1-flash-preview
+                - generic [aria-hidden]:
+                  - generic: Gemini Omni
+              - generic [ref=f8e1377] [cursor=pointer]:
+                - generic [ref=f8e1378]: Aliyun
+                - paragraph [ref=f8e1381]: wan3.0-video
+                - generic [aria-hidden]:
+                  - generic: Wan
+              - generic [ref=f8e1389] [cursor=pointer]:
+                - generic [ref=f8e1390]: BytePlus
+                - paragraph [ref=f8e1393]: seedance-2-5-260628
+                - generic [aria-hidden]:
+                  - generic: Seedance
+                  - generic: Text-to-Video
+                  - generic: ...
+              - generic [ref=f8e1401] [cursor=pointer]:
+                - generic [ref=f8e1402]: Minimax
+                - paragraph [ref=f8e1405]: MiniMax-H3
+                - generic [aria-hidden]:
+                  - generic: Minimax
+              - generic [ref=f8e1413] [cursor=pointer]:
+                - generic [ref=f8e1414]: Google
+                - paragraph [ref=f8e1417]: gemini-omni-flash-preview
+                - generic [aria-hidden]:
+                  - generic: Gemini Omni
+              - generic [ref=f8e1425] [cursor=pointer]:
+                - generic [ref=f8e1426]: Kling
+                - paragraph [ref=f8e1429]: kling-3.0-turbo-i2v
+                - generic [aria-hidden]:
+                  - generic: Kling-3.0-Turbo
+                  - generic: Image-to-Video
+              - generic [ref=f8e1437] [cursor=pointer]:
+                - generic [ref=f8e1438]: Kling
+                - paragraph [ref=f8e1441]: kling-3.0-turbo-t2v
+                - generic [aria-hidden]:
+                  - generic: Kling-3.0-Turbo
+                  - generic: Text-to-Video
+              - generic [ref=f8e1449] [cursor=pointer]:
+                - generic [ref=f8e1450]: Aliyun
+                - paragraph [ref=f8e1453]: happyhorse-1.1-r2v
+                - generic [aria-hidden]:
+                  - generic: HappyHorse
+                  - generic: Reference-to-Video
+              - generic [ref=f8e1461] [cursor=pointer]:
+                - generic [ref=f8e1462]: Aliyun
+                - paragraph [ref=f8e1465]: happyhorse-1.1-t2v
+                - generic [aria-hidden]:
+                  - generic: HappyHorse
+                  - generic: Text-to-Video
+              - generic [ref=f8e1473] [cursor=pointer]:
+                - generic [ref=f8e1474]: Aliyun
+                - paragraph [ref=f8e1477]: happyhorse-1.1-i2v
+                - generic [aria-hidden]:
+                  - generic: HappyHorse
+                  - generic: Image-to-Video
+              - generic [ref=f8e1485] [cursor=pointer]:
+                - generic [ref=f8e1486]: Luma
+                - paragraph [ref=f8e1489]: luma-ray-3-2-reframe
+                - generic [aria-hidden]:
+                  - generic: Luma
+                  - generic: Ray
+                  - generic: Video-Reframe
+              - generic [ref=f8e1497] [cursor=pointer]:
+                - generic [ref=f8e1498]: Luma
+                - paragraph [ref=f8e1501]: luma-ray-3-2-generate
+                - generic [aria-hidden]:
+                  - generic: Luma
+                  - generic: Ray
+                  - generic: Text-to-Video
+                  - generic: ...
+              - generic [ref=f8e1509] [cursor=pointer]:
+                - generic [ref=f8e1510]: Luma
+                - paragraph [ref=f8e1513]: luma-ray-3-2-edit
+                - generic [aria-hidden]:
+                  - generic: Luma
+                  - generic: Ray
+                  - generic: Video-Editing
+                  - generic: ...
+              - generic [ref=f8e1521] [cursor=pointer]:
+                - generic [ref=f8e1522]: ByteDance
+                - paragraph [ref=f8e1525]: seedance-2-0-260128-upscale
+                - generic [aria-hidden]:
+                  - generic: video-generation
+                  - generic: ...
+              - generic [ref=f8e1533] [cursor=pointer]:
+                - generic [ref=f8e1534]: PixVerse
+                - paragraph [ref=f8e1537]: pixverse-v6-extend
+                - generic [aria-hidden]:
+                  - generic: Pixverse-v6
+                  - generic: Video-Extension
+              - generic [ref=f8e1545] [cursor=pointer]:
+                - generic [ref=f8e1546]: PixVerse
+                - paragraph [ref=f8e1549]: pixverse-v6-transition
+                - generic [aria-hidden]:
+                  - generic: Pixverse-v6
+                  - generic: ...
+              - generic [ref=f8e1557] [cursor=pointer]:
+                - generic [ref=f8e1558]: PixVerse
+                - paragraph [ref=f8e1561]: pixverse-v6-i2v
+                - generic [aria-hidden]:
+                  - generic: Pixverse-v6
+                  - generic: Image-to-Video
+              - generic [ref=f8e1569] [cursor=pointer]:
+                - generic [ref=f8e1570]: PixVerse
+                - paragraph [ref=f8e1573]: pixverse-v6-t2v
+                - generic [aria-hidden]:
+                  - generic: Pixverse-v6
+                  - generic: Text-to-Video
+              - generic [ref=f8e1581] [cursor=pointer]:
+                - generic [ref=f8e1582]: Aliyun
+                - paragraph [ref=f8e1585]: happyhorse-1.0-t2v
+                - generic [aria-hidden]:
+                  - generic: Wan
+              - generic [ref=f8e1593] [cursor=pointer]:
+                - generic [ref=f8e1594]: Aliyun
+                - paragraph [ref=f8e1597]: happyhorse-1.0-i2v
+                - generic [aria-hidden]:
+                  - generic: Wan
+              - generic [ref=f8e1605] [cursor=pointer]:
+                - generic [ref=f8e1606]: Kling
+                - paragraph [ref=f8e1609]: kling-lip-sync
+                - generic [aria-hidden]:
+                  - generic: kling
+              - generic [ref=f8e1617] [cursor=pointer]:
+                - generic [ref=f8e1618]: Kling
+                - paragraph [ref=f8e1621]: kling-identify-face
+                - generic [aria-hidden]:
+                  - generic: kling
+              - generic [ref=f8e1629] [cursor=pointer]:
+                - generic [ref=f8e1630]: Aliyun
+                - paragraph [ref=f8e1633]: wan2.7-videoedit
+                - generic [aria-hidden]:
+                  - generic: Wan
+              - generic [ref=f8e1641] [cursor=pointer]:
+                - generic [ref=f8e1642]: Aliyun
+                - paragraph [ref=f8e1645]: wan2.7-r2v
+                - generic [aria-hidden]:
+                  - generic: Wan
+              - generic [ref=f8e1653] [cursor=pointer]:
+                - generic [ref=f8e1654]: Aliyun
+                - paragraph [ref=f8e1657]: wan2.7-i2v
+                - generic [aria-hidden]:
+                  - generic: Wan
+              - generic [ref=f8e1665] [cursor=pointer]:
+                - generic [ref=f8e1666]: Aliyun
+                - paragraph [ref=f8e1669]: wan2.7-t2v
+                - generic [aria-hidden]:
+                  - generic: Wan
+              - generic [ref=f8e1677] [cursor=pointer]:
+                - generic [ref=f8e1678]: VertexAI
+                - paragraph [ref=f8e1681]: veo-3.1-generate-001
+                - generic [aria-hidden]:
+                  - generic: Veo
+                  - generic: Text-to-Video
+                  - generic: ...
+              - generic [ref=f8e1689] [cursor=pointer]:
+                - generic [ref=f8e1690]: VertexAI
+                - paragraph [ref=f8e1693]: veo-3.1-fast-generate-001
+                - generic [aria-hidden]:
+                  - generic: Veo
+                  - generic: Text-to-Video
+                  - generic: ...
+              - generic [ref=f8e1701] [cursor=pointer]:
+                - generic [ref=f8e1702]: VertexAI
+                - paragraph [ref=f8e1705]: veo-3.1-lite-generate-001
+                - generic [aria-hidden]:
+                  - generic: Veo
+                  - generic: Text-to-Video
+                  - generic: ...
+              - generic [ref=f8e1713] [cursor=pointer]:
+                - generic [ref=f8e1714]: ByteDance
+                - paragraph [ref=f8e1717]: seedance-2-0-260128
+                - generic [aria-hidden]:
+                  - generic: video-generation
+                  - generic: ...
+              - generic [ref=f8e1725] [cursor=pointer]:
+                - generic [ref=f8e1726]: ByteDance
+                - paragraph [ref=f8e1729]: seedance-2-0-fast-260128
+                - generic [aria-hidden]:
+                  - generic: Seedance
+              - generic [ref=f8e1737] [cursor=pointer]:
+                - generic [ref=f8e1738]: Skywork
+                - paragraph [ref=f8e1741]: skyreels-v4-omni
+                - generic [aria-hidden]:
+                  - generic: video-generation
+                  - generic: omni
+                  - generic: ...
+              - generic [ref=f8e1749] [cursor=pointer]:
+                - generic [ref=f8e1750]: ByteDance
+                - paragraph [ref=f8e1753]: seedance-1-5-pro-251215
+                - generic [aria-hidden]:
+                  - generic: Seedance
+                  - generic: Text-to-Video
+                  - generic: ...
+              - generic [ref=f8e1761] [cursor=pointer]:
+                - generic [ref=f8e1762]: Skywork
+                - paragraph [ref=f8e1765]: skyreels-v4-image-to-video
+                - generic [aria-hidden]:
+                  - generic: video-generation
+                  - generic: ...
+              - generic [ref=f8e1773] [cursor=pointer]:
+                - generic [ref=f8e1774]: Skywork
+                - paragraph [ref=f8e1777]: skyreels-v4-text-to-video
+                - generic [aria-hidden]:
+                  - generic: video-generation
+                  - generic: ...
+              - generic [ref=f8e1785] [cursor=pointer]:
+                - generic [ref=f8e1786]: Kling
+                - paragraph [ref=f8e1789]: kling-3-motion-control
+                - generic [aria-hidden]:
+                  - generic: Kling-V3
+                  - generic: Motion-Control
+              - generic [ref=f8e1797] [cursor=pointer]:
+                - generic [ref=f8e1798]: Kling
+                - paragraph [ref=f8e1801]: kling-v3-text-to-video
+                - generic [aria-hidden]:
+                  - generic: Kling
+              - generic [ref=f8e1809] [cursor=pointer]:
+                - generic [ref=f8e1810]: Kling
+                - paragraph [ref=f8e1813]: kling-v3-image-to-video
+                - generic [aria-hidden]:
+                  - generic: Kling
+              - generic [ref=f8e1821] [cursor=pointer]:
+                - generic [ref=f8e1822]: Vidu
+                - paragraph [ref=f8e1825]: vidu-q3-pro-t2v
+                - generic [aria-hidden]:
+                  - generic: Vidu-q3-t2v
+                  - generic: text-to-video
+                  - generic: ...
+              - generic [ref=f8e1833] [cursor=pointer]:
+                - generic [ref=f8e1834]: Vidu
+                - paragraph [ref=f8e1837]: vidu-q3-pro-i2v
+                - generic [aria-hidden]:
+                  - generic: Vidu-Image-to-Video
+                  - generic: ...
+              - generic [ref=f8e1845] [cursor=pointer]:
+                - generic [ref=f8e1846]: Vidu
+                - paragraph [ref=f8e1849]: vidu-q2-t2v
+                - generic [aria-hidden]:
+                  - generic: Vidu-t2v
+                  - generic: text-to-video
+                  - generic: 720p
+              - generic [ref=f8e1857] [cursor=pointer]:
+                - generic [ref=f8e1858]: Vidu
+                - paragraph [ref=f8e1861]: vidu-q2-pro-flfv
+                - generic [aria-hidden]:
+                  - generic: Vidu-FLFV
+                  - generic: FLFV
+                  - generic: 720p
+              - generic [ref=f8e1869] [cursor=pointer]:
+                - generic [ref=f8e1870]: Vidu
+                - paragraph [ref=f8e1873]: vidu-q2-pro-i2v
+                - generic [aria-hidden]:
+                  - generic: Vidu-Image-to-Video
+                  - generic: ...
+              - generic [ref=f8e1881] [cursor=pointer]:
+                - generic [ref=f8e1882]: PixVerse
+                - paragraph [ref=f8e1885]: pixverse-v5.6-transition
+                - generic [aria-hidden]:
+                  - generic: Pixverse-v5.6
+                  - generic: Image-to-Video
+              - generic [ref=f8e1893] [cursor=pointer]:
+                - generic [ref=f8e1894]: PixVerse
+                - paragraph [ref=f8e1897]: pixverse-v5.6-i2v
+                - generic [aria-hidden]:
+                  - generic: Pixverse-v5.6
+                  - generic: Image-to-Video
+              - generic [ref=f8e1905] [cursor=pointer]:
+                - generic [ref=f8e1906]: PixVerse
+                - paragraph [ref=f8e1909]: pixverse-v5.6-t2v
+                - generic [aria-hidden]:
+                  - generic: Pixverse-v5.6
+                  - generic: Text-to-Video
+              - generic [ref=f8e1917] [cursor=pointer]:
+                - generic [ref=f8e1918]: Kling
+                - paragraph [ref=f8e1921]: kling-2.6-motion-control
+                - generic [aria-hidden]:
+                  - generic: Kling-V2.6
+                  - generic: Motion-Control
+              - generic [ref=f8e1929] [cursor=pointer]:
+                - generic [ref=f8e1930]: Hunyuan
+                - paragraph [ref=f8e1933]: Hunyuan1.5
+                - generic [aria-hidden]:
+                  - generic: Tencent
+                  - generic: Video-Generation
+                  - generic: ...
+              - generic [ref=f8e1941] [cursor=pointer]:
+                - generic [ref=f8e1942]: LTX
+                - paragraph [ref=f8e1945]: LTX-2-KeyframeInterpolation
+                - generic [aria-hidden]:
+                  - generic: Lightricks
+                  - generic: Text-to-Video
+                  - generic: ...
+              - generic [ref=f8e1953] [cursor=pointer]:
+                - generic [ref=f8e1954]: LTX
+                - paragraph [ref=f8e1957]: LTX-2
+                - generic [aria-hidden]:
+                  - generic: Lightricks
+                  - generic: Text-to-Video
+                  - generic: ...
+              - generic [ref=f8e1965] [cursor=pointer]:
+                - generic [ref=f8e1966]: LTX2
+                - paragraph [ref=f8e1969]: LTX2-ICLoRA
+                - generic [aria-hidden]:
+                  - generic: Lightricks
+                  - generic: Text-to-Video
+                  - generic: ...
+              - generic [ref=f8e1977] [cursor=pointer]:
+                - generic [ref=f8e1978]: LTX2
+                - paragraph [ref=f8e1981]: LTX2-Distilled
+                - generic [aria-hidden]:
+                  - generic: Lightricks
+                  - generic: Text-to-Video
+                  - generic: ...
+              - generic [ref=f8e1989] [cursor=pointer]:
+                - generic [ref=f8e1990]: LTX2
+                - paragraph [ref=f8e1993]: LTX2-Ti2VidTwoStages
+                - generic [aria-hidden]:
+                  - generic: Lightricks
+                  - generic: Text-to-Video
+                  - generic: ...
+              - generic [ref=f8e2001] [cursor=pointer]:
+                - generic [ref=f8e2002]: PixVerse
+                - paragraph [ref=f8e2005]: pixverse-v5.5-transition
+                - generic [aria-hidden]:
+                  - generic: Pixverse-v5.5
+                  - generic: Image-to-Video
+              - generic [ref=f8e2013] [cursor=pointer]:
+                - generic [ref=f8e2014]: PixVerse
+                - paragraph [ref=f8e2017]: pixverse-v5.5-i2v
+                - generic [aria-hidden]:
+                  - generic: Pixverse-v5.5
+                  - generic: Image-to-Video
+              - generic [ref=f8e2025] [cursor=pointer]:
+                - generic [ref=f8e2026]: PixVerse
+                - paragraph [ref=f8e2029]: pixverse-v5.5-t2v
+                - generic [aria-hidden]:
+                  - generic: Pixverse-v5.5
+                  - generic: Text-to-Video
+              - generic [ref=f8e2037] [cursor=pointer]:
+                - generic [ref=f8e2038]: Bria
+                - paragraph [ref=f8e2041]: bria-video-remove-background
+                - generic [aria-hidden]:
+                  - generic: ...
+              - generic [ref=f8e2049] [cursor=pointer]:
+                - generic [ref=f8e2050]: Bria
+                - paragraph [ref=f8e2053]: bria-video-increase-resolution
+                - generic [aria-hidden]:
+                  - generic: Bria-Video-Increase-Resolution
+                  - generic: ...
+              - generic [ref=f8e2061] [cursor=pointer]:
+                - generic [ref=f8e2062]: Bria
+                - paragraph [ref=f8e2065]: bria-video-eraser
+                - generic [aria-hidden]:
+                  - generic: Bria-Video-Eraser
+                  - generic: Video-to-Video
+              - generic [ref=f8e2073] [cursor=pointer]:
+                - generic [ref=f8e2074]: Aliyun
+                - paragraph [ref=f8e2077]: wan2.6-r2v
+                - generic [aria-hidden]:
+                  - generic: Wan
+                  - generic: Video-to-Video
+              - generic [ref=f8e2085] [cursor=pointer]:
+                - generic [ref=f8e2086]: Kling
+                - paragraph [ref=f8e2089]: kling-o1-edit-video
+                - generic [aria-hidden]:
+                  - generic: Kling-Omni-Video
+                  - generic: Video-to-Video
+              - generic [ref=f8e2097] [cursor=pointer]:
+                - generic [ref=f8e2098]: Kling
+                - paragraph [ref=f8e2101]: kling-o1-reference-to-video
+                - generic [aria-hidden]:
+                  - generic: Kling-Omni-Video
+                  - generic: Video-to-Video
+              - generic [ref=f8e2109] [cursor=pointer]:
+                - generic [ref=f8e2110]: Kling
+                - paragraph [ref=f8e2113]: kling-o1-image-to-video
+                - generic [aria-hidden]:
+                  - generic: Kling-Omni-Video
+                  - generic: ...
+              - generic [ref=f8e2121] [cursor=pointer]:
+                - generic [ref=f8e2122]: Kling
+                - paragraph [ref=f8e2125]: kling-o1-flfv
+                - generic [aria-hidden]:
+                  - generic: Kling-Omni-Video
+                  - generic: ...
+              - generic [ref=f8e2133] [cursor=pointer]:
+                - generic [ref=f8e2134]: Aliyun
+                - paragraph [ref=f8e2137]: wan2.6-i2v
+                - generic [aria-hidden]:
+                  - generic: Wan
+                  - generic: Image-to-Video
+              - generic [ref=f8e2145] [cursor=pointer]:
+                - generic [ref=f8e2146]: Aliyun
+                - paragraph [ref=f8e2149]: wan2.6-t2v
+                - generic [aria-hidden]:
+                  - generic: Wan
+                  - generic: Text-to-Video
+              - generic [ref=f8e2157] [cursor=pointer]:
+                - generic [ref=f8e2158]: Kling
+                - paragraph [ref=f8e2161]: kling-v2-6
+                - generic [aria-hidden]:
+                  - generic: Kling-V2.6
+                  - generic: Text-to-Video
+                  - generic: ...
+              - generic [ref=f8e2169] [cursor=pointer]:
+                - generic [ref=f8e2170]: ByteDance
+                - paragraph [ref=f8e2173]: seedance-1-0-pro-fast-251015
+                - generic [aria-hidden]:
+                  - generic: Seedance
+                  - generic: Text-to-Video
+                  - generic: ...
+              - generic [ref=f8e2181] [cursor=pointer]:
+                - generic [ref=f8e2182]: GMI
+                - paragraph [ref=f8e2185]: GMI-MiniMeTalks-Workflow
+                - generic [aria-hidden]:
+                  - generic: Image-to-Video
+                  - generic: Lip-Sync
+                  - generic: ...
+              - generic [ref=f8e2193] [cursor=pointer]:
+                - generic [ref=f8e2194]: Krea
+                - paragraph [ref=f8e2197]: Krea-Realtime-14B
+                - generic [aria-hidden]:
+                  - generic: video-generation
+                  - generic: ...
+              - generic [ref=f8e2205] [cursor=pointer]:
+                - generic [ref=f8e2206]: GMI
+                - paragraph [ref=f8e2209]: GMI-Halloween-HauntedYou-Workflow
+                - generic [aria-hidden]:
+                  - generic: Halloween
+                  - generic: Image-to-Video
+                  - generic: ...
+              - generic [ref=f8e2217] [cursor=pointer]:
+                - generic [ref=f8e2218]: MiniMax
+                - paragraph [ref=f8e2221]: Minimax-Hailuo-2.3
+                - generic [aria-hidden]:
+                  - generic: Minimax
+                  - generic: Hailuo
+                  - generic: ...
+              - generic [ref=f8e2229] [cursor=pointer]:
+                - generic [ref=f8e2230]: MiniMax
+                - paragraph [ref=f8e2233]: Minimax-Hailuo-2.3-Fast
+                - generic [aria-hidden]:
+                  - generic: Minimax
+                  - generic: Hailuo
+                  - generic: ...
+              - generic [ref=f8e2241] [cursor=pointer]:
+                - generic [ref=f8e2242]: Kling
+                - paragraph [ref=f8e2245]: kling-v2-5-turbo
+                - generic [aria-hidden]:
+                  - generic: Kling
+                  - generic: Text-to-Video
+                  - generic: ...
+              - generic [ref=f8e2253] [cursor=pointer]:
+                - generic [ref=f8e2254]: PixVerse
+                - paragraph [ref=f8e2257]: pixverse-v5-transition
+                - generic [aria-hidden]:
+                  - generic: PixVerse
+                  - generic: Image-to-Video
+              - generic [ref=f8e2265] [cursor=pointer]:
+                - generic [ref=f8e2266]: PixVerse
+                - paragraph [ref=f8e2269]: pixverse-v5-t2v
+                - generic [aria-hidden]:
+                  - generic: PixVerse
+                  - generic: Text-to-Video
+              - generic [ref=f8e2277] [cursor=pointer]:
+                - generic [ref=f8e2278]: PixVerse
+                - paragraph [ref=f8e2281]: pixverse-v5-i2v
+                - generic [aria-hidden]:
+                  - generic: PixVerse
+                  - generic: Image-to-Video
+              - generic [ref=f8e2289] [cursor=pointer]:
+                - generic [ref=f8e2290]: VertexAI
+                - paragraph [ref=f8e2293]: veo-3.1-fast-generate-preview
+                - generic [aria-hidden]:
+                  - generic: Veo
+                  - generic: Text-to-Video
+                  - generic: ...
+              - generic [ref=f8e2301] [cursor=pointer]:
+                - generic [ref=f8e2302]: VertexAI
+                - paragraph [ref=f8e2305]: veo-3.1-generate-preview
+                - generic [aria-hidden]:
+                  - generic: Veo
+                  - generic: Text-to-Video
+                  - generic: ...
+              - generic [ref=f8e2313] [cursor=pointer]:
+                - generic [ref=f8e2314]: Wan2.2
+                - paragraph [ref=f8e2317]: Wan2.2-Animate-14B
+                - generic [aria-hidden]:
+                  - generic: Wan
+                  - generic: Video-to-Video
+              - generic [ref=f8e2325] [cursor=pointer]:
+                - generic [ref=f8e2326]: Aliyun
+                - paragraph [ref=f8e2329]: wan2.5-i2v-preview
+                - generic [aria-hidden]:
+                  - generic: Wan
+                  - generic: Image-to-Video
+              - generic [ref=f8e2337] [cursor=pointer]:
+                - generic [ref=f8e2338]: ByteDance
+                - paragraph [ref=f8e2341]: seedance-1-0-pro-250528
+                - generic [aria-hidden]:
+                  - generic: Seedance
+                  - generic: Text-to-Video
+                  - generic: ...
+              - generic [ref=f8e2349] [cursor=pointer]:
+                - generic [ref=f8e2350]: Minimax
+                - paragraph [ref=f8e2353]: Minimax-Hailuo-02
+                - generic [aria-hidden]:
+                  - generic: Minimax
+                  - generic: Hailuo
+              - generic [ref=f8e2361] [cursor=pointer]:
+                - generic [ref=f8e2362]: Wan
+                - paragraph [ref=f8e2365]: Wan-AI_Wan2.2-I2V-A14B
+                - generic [aria-hidden]:
+                  - generic: Wan
+                  - generic: Image-to-Video
+              - generic [ref=f8e2373] [cursor=pointer]:
+                - generic [ref=f8e2374]: Wan
+                - paragraph [ref=f8e2377]: Wan-AI_Wan2.2-T2V-A14B
+                - generic [aria-hidden]:
+                  - generic: Wan
+                  - generic: Text-to-Video
+              - generic [ref=f8e2385] [cursor=pointer]:
+                - generic [ref=f8e2386]: Kling
+                - paragraph [ref=f8e2389]: Kling-Text2Video-V2.1-Master
+                - generic [aria-hidden]:
+                  - generic: Kling
+                  - generic: Text-to-Video
+              - generic [ref=f8e2397] [cursor=pointer]:
+                - generic [ref=f8e2398]: Kling
+                - paragraph [ref=f8e2401]: Kling-Image2Video-V2.1-Standard
+                - generic [aria-hidden]:
+                  - generic: Kling
+                  - generic: Image-to-Video
+              - generic [ref=f8e2409] [cursor=pointer]:
+                - generic [ref=f8e2410]: Kling
+                - paragraph [ref=f8e2413]: Kling-Image2Video-V2.1-Pro
+                - generic [aria-hidden]:
+                  - generic: Kling
+                  - generic: Image-to-Video
+              - generic [ref=f8e2421] [cursor=pointer]:
+                - generic [ref=f8e2422]: Kling
+                - paragraph [ref=f8e2425]: Kling-Image2Video-V2.1-Master
+                - generic [aria-hidden]:
+                  - generic: Kling
+                  - generic: Image-to-Video
+              - generic [ref=f8e2433] [cursor=pointer]:
+                - generic [ref=f8e2434]: Kling
+                - paragraph [ref=f8e2437]: Kling-Text2Video-V1.6-Standard
+                - generic [aria-hidden]:
+                  - generic: Kling
+                  - generic: Text-to-Video
+              - generic [ref=f8e2445] [cursor=pointer]:
+                - generic [ref=f8e2446]: Kling
+                - paragraph [ref=f8e2449]: Kling-Text2Video-V2-Master
+                - generic [aria-hidden]:
+                  - generic: Kling
+                  - generic: Text-to-Video
+              - generic [ref=f8e2457] [cursor=pointer]:
+                - generic [ref=f8e2458]: Kling
+                - paragraph [ref=f8e2461]: Kling-Image2Video-V2-Master
+                - generic [aria-hidden]:
+                  - generic: Kling
+                  - generic: Image-to-Video
+              - generic [ref=f8e2469] [cursor=pointer]:
+                - generic [ref=f8e2470]: Kling
+                - paragraph [ref=f8e2473]: Kling-Image2Video-V1.6-Standard
+                - generic [aria-hidden]:
+                  - generic: Kling
+                  - generic: Image-to-Video
+              - generic [ref=f8e2481] [cursor=pointer]:
+                - generic [ref=f8e2482]: Kling
+                - paragraph [ref=f8e2485]: Kling-Image2Video-V1.6-Pro
+                - generic [aria-hidden]:
+                  - generic: Kling
+                  - generic: Image-to-Video
+              - generic [ref=f8e2493] [cursor=pointer]:
+                - generic [ref=f8e2494]: Wan
+                - paragraph [ref=f8e2497]: Wan-AI_Wan2.1-I2V-14B-720P
+                - generic [aria-hidden]:
+                  - generic: Wan
+                  - generic: Image-to-Video
+              - generic [ref=f8e2505] [cursor=pointer]:
+                - generic [ref=f8e2506]: Wan
+                - paragraph [ref=f8e2509]: Wan-AI_Wan2.1-I2V-14B-480P
+                - generic [aria-hidden]:
+                  - generic: Wan
+                  - generic: Image-to-Video
+              - generic [ref=f8e2517] [cursor=pointer]:
+                - generic [ref=f8e2518]: Wan
+                - paragraph [ref=f8e2521]: Wan-AI_Wan2.1-FLF2V-14B-720P
+                - generic [aria-hidden]:
+                  - generic: Wan
+                  - generic: Image-to-Video
+              - generic [ref=f8e2529] [cursor=pointer]:
+                - generic [ref=f8e2530]: Wan
+                - paragraph [ref=f8e2533]: Wan-AI_Wan2.1-T2V-14B
+                - generic [aria-hidden]:
+                  - generic: Wan
+                  - generic: Text-to-Video
+              - generic [ref=f8e2541] [cursor=pointer]:
+                - generic [ref=f8e2542]: Google
+                - paragraph [ref=f8e2545]: gemini-3-pro-image
+                - generic [aria-hidden]:
+                  - generic: Nano Banana
+                  - generic: Text-to-Image
+                  - generic: ...
+              - generic [ref=f8e2553] [cursor=pointer]:
+                - generic [ref=f8e2554]: Bria
+                - paragraph [ref=f8e2557]: bria-fibo-generate-1.5
+                - generic [aria-hidden]:
+                  - generic: text-to-image
+              - generic [ref=f8e2565] [cursor=pointer]:
+                - generic [ref=f8e2566]: Bria
+                - paragraph [ref=f8e2569]: bria-fibo-edit-1.5
+                - generic [aria-hidden]:
+                  - generic: Bria-Image-Edit
+                  - generic: Image to Image
+              - generic [ref=f8e2577] [cursor=pointer]:
+                - generic [ref=f8e2578]: Bria
+                - paragraph [ref=f8e2581]: bria-extract-object
+                - generic [aria-hidden]:
+                  - generic: Bria-Extract-Object
+                  - generic: ...
+              - generic [ref=f8e2589] [cursor=pointer]:
+                - generic [ref=f8e2590]: Reve AI
+                - paragraph [ref=f8e2593]: reve-2-1
+                - generic [aria-hidden]:
+                  - generic: image-generation
+                  - generic: ...
+              - generic [ref=f8e2601] [cursor=pointer]:
+                - generic [ref=f8e2602]: Bria
+                - paragraph [ref=f8e2605]: bria-product-dimensions
+                - generic [aria-hidden]:
+                  - generic: Bria
+                  - generic: Product Dimensions
+                  - generic: ...
+              - generic [ref=f8e2613] [cursor=pointer]:
+                - generic [ref=f8e2614]: ByteDance
+                - paragraph [ref=f8e2617]: seedream-5.0-pro
+                - generic [aria-hidden]:
+                  - generic: Text-to-Image
+                  - generic: ...
+              - generic [ref=f8e2625] [cursor=pointer]:
+                - generic [ref=f8e2626]: Google
+                - paragraph [ref=f8e2629]: gemini-3.1-flash-image
+                - generic [aria-hidden]:
+                  - generic: Nano Banana 2
+                  - generic: Gemini 3.1
+                  - generic: ...
+              - generic [ref=f8e2637] [cursor=pointer]:
+                - generic [ref=f8e2638]: Bria
+                - paragraph [ref=f8e2641]: bria-image-increase-resolution
+                - generic [aria-hidden]:
+                  - generic: Bria-Image-Increase-Resolution
+                  - generic: ...
+              - generic [ref=f8e2649] [cursor=pointer]:
+                - generic [ref=f8e2650]: Bria
+                - paragraph [ref=f8e2653]: bria-image-remove-background
+                - generic [aria-hidden]:
+                  - generic: ...
+              - generic [ref=f8e2661] [cursor=pointer]:
+                - generic [ref=f8e2662]: Google
+                - paragraph [ref=f8e2665]: gemini-3.1-flash-lite-image
+                - generic [aria-hidden]:
+                  - generic: Nano Banana 2 Lite
+              - generic [ref=f8e2673] [cursor=pointer]:
+                - generic [ref=f8e2674]: Luma
+                - paragraph [ref=f8e2677]: luma-uni-1.1
+                - generic [aria-hidden]:
+                  - generic: image-generation
+                  - generic: ...
+              - generic [ref=f8e2679] [cursor=pointer]:
+                - generic [ref=f8e2685]: 20% off
+                - generic [ref=f8e2686]:
+                  - generic [ref=f8e2687]: OpenAI
+                  - paragraph [ref=f8e2690]: gpt-image-2-edit
+                  - generic [aria-hidden]:
+                    - generic: image-editing
+                    - generic: inpainting
+                    - generic: ...
+              - generic [ref=f8e2692] [cursor=pointer]:
+                - generic [ref=f8e2698]: 20% off
+                - generic [ref=f8e2699]:
+                  - generic [ref=f8e2700]: OpenAI
+                  - paragraph [ref=f8e2703]: gpt-image-2-generate
+                  - generic [aria-hidden]:
+                    - generic: image-generation
+                    - generic: ...
+              - generic [ref=f8e2711] [cursor=pointer]:
+                - generic [ref=f8e2712]: Aliyun
+                - paragraph [ref=f8e2715]: wan2.7-image-pro
+                - generic [aria-hidden]:
+                  - generic: Wan
+                  - generic: Image-to-Image
+                  - generic: ...
+              - generic [ref=f8e2723] [cursor=pointer]:
+                - generic [ref=f8e2724]: Aliyun
+                - paragraph [ref=f8e2727]: wan2.7-image
+                - generic [aria-hidden]:
+                  - generic: Wan
+                  - generic: Image-to-Image
+                  - generic: ...
+              - generic [ref=f8e2735] [cursor=pointer]:
+                - generic [ref=f8e2736]: Hunyuan
+                - paragraph [ref=f8e2739]: hunyuan-image-to-image
+                - generic [aria-hidden]:
+                  - generic: Image-to-Image
+                  - generic: Tencent
+                  - generic: ...
+              - generic [ref=f8e2747] [cursor=pointer]:
+                - generic [ref=f8e2748]: BytePlus
+                - paragraph [ref=f8e2751]: seedream-5.0-lite
+                - generic [aria-hidden]:
+                  - generic: Text-to-Image
+                  - generic: ...
+              - generic [ref=f8e2759] [cursor=pointer]:
+                - generic [ref=f8e2760]: Gemini
+                - paragraph [ref=f8e2763]: gemini-2.5-flash-image
+                - generic [aria-hidden]:
+                  - generic: Image Generation
+                  - generic: ...
+              - generic [ref=f8e2771] [cursor=pointer]:
+                - generic [ref=f8e2772]: Bria
+                - paragraph [ref=f8e2775]: bria-fibo-sketch-to-image
+                - generic [aria-hidden]:
+                  - generic: Bria-Fibo-Sketch
+                  - generic: ...
+              - generic [ref=f8e2783] [cursor=pointer]:
+                - generic [ref=f8e2784]: Bria
+                - paragraph [ref=f8e2787]: bria-fibo-reseason
+                - generic [aria-hidden]:
+                  - generic: Bria-Fibo-Reseason
+                  - generic: ...
+              - generic [ref=f8e2795] [cursor=pointer]:
+                - generic [ref=f8e2796]: Bria
+                - paragraph [ref=f8e2799]: bria-fibo-image-blend
+                - generic [aria-hidden]:
+                  - generic: Bria-Fibo-Image-Blending
+                  - generic: ...
+              - generic [ref=f8e2807] [cursor=pointer]:
+                - generic [ref=f8e2808]: Bria
+                - paragraph [ref=f8e2811]: bria-fibo-restore
+                - generic [aria-hidden]:
+                  - generic: Bria-Fibo-Restore
+                  - generic: ...
+              - generic [ref=f8e2819] [cursor=pointer]:
+                - generic [ref=f8e2820]: Bria
+                - paragraph [ref=f8e2823]: bria-fibo-relight
+                - generic [aria-hidden]:
+                  - generic: Bria-Fibo-Relight
+                  - generic: ...
+              - generic [ref=f8e2831] [cursor=pointer]:
+                - generic [ref=f8e2832]: Bria
+                - paragraph [ref=f8e2835]: bria-fibo-recolor
+                - generic [aria-hidden]:
+                  - generic: Bria-Fibo-Recolor
+                  - generic: Image to Image
+              - generic [ref=f8e2843] [cursor=pointer]:
+                - generic [ref=f8e2844]: Bria
+                - paragraph [ref=f8e2847]: bria-fibo-restyle
+                - generic [aria-hidden]:
+                  - generic: Bria-Fibo-Restyle
+                  - generic: Image to Image
+              - generic [ref=f8e2855] [cursor=pointer]:
+                - generic [ref=f8e2856]: Z
+                - paragraph [ref=f8e2859]: Z-Image
+                - generic [aria-hidden]:
+                  - generic: Tongyi-MAI
+                  - generic: Text-to-Image
+                  - generic: ...
+              - generic [ref=f8e2867] [cursor=pointer]:
+                - generic [ref=f8e2868]: Flux2
+                - paragraph [ref=f8e2871]: Flux2-Klein
+                - generic [aria-hidden]:
+                  - generic: Black-Forest-Lab
+                  - generic: ...
+              - generic [ref=f8e2873] [cursor=pointer]:
+                - generic [ref=f8e2879]: Free
+                - generic [ref=f8e2880]:
+                  - generic [ref=f8e2881]: Google
+                  - paragraph [ref=f8e2884]: Gemini-batch-inference
+                  - generic [aria-hidden]:
+                    - generic: Batch Inference
+                    - generic: Multimodal
+                    - generic: ...
+              - generic [ref=f8e2892] [cursor=pointer]:
+                - generic [ref=f8e2893]: GLM
+                - paragraph [ref=f8e2896]: GLM-Image
+                - generic [aria-hidden]:
+                  - generic: Z.ai
+                  - generic: Text-to-Image
+                  - generic: ...
+              - generic [ref=f8e2904] [cursor=pointer]:
+                - generic [ref=f8e2905]: Qwen
+                - paragraph [ref=f8e2908]: Qwen-Image-2512
+                - generic [aria-hidden]:
+                  - generic: Qwen
+                  - generic: Text-to-Image
+                  - generic: ...
+              - generic [ref=f8e2916] [cursor=pointer]:
+                - generic [ref=f8e2917]: Z
+                - paragraph [ref=f8e2920]: Z-Image-Turbo-Fun-Controlnet-Union-2.1
+                - generic [aria-hidden]:
+                  - generic: Alibaba-PAI
+                  - generic: Text-to-Image
+                  - generic: ...
+              - generic [ref=f8e2928] [cursor=pointer]:
+                - generic [ref=f8e2929]: Z
+                - paragraph [ref=f8e2932]: Z-Image-Turbo
+                - generic [aria-hidden]:
+                  - generic: Alibaba-PAI
+                  - generic: Text-to-Image
+                  - generic: ...
+              - generic [ref=f8e2940] [cursor=pointer]:
+                - generic [ref=f8e2941]: Flux2
+                - paragraph [ref=f8e2944]: Flux2-Dev
+                - generic [aria-hidden]:
+                  - generic: Black-Forest-Lab
+                  - generic: Image-to-Image
+              - generic [ref=f8e2952] [cursor=pointer]:
+                - generic [ref=f8e2953]: Bria
+                - paragraph [ref=f8e2956]: bria-genfill
+              - generic [ref=f8e2964] [cursor=pointer]:
+                - generic [ref=f8e2965]: Bria
+                - paragraph [ref=f8e2968]: bria-eraser
+              - generic [ref=f8e2976] [cursor=pointer]:
+                - generic [ref=f8e2977]: BFL
+                - paragraph [ref=f8e2980]: flux-kontext-pro
+                - generic [aria-hidden]:
+                  - generic: Text-to-Image
+                  - generic: Flux
+              - generic [ref=f8e2988] [cursor=pointer]:
+                - generic [ref=f8e2989]: BytePlus
+                - paragraph [ref=f8e2992]: seededit-3-0-i2i-250628
+                - generic [aria-hidden]:
+                  - generic: Image-to-Image
+                  - generic: SeedEdit
+              - generic [ref=f8e3000] [cursor=pointer]:
+                - generic [ref=f8e3001]: BytePlus
+                - paragraph [ref=f8e3004]: seedream-3-0-t2i-250415
+                - generic [aria-hidden]:
+                  - generic: Text-to-Image
+                  - generic: Seedream
+              - generic [ref=f8e3012] [cursor=pointer]:
+                - generic [ref=f8e3013]: BytePlus
+                - paragraph [ref=f8e3016]: seedream-4-0-250828
+                - generic [aria-hidden]:
+                  - generic: Text-to-Image
+                  - generic: ...
+              - generic [ref=f8e3024] [cursor=pointer]:
+                - generic [ref=f8e3025]: Inworld
+                - paragraph [ref=f8e3028]: inworld-tts-2-flash
+                - generic [aria-hidden]:
+                  - generic: Inworld
+              - generic [ref=f8e3030] [cursor=pointer]:
+                - generic [ref=f8e3036]: Free
+                - generic [ref=f8e3037]:
+                  - generic [ref=f8e3038]: MiniMax
+                  - paragraph [ref=f8e3041]: minimax-tts-speech-2.8-turbo
+                  - generic [aria-hidden]:
+                    - generic: audio-generation
+                    - generic: ...
+              - generic [ref=f8e3043] [cursor=pointer]:
+                - generic [ref=f8e3049]: Free
+                - generic [ref=f8e3050]:
+                  - generic [ref=f8e3051]: MiniMax
+                  - paragraph [ref=f8e3054]: minimax-tts-speech-2.8-hd
+                  - generic [aria-hidden]:
+                    - generic: audio-generation
+                    - generic: ...
+              - generic [ref=f8e3056] [cursor=pointer]:
+                - generic [ref=f8e3062]: Free
+                - generic [ref=f8e3063]:
+                  - generic [ref=f8e3064]: MiniMax
+                  - paragraph [ref=f8e3067]: minimax-audio-voice-clone-speech-2.8-hd
+                  - generic [aria-hidden]:
+                    - generic: audio-generation
+                    - generic: ...
+              - generic [ref=f8e3069] [cursor=pointer]:
+                - generic [ref=f8e3075]: Free
+                - generic [ref=f8e3076]:
+                  - generic [ref=f8e3077]: MiniMax
+                  - paragraph [ref=f8e3080]: minimax-audio-voice-clone-speech-2.8-turbo
+                  - generic [aria-hidden]:
+                    - generic: audio-generation
+                    - generic: ...
+              - generic [ref=f8e3082] [cursor=pointer]:
+                - generic [ref=f8e3088]: Free
+                - generic [ref=f8e3089]:
+                  - generic [ref=f8e3090]: MiniMax
+                  - paragraph [ref=f8e3093]: minimax-music-3.0
+                  - generic [aria-hidden]:
+                    - generic: Music-Generation
+                    - generic: Minimax
+                    - generic: ...
+              - generic [ref=f8e3101] [cursor=pointer]:
+                - generic [ref=f8e3102]: Kling
+                - paragraph [ref=f8e3105]: kling-custom-voice
+                - generic [aria-hidden]:
+                  - generic: kling
+                  - generic: voice-cloning
+                  - generic: ...
+              - generic [ref=f8e3113] [cursor=pointer]:
+                - generic [ref=f8e3114]: Resemble
+                - paragraph [ref=f8e3117]: Chatterbox-tts
+                - generic [aria-hidden]:
+                  - generic: Resemble
+                  - generic: Text-to-Speech
+                  - generic: ...
+              - generic [ref=f8e3125] [cursor=pointer]:
+                - generic [ref=f8e3126]: Inworld
+                - paragraph [ref=f8e3129]: inworld-tts-2
+                - generic [aria-hidden]:
+                  - generic: Inworld
+              - generic [ref=f8e3137] [cursor=pointer]:
+                - generic [ref=f8e3138]: MiniMax
+                - paragraph [ref=f8e3141]: minimax-music-2.5
+                - generic [aria-hidden]:
+                  - generic: Music-Generation
+                  - generic: Minimax
+                  - generic: ...
+              - generic [ref=f8e3149] [cursor=pointer]:
+                - generic [ref=f8e3150]: Inworld
+                - paragraph [ref=f8e3153]: Realtime-tts-1.5-mini
+                - generic [aria-hidden]:
+                  - generic: audio-generation
+                  - generic: ...
+              - generic [ref=f8e3161] [cursor=pointer]:
+                - generic [ref=f8e3162]: Inworld
+                - paragraph [ref=f8e3165]: Realtime-tts-1.5-max
+                - generic [aria-hidden]:
+                  - generic: audio-generation
+                  - generic: ...
+              - generic [ref=f8e3173] [cursor=pointer]:
+                - generic [ref=f8e3174]: Step
+                - paragraph [ref=f8e3177]: Step-Audio-EditX
+                - generic [aria-hidden]:
+                  - generic: voice-cloning
+                  - generic: audio-editing
+                  - generic: ...
+              - generic [ref=f8e3185] [cursor=pointer]:
+                - generic [ref=f8e3186]: MiniMax
+                - paragraph [ref=f8e3189]: minimax-audio-voice-clone-speech-2.6-turbo
+                - generic [aria-hidden]:
+                  - generic: audio-generation
+                  - generic: ...
+              - generic [ref=f8e3197] [cursor=pointer]:
+                - generic [ref=f8e3198]: MiniMax
+                - paragraph [ref=f8e3201]: minimax-audio-voice-clone-speech-2.6-hd
+                - generic [aria-hidden]:
+                  - generic: audio-generation
+                  - generic: ...
+              - generic [ref=f8e3209] [cursor=pointer]:
+                - generic [ref=f8e3210]: MiniMax
+                - paragraph [ref=f8e3213]: minimax-tts-speech-2.6-turbo
+                - generic [aria-hidden]:
+                  - generic: audio-generation
+                  - generic: ...
+              - generic [ref=f8e3221] [cursor=pointer]:
+                - generic [ref=f8e3222]: MiniMax
+                - paragraph [ref=f8e3225]: minimax-tts-speech-2.6-hd
+                - generic [aria-hidden]:
+                  - generic: audio-generation
+                  - generic: ...
+              - generic [ref=f8e3233] [cursor=pointer]:
+                - generic [ref=f8e3234]: MiniMax
+                - paragraph [ref=f8e3237]: minimax-tts-speech-2.5-hd-preview
+                - generic [aria-hidden]:
+                  - generic: audio-generation
+                  - generic: ...
+              - generic [ref=f8e3245] [cursor=pointer]:
+                - generic [ref=f8e3246]: MiniMax
+                - paragraph [ref=f8e3249]: minimax-tts-speech-2.5-turbo-preview
+                - generic [aria-hidden]:
+                  - generic: audio-generation
+                  - generic: ...
+              - generic [ref=f8e3257] [cursor=pointer]:
+                - generic [ref=f8e3258]: MiniMax
+                - paragraph [ref=f8e3261]: minimax-tts-speech-02-hd
+                - generic [aria-hidden]:
+                  - generic: audio-generation
+                  - generic: ...
+              - generic [ref=f8e3269] [cursor=pointer]:
+                - generic [ref=f8e3270]: MiniMax
+                - paragraph [ref=f8e3273]: minimax-tts-speech-02-turbo
+                - generic [aria-hidden]:
+                  - generic: audio-generation
+                  - generic: ...
+              - generic [ref=f8e3281] [cursor=pointer]:
+                - generic [ref=f8e3282]: MiniMax
+                - paragraph [ref=f8e3285]: minimax-tts-speech-01-hd
+                - generic [aria-hidden]:
+                  - generic: audio-generation
+                  - generic: ...
+              - generic [ref=f8e3293] [cursor=pointer]:
+                - generic [ref=f8e3294]: MiniMax
+                - paragraph [ref=f8e3297]: minimax-tts-speech-01-turbo
+                - generic [aria-hidden]:
+                  - generic: audio-generation
+                  - generic: ...
+              - generic [ref=f8e3305] [cursor=pointer]:
+                - generic [ref=f8e3306]: Hunyuan
+                - paragraph [ref=f8e3309]: hunyuan-3d-pro
+                - generic [aria-hidden]:
+                  - generic: Text-to-3D
+                  - generic: Image-to-3D
+                  - generic: ...
+    - contentinfo [ref=f8e3310]:
+      - generic [ref=f8e3311]:
+        - link [ref=f8e3312] [cursor=pointer]:
+          - /url: /
+        - generic [ref=f8e3327]:
+          - button [ref=f8e3328] [cursor=pointer]
+          - button [ref=f8e3329] [cursor=pointer]
+          - button [ref=f8e3330] [cursor=pointer]
+          - button [ref=f8e3331] [cursor=pointer]
+      - separator [ref=f8e3332]
+      - generic [ref=f8e3333]:
+        - paragraph [ref=f8e3334]: Copyright 2026 © GMI Cloud
+        - generic [ref=f8e3335]:
+          - button "Contact Us" [ref=f8e3336] [cursor=pointer]
+          - button "Terms of Service" [ref=f8e3337] [cursor=pointer]
+          - button "User Policy" [ref=f8e3338] [cursor=pointer]
+          - button "User Disclaimer" [ref=f8e3339] [cursor=pointer]
+          - button "Sanctions and Export Control" [ref=f8e3340] [cursor=pointer]
+  - region "Notifications alt+T"

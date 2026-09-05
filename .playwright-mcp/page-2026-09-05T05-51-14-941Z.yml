@@ -1,0 +1,192 @@
+- generic [active] [ref=f112e1]:
+  - alert [ref=f112e2]
+  - complementary
+  - generic [ref=f112e3]:
+    - banner [ref=f112e6]:
+      - generic [ref=f112e7]:
+        - link [ref=f112e8] [cursor=pointer]:
+          - /url: /
+        - button "Sign in" [ref=f112e24] [cursor=pointer]
+    - main [ref=f112e25]:
+      - generic [ref=f112e26]:
+        - generic [ref=f112e27]:
+          - button "Back" [ref=f112e29] [cursor=pointer]
+          - generic [ref=f112e30]:
+            - generic [ref=f112e31]:
+              - img "Minimax" [ref=f112e34]
+              - generic [ref=f112e36]:
+                - generic [ref=f112e37]:
+                  - paragraph [ref=f112e38]: "MiniMax AI: MiniMax-M2.5 (H200)"
+                  - list [ref=f112e39]:
+                    - generic [ref=f112e40]: LLM
+                    - generic [ref=f112e41]: Text-to-Text
+                    - generic [ref=f112e42]: Text-Image-to-Text
+                - paragraph [ref=f112e43]: MiniMaxAI/MiniMax-M2.5 B200
+            - button "Deploy" [ref=f112e45] [cursor=pointer]
+        - generic [ref=f112e46]:
+          - main [ref=f112e47]:
+            - main [ref=f112e49]:
+              - button "Learn more in Docs" [ref=f112e51] [cursor=pointer]
+              - generic [ref=f112e53]:
+                - heading "MiniMax-M2.5" [level=1] [ref=f112e54]
+                - generic [ref=f112e55]: MiniMax-M2.5 is an advanced reasoning model featuring built-in extended thinking capabilities for complex problem-solving. The model shows its reasoning process through "thinking" content blocks, making it ideal for tasks requiring step-by-step analysis, coding, and multi-step planning.
+                - heading "API Usage" [level=2] [ref=f112e56]
+                - generic [ref=f112e57]: "MiniMax-M2.5 supports two API formats:"
+                - list [ref=f112e58]:
+                  - listitem [ref=f112e59]: "OpenAI-compatible: /v1/chat/completions endpoint"
+                  - listitem [ref=f112e60]: "Anthropic-compatible: /v1/messages endpoint (with extended thinking support)"
+                - heading "API Examples" [level=2] [ref=f112e61]
+                - heading "OpenAI-Compatible Endpoint" [level=3] [ref=f112e62]
+                - generic [ref=f112e63]: Generate a model response using the chat completions endpoint.
+                - heading "Shell" [level=4] [ref=f112e64]
+                - generic [ref=f112e65]:
+                  - generic [ref=f112e67]:
+                    - generic [ref=f112e68]: sh
+                    - button [ref=f112e69] [cursor=pointer]
+                  - code [ref=f112e72]:
+                    - generic [ref=f112e73]: curl --request POST \
+                    - generic [ref=f112e74]: "--url https://api.gmi-serving.com/v1/chat/completions \\"
+                    - generic [ref=f112e75]: "-H 'Content-Type: application/json' \\"
+                    - generic [ref=f112e76]: "-H 'Authorization: Bearer *************' \\"
+                    - generic [ref=f112e77]: "--data '{"
+                    - generic [ref=f112e78]: "\"model\": \"MiniMaxAI/MiniMax-M2.5\","
+                    - generic [ref=f112e79]: "\"messages\": ["
+                    - generic [ref=f112e80]: "{\"role\": \"system\", \"content\": \"You are a helpful AI assistant with strong reasoning and coding ability.\"},"
+                    - generic [ref=f112e81]: "{\"role\": \"user\", \"content\": \"Explain how the Mixture-of-Experts architecture improves inference efficiency in large language models.\"}"
+                    - generic [ref=f112e82]: "],"
+                    - generic [ref=f112e83]: "\"max_tokens\": 1024"
+                    - generic [ref=f112e84]: "}'"
+                - heading "Python" [level=4] [ref=f112e86]
+                - generic [ref=f112e87]:
+                  - generic [ref=f112e89]:
+                    - generic [ref=f112e90]: sh
+                    - button [ref=f112e91] [cursor=pointer]
+                  - code [ref=f112e94]:
+                    - generic [ref=f112e95]: import requests
+                    - generic [ref=f112e96]: import json
+                    - generic [ref=f112e98]: url = "https://api.gmi-serving.com/v1/chat/completions"
+                    - generic [ref=f112e99]: "headers = {"
+                    - generic [ref=f112e100]: "\"Content-Type\": \"application/json\","
+                    - generic [ref=f112e101]: "\"Authorization\": \"Bearer YOUR_API_KEY\""
+                    - generic [ref=f112e102]: "}"
+                    - generic [ref=f112e104]: "payload = {"
+                    - generic [ref=f112e105]: "\"model\": \"MiniMaxAI/MiniMax-M2.5\","
+                    - generic [ref=f112e106]: "\"messages\": ["
+                    - generic [ref=f112e107]: "{\"role\": \"system\", \"content\": \"You are a capable AI coding assistant\"},"
+                    - generic [ref=f112e108]: "{\"role\": \"user\", \"content\": \"Refactor this multi-file Python module to make it async-ready\"}"
+                    - generic [ref=f112e109]: "],"
+                    - generic [ref=f112e110]: "\"max_tokens\": 1024"
+                    - generic [ref=f112e111]: "}"
+                    - generic [ref=f112e113]: response = requests.post(url, headers=headers, json=payload)
+                    - generic [ref=f112e114]: print(json.dumps(response.json(), indent=2))
+                - heading "Anthropic-Compatible Endpoint (with Extended Thinking)" [level=3] [ref=f112e116]
+                - generic [ref=f112e117]: The /v1/messages endpoint provides access to the model's reasoning process through the "thinking" content block. You can also use the Anthropic SDK directly by configuring the base URL.
+                - heading "Using Anthropic SDK (Recommended)" [level=4] [ref=f112e118]
+                - generic [ref=f112e119]:
+                  - generic [ref=f112e121]:
+                    - generic [ref=f112e122]: sh
+                    - button [ref=f112e123] [cursor=pointer]
+                  - code [ref=f112e126]:
+                    - generic [ref=f112e127]: "# Configure environment variables"
+                    - generic [ref=f112e128]: export ANTHROPIC_BASE_URL=https://api.minimax.io/anthropic
+                    - generic [ref=f112e129]: "export ANTHROPIC_API_KEY=${YOUR_API_KEY}"
+                - generic [ref=f112e131]:
+                  - generic [ref=f112e133]:
+                    - generic [ref=f112e134]: sh
+                    - button [ref=f112e135] [cursor=pointer]
+                  - code [ref=f112e138]:
+                    - generic [ref=f112e139]: import anthropic
+                    - generic [ref=f112e141]: client = anthropic.Anthropic()
+                    - generic [ref=f112e143]: message = client.messages.create(
+                    - generic [ref=f112e144]: model="MiniMax-M2.5",
+                    - generic [ref=f112e145]: max_tokens=1000,
+                    - generic [ref=f112e146]: system="You are a helpful assistant.",
+                    - generic [ref=f112e147]: messages=[
+                    - generic [ref=f112e148]: "{"
+                    - generic [ref=f112e149]: "\"role\": \"user\","
+                    - generic [ref=f112e150]: "\"content\": ["
+                    - generic [ref=f112e151]: "{"
+                    - generic [ref=f112e152]: "\"type\": \"text\","
+                    - generic [ref=f112e153]: "\"text\": \"Hi, how are you?\""
+                    - generic [ref=f112e154]: "}"
+                    - generic [ref=f112e155]: "]"
+                    - generic [ref=f112e156]: "}"
+                    - generic [ref=f112e157]: "]"
+                    - generic [ref=f112e158]: )
+                    - generic [ref=f112e160]: "for block in message.content:"
+                    - generic [ref=f112e161]: "if block.type == \"thinking\":"
+                    - generic [ref=f112e162]: "print(f\"Thinking:\\n{block.thinking}\\n\")"
+                    - generic [ref=f112e163]: "elif block.type == \"text\":"
+                    - generic [ref=f112e164]: "print(f\"Text:\\n{block.text}\\n\")"
+                - heading "Shell (Direct API)" [level=4] [ref=f112e166]
+                - generic [ref=f112e167]:
+                  - generic [ref=f112e169]:
+                    - generic [ref=f112e170]: sh
+                    - button [ref=f112e171] [cursor=pointer]
+                  - code [ref=f112e174]:
+                    - generic [ref=f112e175]: curl --request POST \
+                    - generic [ref=f112e176]: "--url https://api.gmi-serving.com/v1/messages \\"
+                    - generic [ref=f112e177]: "-H 'Content-Type: application/json' \\"
+                    - generic [ref=f112e178]: "-H 'x-api-key: *************' \\"
+                    - generic [ref=f112e179]: "--data '{"
+                    - generic [ref=f112e180]: "\"model\": \"MiniMaxAI/MiniMax-M2.5\","
+                    - generic [ref=f112e181]: "\"max_tokens\": 1024,"
+                    - generic [ref=f112e182]: "\"messages\": ["
+                    - generic [ref=f112e183]: "{\"role\": \"user\", \"content\": \"Solve this step by step: What is 23 * 47?\"}"
+                    - generic [ref=f112e184]: "]"
+                    - generic [ref=f112e185]: "}'"
+                - heading "Shell (with Streaming)" [level=4] [ref=f112e187]
+                - generic [ref=f112e188]:
+                  - generic [ref=f112e190]:
+                    - generic [ref=f112e191]: sh
+                    - button [ref=f112e192] [cursor=pointer]
+                  - code [ref=f112e195]:
+                    - generic [ref=f112e196]: curl --request POST \
+                    - generic [ref=f112e197]: "--url https://api.gmi-serving.com/v1/messages \\"
+                    - generic [ref=f112e198]: "-H 'Content-Type: application/json' \\"
+                    - generic [ref=f112e199]: "-H 'x-api-key: *************' \\"
+                    - generic [ref=f112e200]: "--data '{"
+                    - generic [ref=f112e201]: "\"model\": \"MiniMaxAI/MiniMax-M2.5\","
+                    - generic [ref=f112e202]: "\"max_tokens\": 1024,"
+                    - generic [ref=f112e203]: "\"messages\": ["
+                    - generic [ref=f112e204]: "{\"role\": \"user\", \"content\": \"Tell me a three sentence bedtime story about a unicorn.\"}"
+                    - generic [ref=f112e205]: "],"
+                    - generic [ref=f112e206]: "\"stream\": true"
+                    - generic [ref=f112e207]: "}'"
+                - heading "Python (with Streaming)" [level=4] [ref=f112e209]
+                - generic [ref=f112e210]:
+                  - generic [ref=f112e212]:
+                    - generic [ref=f112e213]: sh
+                    - button [ref=f112e214] [cursor=pointer]
+                  - code [ref=f112e217]:
+                    - generic [ref=f112e218]: import anthropic
+                    - generic [ref=f112e220]: client = anthropic.Anthropic()
+                    - generic [ref=f112e222]: stream = client.messages.create(
+                    - generic [ref=f112e223]: model="MiniMax-M2.5",
+                    - generic [ref=f112e224]: max_tokens=1000,
+                    - generic [ref=f112e225]: system="You are a helpful assistant.",
+                    - generic [ref=f112e226]: messages=[
+                    - generic [ref=f112e227]: "{\"role\": \"user\", \"content\": [{\"type\": \"text\", \"text\": \"Hi, how are you?\"}]}"
+                    - generic [ref=f112e228]: "],"
+                    - generic [ref=f112e229]: stream=True,
+                    - generic [ref=f112e230]: )
+                    - generic [ref=f112e232]: "for chunk in stream:"
+                    - generic [ref=f112e233]: "if chunk.type == \"content_block_delta\":"
+                    - generic [ref=f112e234]: "if hasattr(chunk, \"delta\") and chunk.delta:"
+                    - generic [ref=f112e235]: "if chunk.delta.type == \"thinking_delta\":"
+                    - generic [ref=f112e236]: print(chunk.delta.thinking, end="", flush=True)
+                    - generic [ref=f112e237]: "elif chunk.delta.type == \"text_delta\":"
+                    - generic [ref=f112e238]: print(chunk.delta.text, end="", flush=True)
+          - generic [ref=f112e247]:
+            - generic [ref=f112e248]: Model Overview
+            - generic [ref=f112e249]:
+              - generic [ref=f112e250]:
+                - generic [ref=f112e251]: Context Length
+                - generic [ref=f112e252]: "196608"
+              - generic [ref=f112e253]:
+                - generic [ref=f112e254]: Quantization
+                - generic [ref=f112e255]: fp8
+              - generic [ref=f112e256]:
+                - generic [ref=f112e257]: Provider
+                - generic [ref=f112e258]: Minimax
+  - region "Notifications alt+T"

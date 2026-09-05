@@ -4,6 +4,7 @@ import asyncio
 import base64
 import json
 import os
+import subprocess
 import tempfile
 import time
 import wave
@@ -503,15 +504,19 @@ class VllmVisionAdapter:
         except Exception as exc:
             return AdapterResult("invalid", {"error": type(exc).__name__}, "VLLM_INVALID_FOCUS_REVIEW", result.latency_ms)
 
-    async def analyze_images(self, images: tuple[bytes, ...] | list[bytes], mime_type: str = "image/jpeg", audio_pcm: bytes | None = None,
-                             scene_context: dict[str, Any] | None = None, enable_thinking: bool | None = None) -> AdapterResult:
-        started = time.perf_counter()
-        if not images:
-            return AdapterResult("invalid", {"error": "empty_frame_window"}, "VLLM_EMPTY_FRAME_WINDOW")
-        frame_count = len(images)
-        encoded_images = [base64.b64encode(image).decode("ascii") for image in images]
+    def _observation_prompt(self, frame_count: int, scene_context: dict[str, Any] | None,
+                            *, media_kind: str = "frames") -> str:
+        """Prompt shared by the frames and video wire formats.
+
+        Both wire formats carry the same window and must return the same
+        vision-observation.v1 object, so only the sentence describing how the
+        window is presented differs.
+        """
+        intro = (f"以下是依時間排序的 {frame_count} 張連續攝影機 frame，"
+                 if media_kind == "frames"
+                 else f"以下是一段 {self.settings.vllm_window_seconds:g} 秒的連續攝影機影片（約 {frame_count} 個取樣時點），")
         prompt = (
-            f"你是照護影像事件觀察器。以下是依時間排序的 {frame_count} 張連續攝影機 frame，"
+            f"你是照護影像事件觀察器。{intro}"
             "請把它們視為同一個事件窗口，並只輸出一個 JSON object，不要 markdown、不要推理文字。"
             "遵守 vision-observation.v1 欄位：observed_at_offset_ms(0), person_visible(boolean), "
             "posture(standing|sitting|lying|unknown), vertical_transition(up|down|none|unknown), near_floor(boolean), "
@@ -527,6 +532,16 @@ class VllmVisionAdapter:
         )
         if scene_context:
             prompt += "此 camera session 的場景註腳（只作背景，不可取代目前 frame evidence）：" + json.dumps(scene_context, ensure_ascii=False, separators=(",", ":"))
+        return prompt
+
+    async def analyze_images(self, images: tuple[bytes, ...] | list[bytes], mime_type: str = "image/jpeg", audio_pcm: bytes | None = None,
+                             scene_context: dict[str, Any] | None = None, enable_thinking: bool | None = None) -> AdapterResult:
+        started = time.perf_counter()
+        if not images:
+            return AdapterResult("invalid", {"error": "empty_frame_window"}, "VLLM_EMPTY_FRAME_WINDOW")
+        frame_count = len(images)
+        encoded_images = [base64.b64encode(image).decode("ascii") for image in images]
+        prompt = self._observation_prompt(frame_count, scene_context, media_kind="frames")
         content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
         content.extend({"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{encoded}"}} for encoded in encoded_images)
         transient_audio = None
@@ -555,6 +570,133 @@ class VllmVisionAdapter:
                     os.unlink(transient_audio)
                 except FileNotFoundError:
                     pass
+
+    def _encode_window_video(self, images: tuple[bytes, ...] | list[bytes], audio_pcm: bytes | None,
+                             fps: float) -> bytes:
+        """Mux ordered JPEG frames (and optional PCM) into one MP4.
+
+        The sampler already holds the window as JPEG frames, so the video wire
+        format is produced here rather than kept as a second copy of the
+        stream. Raises RuntimeError with ffmpeg's stderr so the caller can
+        report a specific error code instead of a generic failure.
+        """
+        root = Path(self.settings.media_root).resolve()
+        root.mkdir(parents=True, exist_ok=True)
+        audio_path = None
+        video_fd, video_path = tempfile.mkstemp(prefix="vision-window-", suffix=".mp4", dir=root)
+        os.close(video_fd)
+        try:
+            command = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                       "-framerate", f"{max(0.1, fps):g}", "-f", "image2pipe", "-vcodec", "mjpeg", "-i", "-"]
+            if audio_pcm:
+                audio_fd, audio_path = tempfile.mkstemp(prefix="vision-window-", suffix=".wav", dir=root)
+                with os.fdopen(audio_fd, "wb") as audio_file:
+                    audio_file.write(self._pcm_to_wav(audio_pcm))
+                command += ["-i", audio_path]
+            # -2 keeps the height even, which yuv420p requires.
+            command += ["-vf", f"scale='min({self.settings.vision_video_max_width},iw)':-2",
+                        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast",
+                        "-crf", str(self.settings.vision_video_crf)]
+            if audio_pcm:
+                command += ["-c:a", "aac", "-b:a", "64k", "-shortest"]
+            command += ["-movflags", "+faststart", video_path]
+            completed = subprocess.run(command, input=b"".join(images), capture_output=True,
+                                       timeout=self.settings.vision_video_encode_timeout)
+            if completed.returncode != 0:
+                raise RuntimeError(completed.stderr.decode("utf-8", "replace")[-240:] or "ffmpeg failed")
+            data = Path(video_path).read_bytes()
+            if not data:
+                raise RuntimeError("ffmpeg produced an empty file")
+            return data
+        finally:
+            for path in (video_path, audio_path):
+                if path:
+                    try:
+                        os.unlink(path)
+                    except FileNotFoundError:
+                        pass
+
+    async def analyze_video(self, images: tuple[bytes, ...] | list[bytes] | None = None, *,
+                            video_bytes: bytes | None = None, mime_type: str = "video/mp4",
+                            audio_pcm: bytes | None = None, scene_context: dict[str, Any] | None = None,
+                            enable_thinking: bool | None = None, fps: float | None = None) -> AdapterResult:
+        """Send one window as a single video_url part instead of N image parts.
+
+        Returns the same VisionObservation as analyze_images so the state
+        machine is unaffected by which wire format was used. The provider does
+        not document a video_url format for the hosted model, so callers should
+        only select this path after probe_video() has passed.
+        """
+        started = time.perf_counter()
+        if video_bytes is None and not images:
+            return AdapterResult("invalid", {"error": "empty_frame_window"}, "VLLM_EMPTY_FRAME_WINDOW")
+        frame_count = len(images) if images else self.settings.vllm_window_frames
+        if video_bytes is None:
+            window_seconds = max(0.1, float(self.settings.vllm_window_seconds))
+            sample_fps = fps or (frame_count / window_seconds if frame_count else self.settings.vllm_sample_fps)
+            try:
+                video_bytes = await asyncio.to_thread(self._encode_window_video, images, audio_pcm, sample_fps)
+            except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+                return AdapterResult("invalid", {"error": type(exc).__name__, "detail": str(exc)[-240:]},
+                                     "VISION_VIDEO_ENCODE_FAILED", int((time.perf_counter() - started) * 1000))
+        encoded = base64.b64encode(video_bytes).decode("ascii")
+        prompt = self._observation_prompt(frame_count, scene_context, media_kind="video")
+        content: list[dict[str, Any]] = [{"type": "text", "text": prompt},
+                                         {"type": "video_url", "video_url": {"url": f"data:{mime_type};base64,{encoded}"}}]
+        response_format = {"type": "json_object"} if self.settings.inference_provider == "gmi_cloud" else {"type": "json_schema", "json_schema": {"name": "vision_observation", "strict": True, "schema": self._schema()}}
+        body = {"model": self.settings.inference_model, "messages": [{"role": "user", "content": content}],
+                "temperature": 0.0, "max_tokens": 512,
+                "chat_template_kwargs": {"enable_thinking": self.settings.vllm_observation_enable_thinking if enable_thinking is None else enable_thinking},
+                "response_format": response_format}
+        headers = {"Authorization": f"Bearer {self.settings.inference_api_key}"} if self.settings.inference_api_key else None
+        try:
+            status, payload = await asyncio.to_thread(_http_json, "POST", f"{self.settings.inference_base_url}/chat/completions", headers=headers, body=body, timeout=90)
+            message = payload.get("choices", [{}])[0].get("message", {}).get("content", "")
+            observation = VisionObservation.model_validate(self._normalize_observation(self._extract_json(message)))
+            if audio_pcm and not observation.audio_present:
+                observation = observation.model_copy(update={"audio_present": True, "audio_uncertainty_reasons": [*observation.audio_uncertainty_reasons, "audio track was muxed into the video but the model returned no audio event"]})
+            result = {"observation": observation.model_dump(), "wire_format": "video", "video_bytes": len(video_bytes)}
+            if status >= 300:
+                return AdapterResult("degraded", result, "VLLM_HTTP_ERROR", int((time.perf_counter() - started) * 1000))
+            return AdapterResult("healthy", result, None, int((time.perf_counter() - started) * 1000))
+        except (OSError, urllib.error.URLError, ValueError, json.JSONDecodeError, KeyError, IndexError, TypeError) as exc:
+            return AdapterResult("invalid", {"error": type(exc).__name__, "wire_format": "video"}, "VLLM_INVALID_OBSERVATION", int((time.perf_counter() - started) * 1000))
+
+    async def analyze_window(self, images: tuple[bytes, ...] | list[bytes], mime_type: str = "image/jpeg",
+                             audio_pcm: bytes | None = None, scene_context: dict[str, Any] | None = None,
+                             enable_thinking: bool | None = None) -> AdapterResult:
+        """Dispatch one window to the configured wire format.
+
+        Falls back to the verified frames path when the video path fails, so a
+        provider that silently rejects video_url degrades instead of losing the
+        window entirely.
+        """
+        if not self.settings.vision_video_mode:
+            return await self.analyze_images(images, mime_type=mime_type, audio_pcm=audio_pcm,
+                                             scene_context=scene_context, enable_thinking=enable_thinking)
+        result = await self.analyze_video(images, audio_pcm=audio_pcm, scene_context=scene_context,
+                                          enable_thinking=enable_thinking)
+        if result.status == "healthy":
+            return result
+        return await self.analyze_images(images, mime_type=mime_type, audio_pcm=audio_pcm,
+                                         scene_context=scene_context, enable_thinking=enable_thinking)
+
+    async def probe_video(self) -> AdapterResult:
+        """Check whether the endpoint accepts a video_url content part.
+
+        The hosted provider documents no video_url wire format, so this must
+        pass before vision_wire_format is switched to `video`.
+        """
+        frames = []
+        for shade in (16, 200):
+            try:
+                from PIL import Image
+            except ImportError:
+                return AdapterResult("invalid", {"error": "pillow_missing"}, "VISION_VIDEO_PROBE_UNAVAILABLE")
+            buffer = BytesIO()
+            Image.new("RGB", (320, 180), (shade, shade, shade)).save(buffer, format="JPEG")
+            frames.append(buffer.getvalue())
+        return await self.analyze_video(tuple(frames * 5), fps=2.0)
 
     async def analyze_main_agent(self, images: tuple[bytes, ...] | list[bytes] | None, context: dict[str, Any],
                                  audio_pcm: bytes | None = None, mime_type: str = "image/jpeg") -> AdapterResult:

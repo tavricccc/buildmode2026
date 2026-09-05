@@ -149,7 +149,7 @@ async def handle_vllm_window(session, image_bytes: tuple[bytes, ...], window: di
     scene_context = await ensure_scene_context(session, image_bytes, window)
     async with vllm_semaphore:
         await broadcaster.send({"type": "local_analysis.started", "correlation_id": window["window_id"], "payload": {"stream_id": session.id, "window": window, "model": settings.inference_model, "source": "continuous_media_window_sampler"}})
-        result = await vllm.analyze_images(image_bytes, audio_pcm=audio_pcm, scene_context=scene_context)
+        result = await vllm.analyze_window(image_bytes, audio_pcm=audio_pcm, scene_context=scene_context)
     if result.status != "healthy":
         store.log("warning", "local_vlm", "VLM observation was rejected", context={"stream_id": session.id, "status": result.status, "error_code": result.error_code})
         return

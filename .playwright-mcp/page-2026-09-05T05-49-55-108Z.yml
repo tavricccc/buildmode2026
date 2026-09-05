@@ -1,0 +1,41 @@
+- generic [active] [ref=f56e1]:
+  - alert [ref=f56e2]
+  - complementary
+  - generic [ref=f56e3]:
+    - paragraph [ref=f56e8]:
+      - text: Summer Signal '26 -- The Modern Renaissance, SF, 9/14
+      - link "RSVP NOW" [ref=f56e9] [cursor=pointer]:
+        - /url: https://www.gmicloud.ai/en/company/summer-signal
+    - banner [ref=f56e10]:
+      - generic [ref=f56e11]:
+        - link [ref=f56e12] [cursor=pointer]:
+          - /url: /
+        - button "Sign in" [ref=f56e28] [cursor=pointer]
+    - main [ref=f56e29]:
+      - generic [ref=f56e38]:
+        - generic [ref=f56e39]:
+          - heading "Models" [level=2] [ref=f56e40]
+          - paragraph [ref=f56e41]: Discover popular models available on GMI Cloud.
+        - complementary [ref=f56e43]:
+          - group [ref=f56e52]:
+            - group [ref=f56e53]
+            - textbox "Search by model name" [ref=f56e57]
+    - contentinfo [ref=f56e72]:
+      - generic [ref=f56e73]:
+        - link [ref=f56e74] [cursor=pointer]:
+          - /url: /
+        - generic [ref=f56e89]:
+          - button [ref=f56e90] [cursor=pointer]
+          - button [ref=f56e91] [cursor=pointer]
+          - button [ref=f56e92] [cursor=pointer]
+          - button [ref=f56e93] [cursor=pointer]
+      - separator [ref=f56e94]
+      - generic [ref=f56e95]:
+        - paragraph [ref=f56e96]: Copyright 2026 © GMI Cloud
+        - generic [ref=f56e97]:
+          - button "Contact Us" [ref=f56e98] [cursor=pointer]
+          - button "Terms of Service" [ref=f56e99] [cursor=pointer]
+          - button "User Policy" [ref=f56e100] [cursor=pointer]
+          - button "User Disclaimer" [ref=f56e101] [cursor=pointer]
+          - button "Sanctions and Export Control" [ref=f56e102] [cursor=pointer]
+  - region "Notifications alt+T"

@@ -1,0 +1,11 @@
+- generic [active] [ref=f24e1]:
+  - alert [ref=f24e2]
+  - complementary
+  - generic [ref=f24e3]:
+    - banner [ref=f24e6]:
+      - generic [ref=f24e7]:
+        - link [ref=f24e8] [cursor=pointer]:
+          - /url: /
+        - button "Sign in" [ref=f24e24] [cursor=pointer]
+    - main [ref=f24e25]
+  - region "Notifications alt+T"

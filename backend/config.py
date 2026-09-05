@@ -52,6 +52,10 @@ class Settings:
     change_gate_audio_delta_threshold: float = field(default_factory=lambda: max(0.005, min(0.5, float(os.getenv("CHANGE_GATE_AUDIO_DELTA_THRESHOLD", "0.06")))))
     change_gate_min_changed_pairs: int = field(default_factory=lambda: max(1, int(os.getenv("CHANGE_GATE_MIN_CHANGED_PAIRS", "2"))))
     change_gate_strong_score_multiplier: float = field(default_factory=lambda: max(1.0, float(os.getenv("CHANGE_GATE_STRONG_SCORE_MULTIPLIER", "2.5"))))
+    vision_wire_format: str = field(default_factory=lambda: os.getenv("VISION_WIRE_FORMAT", "frames").strip().lower())
+    vision_video_crf: int = field(default_factory=lambda: max(0, min(51, int(os.getenv("VISION_VIDEO_CRF", "28")))))
+    vision_video_max_width: int = field(default_factory=lambda: max(64, int(os.getenv("VISION_VIDEO_MAX_WIDTH", "768"))))
+    vision_video_encode_timeout: float = field(default_factory=lambda: max(1.0, float(os.getenv("VISION_VIDEO_ENCODE_TIMEOUT", "20"))))
     vllm_observation_enable_thinking: bool = field(default_factory=lambda: _bool("VLLM_OBSERVATION_ENABLE_THINKING", False))
     vllm_main_agent_enable_thinking: bool = field(default_factory=lambda: _bool("VLLM_MAIN_AGENT_ENABLE_THINKING", False))
     flow_model_provider: str = field(default_factory=lambda: os.getenv("FLOW_MODEL_PROVIDER", "local_vlm").strip().lower())
@@ -129,6 +133,16 @@ class Settings:
         if self.inference_provider == "gmi_cloud":
             return self.flow_model_api_key or self.minimax_api_key
         return self.vllm_api_key
+
+    @property
+    def vision_video_mode(self) -> bool:
+        """True when the vision window should be sent as one video_url part.
+
+        Defaults to False: the provider does not document a video_url wire
+        format for the hosted model, so `frames` stays the verified default
+        until a capability probe passes.
+        """
+        return self.vision_wire_format in {"video", "video_url"}
 
     @property
     def telegram_configured(self) -> bool:
