@@ -1,74 +1,50 @@
-# Care Agent 實作文件
+# Care Agent 技術文件庫
 
-版本：2026-09-05
+歡迎查閱 Care Agent（居家長照連續觀測與失能評估輔助系統）技術文件。本目錄為儲存庫唯一權威規格來源。
 
-本系統收斂成固定三層：**本地便宜過濾 → Gemini 做主要理解 → MiniMax 只處理需要深挖的事件**。不再維持早期版本那種「所有模型都抽象成同一 serving runtime」的大包袱。
+文件架構參照 **Diátaxis 框架**，區分為「快速入門（Tutorials）」、「操作指南（How-To）」、「架構解析（Explanation）」與「技術規格（Reference）」四個維度，協助開發者、評審與維護者快速定位資訊。
 
-## 核心架構
+---
+
+## 文件導覽
 
 ```text
-RTSP / Replay
-  ↓
-L1 本地 Person Gate
-  ├─ 無人 → 大多數窗口略過
-  └─ 有人 → 建立短影片
-             ↓
-L2 Gemini 3.5 Flash Lite
-  → 跌倒 / 喝水結構化 observation
-  → escalation.required
-             ↓
-      Event State Machine
-        ├─ 一般 → SQLite / Dashboard
-        └─ escalation
-               ↓
-L3 MiniMax M3
-  → 短影片 + Gemini 結果 + 必要文字上下文
-  → deeper analysis
-               ↓
-Deterministic Policy Gateway
-  → Dashboard / Telegram
+docs/
+├── README.md                  # 文件庫首頁與導覽（本文件）
+│
+├── [入門與操作指南]
+│   ├── getting-started.md     # 系統安裝、環境配置、WSL/Linux 支援與 Setup 精靈
+│   └── verification-and-testing.md # 驗證指令、重播測試情境與 14 項 Definition of Done (DoD)
+│
+├── [架構與設計原理]
+│   ├── architecture.md        # 系統三層級聯、確定性狀態機與策略守門員架構
+│   ├── pipeline.md            # 影像音訊管線、環形緩衝區、L1-L3 調度與背壓機制
+│   └── data-and-policy.md     # SQLite 資料模型、稽核足跡 (pipeline_runs) 與隱私防線
+│
+└── [規格與實測參考]
+    ├── api-reference.md       # REST API 端點、WebSocket 事件協定與 JSON 資料結構
+    └── measured-capabilities.md # 雙模型實測基準（Gemini 3.5 Flash Lite 與 MiniMax M3 實測數據）
 ```
 
-## 三層責任
+---
 
-### L1：本地 Person Gate
+## 文件對照與分類
 
-只判斷「畫面是否有人」。不可判斷跌倒、喝水、姿勢、身份、情緒或健康風險。可用 YOLO11n person class 等小型 detector，但 contract 與實作解耦。
+| 分類 | 文件名稱 | 說明 | 適用對象 |
+| --- | --- | --- | --- |
+| **Tutorials** | [快速安裝與執行指南](getting-started.md) | 從零開始安裝相依、初始化資料庫並啟動 `/setup` 介面 | 新手、初次建置者 |
+| **How-To** | [測試驗收與情境回放](verification-and-testing.md) | 執行驗證套件、回放測試情境（跌倒、飲水、空房）與查驗 DoD | 開發者、CI、評選書審 |
+| **Explanation** | [核心架構與設計原則](architecture.md) | 三層成本最佳化、Fail-open 機制、狀態機與確定性策略閘道 | 系統架構師、研究人員 |
+| **Explanation** | [三層事件管線 (Pipeline)](pipeline.md) | RTSP 影音切片、L1 存在過濾、L2 常規分析與 L3 深度升級細節 | 演算法工程師 |
+| **Explanation** | [資料模型、策略與隱私防線](data-and-policy.md) | SQLite 綱要、視窗可追溯性稽核與邊緣隱私隔離設計 | 後端工程師、資料工程師 |
+| **Reference** | [API 與 WebSocket 規格參考](api-reference.md) | 完整 REST API、WebSocket 即時串流格式與結構化 Payload | 前端開發者、系統整合者 |
+| **Reference** | [模型能力實測報告](measured-capabilities.md) | Gemini 原生 REST 與 MiniMax M3 多模態 Token 差值實測結果 | AI 工程師、評審委員 |
 
-無人時不跑一般 Gemini job，但保留低頻 safety heartbeat；L1 掛掉時 fail-open，不能把故障當成沒人。
+---
 
-### L2：Gemini 3.5 Flash Lite
+## 核心設計約束（不變原則）
 
-預設 model：`gemini-3.5-flash-lite`，可設定。使用 Google 原生 Gemini REST，不要求 OpenAI-compatible。
-
-- `POST https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key=...`
-- <=20MB：`inline_data` + Base64 + MIME type。
-- 大檔：Files API resumable upload → 等 `ACTIVE` → `file_data.file_uri`。
-- 可送 video / audio / image / text；未實測能力仍需 capability probe。
-
-### L3：MiniMax M3
-
-只在 escalation 時呼叫，不是每個窗口都跑。
-
-正常輸入必須同時包含：相關短影片 evidence、Gemini 結構化結果、escalation reason；必要時再加 transcript、event state、health/event aggregate。影片缺失時才允許 degraded text-only，且 UI / SQLite 必須明示。
-
-MiniMax 不能直接通知，仍要經 Policy Gateway。
-
-## 排程
-
-- L1 持續跑低成本 sampled frame。
-- `person_present=true` → Gemini 依設定 cadence 分析 5–10 秒短片。
-- `person_present=false` → 跳過一般 Gemini，只保留例如每 30–60 秒一次 heartbeat。
-- `suspect / confirmed` → 繞過 L1，強制 Gemini follow-up。
-- Gemini 或 deterministic policy 可要求 MiniMax escalation。
-- 每層 queue 有上限；普通 stale job 可丟，高風險 job 不可被覆蓋。
-
-## 文件
-
-1. [01_PIPELINE.md](01_PIPELINE.md) — 三層 pipeline、影片、音訊、失敗策略。
-2. [02_DATA_AND_POLICY.md](02_DATA_AND_POLICY.md) — Event、SQLite、routing audit、Policy、Observer。
-3. [03_API_AND_FRONTEND.md](03_API_AND_FRONTEND.md) — REST/WebSocket、Dashboard、三層狀態與設定 UI。
-4. [04_SETUP_DEPLOY_VERIFY.md](04_SETUP_DEPLOY_VERIFY.md) — Setup、secret、Docker/WSL、部署與驗收。
-
-本目錄是唯一的規格來源。早期版本的兩條約束——「所有模型都必須 OpenAI-compatible」與「單一 cloud vision layer」——已不再適用。
-
+1. **偵測器故障絕不等於空房**：L1 存在閘道採四值邏輯（`person_present`、`no_person`、`stale`、`unavailable`）。唯有新鮮且健全的 `no_person` 允許略過模型推論；超時或故障一律 fail-open，寧可耗費推論成本，不可忽視安全。
+2. **模型負責提供觀測證據，確定性策略負責行動**：大語言與多模態模型不具備直接對外發送通知或調整門檻的權限。所有警報必須經由確定性狀態機確認與策略守門員（Policy Gateway）核准。
+3. **全鏈路視窗皆可事後回溯**：每個被處理或略過的時間視窗，皆在 `pipeline_runs` 留存模型版本、決策代碼、延遲與短影音引用，支援端到端稽核。
+4. **極簡環境依賴**：後端堅持僅依賴 Python 3.11+ 原生標準庫，啟動無需下載數 GB 模型權重，確保在任何標準開發環境皆能即開即測。

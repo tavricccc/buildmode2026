@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "skills": {
+    "sepia": {
+      "source": "Nanako0129/sepia",
+      "sourceType": "github",
+      "skillPath": "skills/sepia/SKILL.md",
+      "computedHash": "e6d3f31491f135b1121b4977cdae220b08c7089264672978afbb2b34901ab8db"
+    },
+    "sepia-hemingway": {
+      "source": "Nanako0129/sepia",
+      "sourceType": "github",
+      "skillPath": "skills/sepia-hemingway/SKILL.md",
+      "computedHash": "d75f91e21f5dcb73d2f4bcaef05672849fc5575a6a322f252c5e20a090637184"
+    },
+    "sepia-recreate": {
+      "source": "Nanako0129/sepia",
+      "sourceType": "github",
+      "skillPath": "skills/sepia-recreate/SKILL.md",
+      "computedHash": "b6aa9c1a42c656afc22b0ce63a60e29e4d58c24f55ddcb209b04baba5e0fd842"
+    },
+    "sepia-refactor": {
+      "source": "Nanako0129/sepia",
+      "sourceType": "github",
+      "skillPath": "skills/sepia-refactor/SKILL.md",
+      "computedHash": "c06c3e6974f5c6325b47290b396d224a904d71242867fdd3b4ed628b2f371275"
+    },
+    "sepia-review": {
+      "source": "Nanako0129/sepia",
+      "sourceType": "github",
+      "skillPath": "skills/sepia-review/SKILL.md",
+      "computedHash": "a917b519d5830b73078e483d9ae52d843a686f8c5718930b5a06563e735de144"
+    },
+    "sepia-write": {
+      "source": "Nanako0129/sepia",
+      "sourceType": "github",
+      "skillPath": "skills/sepia-write/SKILL.md",
+      "computedHash": "0c1363f8073d0b41abaccf8aa971de3bae6c9c53293ff2db260d50dad9640b83"
+    }
+  }
+}
