@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Care Agent</title>
+    <!--
+      The Dashboard runs on an appliance that may have a camera and no
+      internet. A stylesheet @import blocks first paint until the request
+      resolves, so an offline install waited on a DNS timeout before showing
+      anything. media="print" takes the request off the critical path; the
+      onload flips it back once it has arrived. Nothing depends on it: every
+      stack in styles.css ends in a local face.
+    -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      media="print"
+      onload="this.media='all'"
+      href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap"
+    />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
