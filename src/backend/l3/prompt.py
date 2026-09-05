@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from ..domain.l3_contract import DeeperAnalysis, EvidenceBundle
+from ..domain.l3_contract import CareReview, DeeperAnalysis, EvidenceBundle
 from ..domain.schema import json_skeleton
 
 SYSTEM_INSTRUCTION = """\
@@ -25,6 +25,19 @@ a wrong flag is the failure mode that makes this layer worthless.
 - Never diagnose a medical condition and never identify the person.
 - If the footage does not let you tell, say that in uncertainty and keep \
 your confidence low.
+
+Reply with a single JSON object and nothing else."""
+
+CARE_REVIEW_SYSTEM_INSTRUCTION = """\
+You review longitudinal data for an eldercare team. The input is a bounded, \
+structured snapshot from the selected period: daily activity and hydration \
+summaries, health measurements, care events, actions, and prior observer records.
+
+Write for a caregiver, not an engineer. Summarise what the records support, call \
+out reassuring signals and items that deserve attention, and give practical next \
+steps. Never diagnose a condition, identify a person, claim that missing data is \
+normal, or imply that you saw footage. Recommendations are advisory and cannot \
+trigger notifications or care actions.
 
 Reply with a single JSON object and nothing else."""
 
@@ -84,3 +97,29 @@ def repair_prompt(bad_output: str, error: str) -> str:
             json_skeleton(DeeperAnalysis),
         ]
     )
+
+
+def care_review_prompt(bundle: EvidenceBundle) -> str:
+    return "\n".join([
+        f"Selected period: {bundle.event_state.get('days', 1)} day(s)",
+        "The following object contains every dashboard data category available for this period.",
+        "It is intentionally bounded and contains no secrets or raw footage.",
+        "",
+        json.dumps(bundle.l2_observation, indent=2, ensure_ascii=False),
+        "",
+        "Respond with exactly this JSON shape:",
+        json_skeleton(CareReview),
+    ])
+
+
+def care_review_repair_prompt(bad_output: str, error: str) -> str:
+    return "\n".join([
+        "Your previous care review did not satisfy the required JSON contract.",
+        f"Validator error: {error}",
+        "",
+        "Previous reply:",
+        bad_output[:2000],
+        "",
+        "Return the same assessment in the exact JSON shape below. Do not add keys.",
+        json_skeleton(CareReview),
+    ])

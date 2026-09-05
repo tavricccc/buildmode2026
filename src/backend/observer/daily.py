@@ -229,3 +229,86 @@ def _narrate(ctx: Any, day: str, summary: dict[str, Any], week: dict[str, float]
         call_id=result.call.call_id, payload=result.analysis.to_dict(),
     )
     return {"ok": True, "call_id": result.call.call_id, **result.analysis.to_dict()}
+
+
+def run_comprehensive_review(ctx: Any, days: int) -> dict[str, Any]:
+    """Send every dashboard data category in a bounded period to L3."""
+    if ctx.l3 is None:
+        return {"ok": False, "error": "l3_disabled"}
+
+    period_days = max(1, min(int(days), 30))
+    stamp = now_ms()
+    since_ms = stamp - period_days * 86_400_000
+
+    # Refresh today's deterministic rollup before taking the snapshot. This
+    # keeps a manual review from depending on the observer's next scheduled pass.
+    today = day_key(stamp)
+    current = compute_day(ctx, today)
+    ctx.repos.upsert_daily_summary(today, ctx.config.subject_id, current)
+
+    summaries = ctx.repos.daily_summaries(period_days, day_key(since_ms))
+    health = ctx.repos.health_history(ctx.config.subject_id, since_ms, limit=600)
+    events = ctx.repos.list_events(limit=200, since_ms=since_ms)
+    actions = ctx.repos.list_actions(limit=200, since_ms=since_ms)
+    observations = ctx.repos.list_observer_runs(ctx.config.subject_id, 200, since_ms)
+    totals = {
+        "hydration_ml": sum(float(row.get("hydration_ml", 0) or 0) for row in summaries),
+        "hydration_sessions": sum(int(row.get("hydration_sessions", 0) or 0)
+                                  for row in summaries),
+        "fall_events": sum(int(row.get("fall_events", 0) or 0) for row in summaries),
+        "l2_calls": sum(int(row.get("l2_calls", 0) or 0) for row in summaries),
+        "l3_calls": sum(int(row.get("l3_calls", 0) or 0) for row in summaries),
+    }
+    snapshot = {
+        "subject_id": ctx.config.subject_id,
+        "period": {"days": period_days, "started_at_ms": since_ms, "ended_at_ms": stamp},
+        "period_totals": totals,
+        "daily_summaries": summaries,
+        "health_measurements": health,
+        "latest_health": ctx.repos.latest_health(ctx.config.subject_id),
+        "care_events": events,
+        "policy_actions": actions,
+        "observer_records": observations,
+        "pipeline_stats": ctx.repos.run_stats(since_ms),
+    }
+    bundle = EvidenceBundle(
+        escalation_id=f"care_review_{stamp}",
+        trigger=EscalationTrigger.policy_second_opinion,
+        reason_codes=["comprehensive_care_review"],
+        l2_observation=snapshot,
+        event_state={"days": period_days, "requested_at_ms": stamp},
+        clip=None,
+    )
+    result = ctx.l3.review_care_data(bundle)
+    ctx.repos.save_model_call(result.call)
+    if not result.ok:
+        return {"ok": False, "error": result.call.error_code or "l3_failed",
+                "message": result.call.error_message}
+
+    analysis = result.analysis.to_dict()
+    finding_id = ctx.repos.save_finding(
+        subject_id=ctx.config.subject_id,
+        day=today,
+        kind="care_review",
+        headline=analysis["summary"][:200],
+        detail=" · ".join(analysis["recommendations"])[:1000],
+        severity=("warning" if analysis["risk_level"] in {"medium", "high", "critical"}
+                  else "info"),
+        call_id=result.call.call_id,
+        payload={"days": period_days, **analysis},
+    )
+    return {
+        "ok": True,
+        "days": period_days,
+        "generated_at_ms": stamp,
+        "call_id": result.call.call_id,
+        "finding_id": finding_id,
+        "model": result.call.model,
+        "analysis": analysis,
+        "data_counts": {
+            "daily_summaries": len(summaries),
+            "health_measurements": len(health),
+            "care_events": len(events),
+            "observer_records": len(observations),
+        },
+    }

@@ -14,7 +14,7 @@ Care Agent 是一套面向單一居家住民的照護監測原型，從影像串
 - 跌倒：從人物出現、疑似跌倒到確認與恢復，形成可追蹤的狀態。
 - 飲水：偵測拿杯、喝水與完成事件，累積當日飲水摘要。
 
-Pipeline 會保留每次判斷的來源、時間、模型回應、狀態轉移與政策決策，方便在 Dashboard 中查看一次事件是如何形成的。模型負責提供證據，Policy Gateway 負責決定是否建立事件、發送通知或執行其他動作。
+Pipeline 會保留每次判斷的來源、時間、模型回應、狀態轉移與政策決策。維護人員可在「系統維護」頁回查一次事件是如何形成的；照護首頁只保留住民狀態、健康量測與待處理事項。模型負責提供證據，Policy Gateway 負責決定是否建立事件、發送通知或執行其他動作。
 
 ## 系統流程
 
@@ -97,15 +97,15 @@ bun start -- --stubs --source fall
 
 ## 使用介面
 
-前端是 React、Vite、TypeScript、原生 CSS 與 Phosphor Icons 組成的 Dashboard，左側導覽有五個分頁：
+前端使用 React、Vite、TypeScript、原生 CSS 與 Phosphor Icons。介面採淺色主題，左側導覽分成日常照護與管理維護兩組：
 
-- **照護總覽**：目前狀態、警示、事件與每日飲水摘要。
-- **即時影像**：選擇即時鏡頭（RTSP）、模擬情境或本機錄影並啟動，畫面顯示 Ring Buffer 中最新的取樣影格。
-- **趨勢與統計**：Observer 的定期觀察紀錄與彙總統計。
-- **初始設定**：檢查 Runtime、資料庫、L1、L2、L3 與來源是否就緒。
-- **系統設定**：選擇 provider、寫入 secrets、調整 policy 並回溯設定版本。
+- **照護總覽**：預設首頁。顯示住民目前狀態、健康量測、活動、飲水、跌倒事件與近期照護動作，可切換 1、3、7、30 天。
+- **趨勢與統計**：查看每日活動與飲水走勢、健康量測歷史，以及 Observer 的逐筆觀察紀錄。
+- **即時影像**：選擇 RTSP、模擬情境或本機錄影，並顯示 Ring Buffer 中最新的取樣影格。
+- **系統維護**：查看 L1–L3 Pipeline、模型延遲、Policy 決策、系統日誌與 Cascade Trace。
+- **初始設定／系統設定**：檢查執行環境與資料來源，切換 provider、寫入 secrets、調整 policy 或回溯設定版本。
 
-Pipeline、事件時間軸與 Cascade Trace 都是照護總覽頁裡的面板，不是獨立分頁。Pipeline 面板列出 L1 跳過、L2 呼叫、L3 升級與延遲；事件時間軸依時間排出事件，點一則會展開該次 pipeline run 的 L1、L2、L3、state machine、evidence 與 policy 結果。
+照護總覽的期間切換同時套用在摘要、事件、健康量測走勢與 L3 分析。按「交給 L3 分析全部資料」時，後端會整理所選期間的每日彙總、健康量測、事件、Policy 動作、Observer 紀錄與 Pipeline 統計，再交給目前設定的 L3 provider。傳送內容有 30 天上限，不含 secrets、原始 SQLite 檔案或長時間原始影像。L3 回傳摘要、建議、正向訊號、注意事項與資料限制；結果只供判讀，不會直接觸發通知。
 
 開啟前端時預設停在照護總覽，不會自動導向初始設定。即時影像顯示的是取樣影格，系統沒有錄影播放器。
 
@@ -119,11 +119,13 @@ Pipeline、事件時間軸與 Cascade Trace 都是照護總覽頁裡的面板，
 | Pipeline | `GET /api/pipeline/runs`、`GET /api/observations`、`GET /api/logs` |
 | 事件與行動 | `GET /api/events`、`GET /api/events/{id}`、`GET /api/actions` |
 | 飲水摘要 | `GET /api/hydration/summary` |
+| 健康與趨勢 | `GET /api/health/current`、`GET /api/statistics?days=7` |
+| L3 期間分析 | `POST /api/observer/analyze-all` |
 | Provider 與 secrets | `GET`／`PUT /api/settings`、`POST /api/settings/providers`、`POST /api/settings/rollback`、`POST /api/secrets` |
 | 來源與影像 | `POST /api/source/start`、`POST /api/source/stop`、`GET /api/source/snapshot`、`GET /api/replay/scenarios`、`GET /api/media/streams` |
 | 即時更新 | `WS /ws`、`WS /ws/media` |
 
-上表只涵蓋跌倒與飲水這條主線。backend 另外保留一組相容 Longcare 舊流程的端點：`/api/agent/*`、`/api/memory/*`、`/api/interaction/*`、`/api/health/*`、`/api/transcripts`、`/api/observer/*`、`/api/statistics`。這組端點直接呼叫本地 vLLM，不走 L2/L3 cascade，「趨勢與統計」分頁就建在上面。完整列表見 [API Reference](docs/api-reference.md)。
+backend 另外保留一組相容 Longcare 舊流程的端點：`/api/agent/*`、`/api/memory/*`、`/api/interaction/*` 與 `/api/transcripts`。健康、Observer 與統計端點已由新版照護總覽及趨勢頁直接使用；其中手動期間分析走目前設定的 L3 slot。完整列表見 [API Reference](docs/api-reference.md)。
 
 資料預設寫入 `src/data`，可用 `CARE_DATA_DIR` 指定其他位置。每個實際執行的 L2 視窗都會產生對應 clip，存放在 `data/clips/`，並由 pipeline run 的 evidence reference 指向。現在尚未提供自動清理 clip 的背景工作，長時間執行時需要自行管理資料目錄。
 
@@ -140,12 +142,12 @@ bun run build
 
 `bun run verify` 會執行 Python 編譯檢查、backend unittest、前端型別檢查，以及 FFmpeg 檢查。`bun run build` 會建立前端 production bundle。需要實際雲端金鑰的 provider probes 是另外的能力測試，不會由離線 stub 流程代替。
 
-目前 repository 的驗證結果為 126 個測試通過，前端 typecheck 與 production build 也通過。測試範圍、DoD 與 provider probes 請參閱 [Verification and Testing](docs/verification-and-testing.md)。
+目前 repository 的驗證結果為 128 個測試通過，前端 typecheck 與 production build 也通過。測試範圍、DoD 與 provider probes 請參閱 [Verification and Testing](docs/verification-and-testing.md)。
 
 ## 隱私與目前限制
 
 - 原始串流不會作為長期資料庫內容保存；系統使用受限大小的近期 frame buffer。
-- 若選用雲端 provider，只有觸發 L2/L3 分析的短片段會送到對應服務；選用本地 provider 時，模型請求留在本機。
+- 若選用雲端 provider，觸發 L2/L3 事件分析的短片段會送到對應服務；手動執行 L3 期間分析時，另會傳送所選期間的結構化照護彙總與健康量測。選用本地 provider 時，模型請求留在本機。
 - API 與前端目前適合在受信任的本機或內網使用，尚未提供完整的使用者登入與權限管理。
 - L1 的 `yolo11n` 需要額外的 ONNX Runtime 與模型權重；系統不會在啟動時自動下載權重。
 - RTSP、browser media bridge 與 replay source 的能力不同，請依 [Data and Policy](docs/data-and-policy.md) 與 [Pipeline](docs/pipeline.md) 的說明配置。

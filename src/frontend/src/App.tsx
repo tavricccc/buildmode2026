@@ -1,22 +1,27 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  ChartLineUp, Database, House, Pulse, SlidersHorizontal, VideoCamera, Wrench,
+  ChartLineUp, Database, GearSix, House, Pulse, SlidersHorizontal, VideoCamera, Wrench,
 } from "@phosphor-icons/react";
 import { api } from "./api/client";
 import { RealtimeClient } from "./api/ws";
 import { DashboardPage } from "./dashboard/Page";
+import { MaintenancePage } from "./maintenance/Page";
 import { SettingsPage } from "./settings/Page";
 import { SetupPage } from "./setup/Wizard";
 import { SourcePage } from "./source/Page";
 import { StatisticsPage } from "./statistics/Page";
 import type { Status } from "./types/api";
 
-export type AppTab = "dashboard" | "source" | "statistics" | "setup" | "settings";
+export type AppTab = "dashboard" | "source" | "statistics" | "maintenance" | "setup" | "settings";
 
-const NAV: { id: AppTab; label: string; icon: typeof House }[] = [
+const CARE_NAV: { id: AppTab; label: string; icon: typeof House }[] = [
   { id: "dashboard", label: "照護總覽", icon: House },
-  { id: "source", label: "即時影像", icon: VideoCamera },
   { id: "statistics", label: "趨勢與統計", icon: ChartLineUp },
+  { id: "source", label: "即時影像", icon: VideoCamera },
+];
+
+const ADMIN_NAV: { id: AppTab; label: string; icon: typeof House }[] = [
+  { id: "maintenance", label: "系統維護", icon: GearSix },
   { id: "setup", label: "初始設定", icon: Wrench },
   { id: "settings", label: "系統設定", icon: SlidersHorizontal },
 ];
@@ -52,9 +57,15 @@ export default function App() {
       <aside className="sidebar">
         <div className="brand-mark"><Pulse weight="fill" size={20} /><span>Care <b>Agent</b></span></div>
         <nav aria-label="主要導覽">
-          {NAV.map(({ id, label, icon: Icon }) => (
+          {CARE_NAV.map(({ id, label, icon: Icon }) => (
             <button key={id} aria-current={tab === id ? "page" : undefined} onClick={() => setTab(id)}>
               <Icon size={19} /><span>{label}</span>
+            </button>
+          ))}
+          <span className="nav-section-label">管理與維護</span>
+          {ADMIN_NAV.map(({ id, label, icon: Icon }) => (
+            <button key={id} className="admin-nav" aria-current={tab === id ? "page" : undefined} onClick={() => setTab(id)}>
+              <Icon size={18} /><span>{label}</span>
             </button>
           ))}
         </nav>
@@ -70,6 +81,7 @@ export default function App() {
         {tab === "dashboard" && <DashboardPage status={status} realtime={realtime} onNavigate={setTab} />}
         {tab === "source" && <SourcePage status={status} />}
         {tab === "statistics" && <StatisticsPage />}
+        {tab === "maintenance" && <MaintenancePage status={status} realtime={realtime} />}
         {tab === "setup" && <SetupPage onDone={() => setTab("dashboard")} />}
         {tab === "settings" && <SettingsPage />}
       </main>

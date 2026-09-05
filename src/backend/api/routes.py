@@ -17,12 +17,13 @@ from typing import Any, Callable
 
 from ..config import PROVIDER_LABELS, SLOT_PROVIDERS, provider_config
 from ..domain.enums import L2Outcome
-from ..domain.timeutil import now_ms
+from ..domain.timeutil import day_key, now_ms
 from ..l1.detector import DETECTOR_REGISTRY, build_detector
 from ..l2.gemini_client import GeminiClient, GeminiError
 from ..l3.minimax_client import MiniMaxClient, MiniMaxError
 from ..media import ffmpeg
 from ..media.replay_source import ScriptedSource
+from ..observer.daily import run_comprehensive_review
 from ..secretstore import SECRET_KEYS
 
 
@@ -306,11 +307,13 @@ def get_statistics(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
     since_ms = now_ms() - days * 86_400_000
     return 200, {
         "days": days,
-        "summaries": ctx.repos.daily_summaries(days),
+        "summaries": ctx.repos.daily_summaries(days, day_key(since_ms)),
         "observer_status_counts": ctx.repos.observer_status_counts(
             ctx.config.subject_id, since_ms),
         "recent_observations": ctx.repos.list_observer_runs(
-            ctx.config.subject_id, min(days * 8, 200)),
+            ctx.config.subject_id, min(days * 8, 200), since_ms),
+        "health_samples": ctx.repos.health_history(
+            ctx.config.subject_id, since_ms, min(days * 100, 1000)),
     }
 
 
@@ -319,6 +322,20 @@ def post_observer(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
     result = ctx.observer.run_now()
     if result is None:
         raise ApiError(409, "observer_busy", "observer is already running")
+    return 200, result
+
+
+@route("POST", "/api/observer/analyze-all")
+def post_comprehensive_review(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    days = request.body.get("days", 7)
+    if not isinstance(days, int) or isinstance(days, bool) or days not in {1, 3, 7, 30}:
+        raise ApiError(400, "bad_period", "days must be one of 1, 3, 7, or 30")
+    result = run_comprehensive_review(ctx, days)
+    if not result.get("ok"):
+        if result.get("error") == "l3_disabled":
+            raise ApiError(409, "l3_disabled", "L3 is disabled in the current policy")
+        raise ApiError(502, str(result.get("error", "l3_failed")),
+                       str(result.get("message", "L3 could not complete the review")))
     return 200, result
 
 

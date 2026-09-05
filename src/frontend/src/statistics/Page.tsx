@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { ArrowClockwise, Brain, Drop, PersonSimpleWalk, Warning } from "@phosphor-icons/react";
-import { ApiError, api } from "../api/client";
+import { Brain, Drop, Heartbeat, PersonSimpleWalk, Warning } from "@phosphor-icons/react";
+import { api } from "../api/client";
 import { Badge, Card, Empty, ErrorBanner, clock, errorText } from "../components/ui";
 import type { ObserverRecord, StatisticsPayload } from "../types/api";
 
@@ -20,12 +20,10 @@ const statusLabel = (status: ObserverRecord["status"]) =>
   : "需要注意";
 
 export function StatisticsPage() {
-  const [days, setDays] = useState(30);
+  const [days, setDays] = useState(7);
   const [data, setData] = useState<StatisticsPayload | null>(null);
   const [target, setTarget] = useState(1500);
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -44,21 +42,6 @@ export function StatisticsPage() {
     void api.hydration().then((summary) => setTarget(summary.target_ml || 1500)).catch(() => undefined);
   }, []);
 
-  const runNow = async () => {
-    setBusy(true);
-    setNotice(null);
-    try {
-      await api.runObserver();
-      await load();
-      setNotice("已完成一次觀測分析。");
-    } catch (exc) {
-      // The backend answers 409 while a scheduled run holds the lock.
-      setNotice(exc instanceof ApiError && exc.status === 409
-        ? "另一次觀測分析正在進行中，完成後會自動更新。"
-        : errorText(exc));
-    } finally { setBusy(false); }
-  };
-
   const latest = data?.recent_observations[0];
   const totals = (data?.summaries ?? []).reduce((sum, day) => ({
     hydration: sum.hydration + Number(day.hydration_ml || 0),
@@ -69,15 +52,13 @@ export function StatisticsPage() {
 
   return <div className="page-stack">
     <header className="page-heading">
-      <div><span className="eyebrow">Long-term Observer</span><h1>趨勢與統計</h1><p>定期讀取 SQLite 彙總；正常狀態同樣留下可稽核紀錄。</p></div>
+      <div><span className="eyebrow">照護趨勢</span><h1>趨勢與統計</h1><p>用時間序列查看活動、飲水、健康量測與 Observer 紀錄。</p></div>
       <div className="button-row">
-        <div className="segmented compact">{[7, 30, 90].map((value) => <button key={value} aria-selected={days === value} onClick={() => setDays(value)}>{value} 天</button>)}</div>
-        <button className="action" disabled={busy} onClick={() => void runNow()}><ArrowClockwise size={17} />立即分析</button>
+        <div className="segmented compact">{[1, 3, 7, 30].map((value) => <button key={value} aria-selected={days === value} onClick={() => setDays(value)}>{value}d</button>)}</div>
       </div>
     </header>
 
     {error && <ErrorBanner>無法讀取統計資料：{error}</ErrorBanner>}
-    {notice && <p className="banner">{notice}</p>}
 
     <div className="metric-grid">
       <div className="metric-tile"><Drop size={21} /><span>期間飲水</span><b>{Math.round(totals.hydration)} ml</b></div>
@@ -85,6 +66,14 @@ export function StatisticsPage() {
       <div className="metric-tile"><PersonSimpleWalk size={21} /><span>L2 觀察</span><b>{totals.l2}</b></div>
       <div className="metric-tile"><Brain size={21} /><span>L3 深度分析</span><b>{totals.l3}</b></div>
     </div>
+
+    <Card title="健康量測紀錄" aside={<span className="muted">所選期間 {data?.health_samples.length ?? 0} 筆</span>}>
+      {!data?.health_samples.length ? <Empty>所選期間尚無健康量測。</Empty> : <div className="health-history-list">
+        {data.health_samples.slice(-24).reverse().map((sample) => <div key={sample.sample_id ?? `${sample.metric}-${sample.observed_at_ms}`}>
+          <Heartbeat size={17} /><span>{sample.metric.replaceAll("_", " ")}</span><b>{sample.value} {sample.unit}</b><small>{sample.source}</small><time>{clock(sample.observed_at_ms)}</time>
+        </div>)}
+      </div>}
+    </Card>
 
     <div className="content-grid stats-grid">
       <Card title="每日趨勢" className="span-8">

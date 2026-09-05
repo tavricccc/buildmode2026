@@ -120,6 +120,23 @@ class TestReadEndpoints(ApiTestCase):
         self.assertEqual(payload["days"], 7)
         self.assertIn("observer_status_counts", payload)
         self.assertIn("recent_observations", payload)
+        self.assertIn("health_samples", payload)
+
+    def test_comprehensive_l3_review_uses_selected_dashboard_period(self):
+        self.call("POST", "/api/health/sample", {
+            "metric": "heart_rate", "value": 72, "unit": "bpm", "source": "test",
+        })
+        status, payload = self.call("POST", "/api/observer/analyze-all", {"days": 3})
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["days"], 3)
+        self.assertIn("summary", payload["analysis"])
+        self.assertTrue(payload["analysis"]["recommendations"])
+        self.assertGreaterEqual(payload["data_counts"]["health_measurements"], 1)
+
+    def test_comprehensive_l3_review_rejects_an_unbounded_period(self):
+        status, payload = self.call("POST", "/api/observer/analyze-all", {"days": 90})
+        self.assertEqual(status, 400)
+        self.assertEqual(payload["error"]["code"], "bad_period")
 
     def test_non_api_paths_fall_back_to_the_dashboard_page(self):
         with urllib.request.urlopen(self.base + "/dashboard", timeout=10) as response:

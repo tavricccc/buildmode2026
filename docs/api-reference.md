@@ -67,6 +67,8 @@ Care Agent 後端提供標準 REST API 與 WebSocket 即時資料流（預設監
 ### `GET /api/health/current`
 查詢長輩最新感測器或輔助健康數據指標。
 
+歷史量測不另設端點；`GET /api/statistics?days=1|3|7|30` 的 `health_samples` 會回傳所選期間內、按時間排序的量測。單次回應最多 1,000 筆。
+
 ### `POST /api/health/sample`
 手動或透過外部感測器注入單筆健康量測樣本。
 - **請求格式**：
@@ -142,6 +144,25 @@ Care Agent 後端提供標準 REST API 與 WebSocket 即時資料流（預設監
 - `GET /api/observer/findings`：取得近期的個人作息異常報告與每日摘要。
 - `GET /api/observer/status`：查詢觀察者排程器下次執行時間與最近一次執行狀態。
 - `POST /api/observer/run`：手動立即觸發一次觀察者分析計算。
+
+### `POST /api/observer/analyze-all`
+
+依照照護總覽目前選取的期間，執行一次 L3 綜合分析。`days` 只接受 `1`、`3`、`7` 或 `30`：
+
+```json
+{ "days": 7 }
+```
+
+後端會先更新當日 deterministic rollup，再封裝期間內的每日彙總、健康量測、事件、Policy 動作、Observer 紀錄與 Pipeline 統計。這個請求不包含 secrets、原始資料庫或影像。L3 必須依 `l3.care_review.v1` 回傳以下欄位：
+
+- `summary`
+- `risk_level` 與 `confidence`
+- `recommendations`
+- `positive_signals`
+- `attention_items`
+- `data_limitations`
+
+成功回應也會帶回實際模型名稱、資料筆數、`call_id` 與 `finding_id`。完整結果會寫入 `model_calls` 與 `observer_findings`，但不會送進 Policy Gateway 或直接建立通知。L3 未啟用時回傳 `409 l3_disabled`；模型呼叫或格式修復仍失敗時回傳 `502`。
 
 ---
 

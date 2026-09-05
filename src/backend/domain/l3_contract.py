@@ -96,3 +96,18 @@ class DeeperAnalysis(Schema):
 
     def escalates_risk(self) -> bool:
         return self.risk_level in {"high", "critical"}
+
+
+class CareReview(Schema):
+    """A caregiver-facing review of a bounded longitudinal data window."""
+
+    schema_version = "l3.care_review.v1"
+    fields = {
+        "summary": Field(str),
+        "risk_level": Field(str, choices=RISK_LEVELS, default="none"),
+        "confidence": Field(float, minimum=0.0, maximum=1.0, default=0.0),
+        "recommendations": Field(list, default=list, item=str, max_items=6),
+        "positive_signals": Field(list, default=list, item=str, max_items=6),
+        "attention_items": Field(list, default=list, item=str, max_items=6),
+        "data_limitations": Field(list, default=list, item=str, max_items=6),
+    }

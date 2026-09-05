@@ -264,7 +264,7 @@ class Repositories:
         return event
 
     def list_events(self, limit: int = 50, event_type: str | None = None,
-                    status: str | None = None) -> list[dict[str, Any]]:
+                    status: str | None = None, since_ms: int | None = None) -> list[dict[str, Any]]:
         clauses, params = [], []
         if event_type:
             clauses.append("event_type = ?")
@@ -272,6 +272,9 @@ class Repositories:
         if status:
             clauses.append("status = ?")
             params.append(status)
+        if since_ms is not None:
+            clauses.append("occurred_at_ms >= ?")
+            params.append(since_ms)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         rows = self.db.query(
             f"SELECT * FROM events {where} ORDER BY occurred_at_ms DESC LIMIT ?", (*params, limit)
@@ -353,9 +356,15 @@ class Repositories:
         )
         return decision.action_id
 
-    def list_actions(self, limit: int = 50) -> list[dict[str, Any]]:
-        return [_row(r) for r in
-                self.db.query("SELECT * FROM actions ORDER BY created_at DESC LIMIT ?", (limit,))]
+    def list_actions(self, limit: int = 50, since_ms: int | None = None) -> list[dict[str, Any]]:
+        if since_ms is None:
+            rows = self.db.query("SELECT * FROM actions ORDER BY created_at DESC LIMIT ?", (limit,))
+        else:
+            rows = self.db.query(
+                "SELECT * FROM actions WHERE created_at>=? ORDER BY created_at DESC LIMIT ?",
+                (iso(since_ms), limit),
+            )
+        return [_row(r) for r in rows]
 
     def last_notification_ms(self, subject_id: str) -> int | None:
         row = self.db.query_one(
@@ -421,6 +430,16 @@ class Repositories:
         )
         return [_row(r) for r in rows]
 
+    def health_history(self, subject_id: str, since_ms: int,
+                       limit: int = 1000) -> list[dict[str, Any]]:
+        rows = self.db.query(
+            """SELECT sample_id, metric, value, unit, source, observed_at_ms
+               FROM health_samples WHERE subject_id=? AND observed_at_ms>=?
+               ORDER BY observed_at_ms ASC LIMIT ?""",
+            (subject_id, since_ms, limit),
+        )
+        return [_row(r) for r in rows]
+
     def save_transcript(self, subject_id: str, text: str, started_at_ms: int,
                         ended_at_ms: int, confidence: float, ttl_sec: int) -> str:
         transcript_id = new_id("tr")
@@ -467,9 +486,15 @@ class Repositories:
              iso(), iso()),
         )
 
-    def daily_summaries(self, limit: int = 30) -> list[dict[str, Any]]:
-        rows = [_row(r) for r in self.db.query(
-            "SELECT * FROM daily_summaries ORDER BY day_key DESC LIMIT ?", (limit,))]
+    def daily_summaries(self, limit: int = 30, since_day: str | None = None) -> list[dict[str, Any]]:
+        if since_day is None:
+            records = self.db.query(
+                "SELECT * FROM daily_summaries ORDER BY day_key DESC LIMIT ?", (limit,))
+        else:
+            records = self.db.query(
+                "SELECT * FROM daily_summaries WHERE day_key>=? "
+                "ORDER BY day_key DESC LIMIT ?", (since_day, limit))
+        rows = [_row(r) for r in records]
         for row in rows:
             try:
                 row["payload"] = json.loads(row.pop("payload_json") or "{}")
@@ -514,10 +539,17 @@ class Repositories:
         )
         return run_id
 
-    def list_observer_runs(self, subject_id: str, limit: int = 50) -> list[dict[str, Any]]:
-        rows = [_row(r) for r in self.db.query(
-            "SELECT * FROM observer_runs WHERE subject_id=? "
-            "ORDER BY window_ended_at_ms DESC LIMIT ?", (subject_id, limit))]
+    def list_observer_runs(self, subject_id: str, limit: int = 50,
+                           since_ms: int | None = None) -> list[dict[str, Any]]:
+        if since_ms is None:
+            records = self.db.query(
+                "SELECT * FROM observer_runs WHERE subject_id=? "
+                "ORDER BY window_ended_at_ms DESC LIMIT ?", (subject_id, limit))
+        else:
+            records = self.db.query(
+                "SELECT * FROM observer_runs WHERE subject_id=? AND window_ended_at_ms>=? "
+                "ORDER BY window_ended_at_ms DESC LIMIT ?", (subject_id, since_ms, limit))
+        rows = [_row(r) for r in records]
         for row in rows:
             for source, target, fallback in (
                 ("metrics_json", "metrics", {}),

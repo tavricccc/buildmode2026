@@ -76,8 +76,8 @@ downgrade is recorded; it is never silently dropped.
 including the skipped ones — carries the L1 decision, why L2 was called or
 skipped, whether it escalated and why, whether L3 ran, was degraded to
 text-only or failed, the latencies, the model ids, the config version and
-the evidence reference. Click an event in the Dashboard and you get that
-path back, sourced entirely from the audit tables.
+the evidence reference. Open an event from System Maintenance and you get
+that path back, sourced entirely from the audit tables.
 
 ## Quick start
 
@@ -113,7 +113,7 @@ The care API uses port 8200 so it does not collide with local vLLM on port
 provider choices are available from Settings.
 
 ```bash
-bun run verify           # compile check + 126 tests + frontend typecheck
+bun run verify           # compile check + 128 tests + frontend typecheck
 bun run probe:gemini     # measure what this Gemini deployment can do
 bun run probe:minimax    # measure what this MiniMax deployment can do
 ```
@@ -157,8 +157,8 @@ backend/
   api/           REST routes, the HTTP server, the RFC 6455 upgrade
   notify/        Telegram delivery and acknowledgement
   observer/      daily rollups and baseline comparison
-  tests/         126 tests, including docs/04_SETUP_DEPLOY_VERIFY.md's required-scenario list
-frontend/        React + TypeScript Dashboard, Setup and Settings
+  tests/         128 tests, including docs/04_SETUP_DEPLOY_VERIFY.md's required-scenario list
+frontend/        React + TypeScript care dashboard, trends and maintenance UI
 scripts/         bun orchestration and the capability probes
 data/replays/    annotated scenarios — no camera or video file needed
 ```
@@ -179,7 +179,7 @@ L1 completely.
 
 ## What is verified, and how
 
-`bun run verify` runs 126 tests. The scenario classes in
+`bun run verify` runs 128 tests. The scenario classes in
 `backend/tests/test_cascade.py` map one-to-one onto docs/04_SETUP_DEPLOY_VERIFY.md's 必測情境 list,
 and run the real cascade against the real SQLite schema with only the
 model backends stubbed:
@@ -223,8 +223,9 @@ realistic way for a key to end up in a database.
 Implemented and verified: the full L1 → L2 → L3 → Policy cascade, the
 original-flow-compatible change gate, browser WebM/audio ingress, Main Agent,
 memory candidates and resident interaction, both state machines, the SQLite
-schema with `pipeline_runs`, the REST API and WebSocket push, the Dashboard
-with the three-layer panel and cascade trace, Setup and Settings with
+schema with `pipeline_runs`, the REST API and WebSocket push, the care-first
+Dashboard, health trends, one-click L3 period review, a separate maintenance
+page with the three-layer panel and cascade trace, Setup and Settings with
 versioning and rollback, Telegram delivery, the daily observer, RTSP and
 replay ingest, and both capability probes.
 

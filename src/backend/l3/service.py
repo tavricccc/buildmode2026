@@ -21,20 +21,27 @@ from typing import Any
 
 from ..domain.enums import L3Outcome, Layer
 from ..domain.ids import content_hash
-from ..domain.l3_contract import DeeperAnalysis, EvidenceBundle
+from ..domain.l3_contract import CareReview, DeeperAnalysis, EvidenceBundle
 from ..domain.model_call import ModelCall
 from ..domain.schema import SchemaError
 from ..jsonio import JsonExtractionError, extract_json
 from ..providers import ProviderError
 from .minimax_client import MiniMaxError
-from .prompt import SYSTEM_INSTRUCTION, analysis_prompt, repair_prompt
+from .prompt import (
+    CARE_REVIEW_SYSTEM_INSTRUCTION,
+    SYSTEM_INSTRUCTION,
+    analysis_prompt,
+    care_review_prompt,
+    care_review_repair_prompt,
+    repair_prompt,
+)
 
 PROMPT_VERSION = "l3.analysis.v1"
 
 
 @dataclass
 class L3Result:
-    analysis: DeeperAnalysis | None
+    analysis: DeeperAnalysis | CareReview | None
     call: ModelCall
     outcome: L3Outcome
     reason: str = ""
@@ -135,6 +142,72 @@ class L3Service:
         call.error_message = f"first: {error} | after repair: {error2}"
         return L3Result(None, call, L3Outcome.failed, call.error_message)
 
+    def review_care_data(self, bundle: EvidenceBundle) -> L3Result:
+        """Analyse a bounded care-data snapshot without pretending footage was supplied."""
+        prompt = care_review_prompt(bundle)
+        call = ModelCall(
+            layer=Layer.l3_minimax.value,
+            provider=self.provider,
+            model=getattr(self.backend, "model", "unknown"),
+            purpose="care_review",
+            prompt_version="l3.care_review.v1",
+            schema_version=CareReview.schema_version,
+            input_hash=content_hash(prompt, bundle.escalation_id),
+        )
+
+        seed = getattr(self.backend, "set_bundle", None)
+        if seed is not None:
+            seed(bundle)
+
+        started = time.perf_counter()
+        try:
+            response = self.backend.analyse(
+                [self.backend.text_part(prompt)],
+                system_instruction=CARE_REVIEW_SYSTEM_INSTRUCTION,
+            )
+        except ProviderError as exc:
+            return self._fail(call, exc.code, exc.message,
+                              int((time.perf_counter() - started) * 1000))
+        except Exception as exc:  # noqa: BLE001 - review failures stay inside L3
+            return self._fail(call, "unexpected_error", str(exc),
+                              int((time.perf_counter() - started) * 1000))
+
+        call.latency_ms = response.latency_ms
+        call.prompt_tokens = response.prompt_tokens
+        call.output_tokens = response.output_tokens
+        call.total_tokens = response.total_tokens
+        call.response_text = self._redact(response.text)[:4000]
+        analysis, error = _parse(response.text, CareReview)
+        if analysis is not None:
+            call.status = "ok"
+            return L3Result(analysis, call, L3Outcome.degraded_text_only,
+                            f"care review over {bundle.event_state.get('days', 1)} day(s)")
+        if response.truncated:
+            return self._fail(call, "max_tokens", "response truncated by output limit",
+                              call.latency_ms)
+
+        call.attempts = 2
+        try:
+            repaired = self.backend.analyse(
+                [self.backend.text_part(care_review_repair_prompt(response.text, error))],
+                system_instruction=CARE_REVIEW_SYSTEM_INSTRUCTION,
+            )
+        except ProviderError as exc:
+            return self._fail(call, exc.code, f"repair failed: {exc.message}", call.latency_ms)
+
+        call.latency_ms += repaired.latency_ms
+        call.total_tokens = (call.total_tokens or 0) + (repaired.total_tokens or 0)
+        call.response_text = self._redact(repaired.text)[:4000]
+        analysis, error2 = _parse(repaired.text, CareReview)
+        if analysis is not None:
+            call.status = "repaired"
+            return L3Result(analysis, call, L3Outcome.degraded_text_only,
+                            f"care review over {bundle.event_state.get('days', 1)} day(s)")
+        call.status = "invalid"
+        call.error_code = "schema_invalid"
+        call.error_message = f"first: {error} | after repair: {error2}"
+        return L3Result(None, call, L3Outcome.failed, call.error_message)
+
     def _fail(self, call: ModelCall, code: str, message: str, latency_ms: int) -> L3Result:
         call.status = "failed"
         call.error_code = code
@@ -143,13 +216,13 @@ class L3Service:
         return L3Result(None, call, L3Outcome.failed, f"{code}: {call.error_message}")
 
 
-def _parse(text: str) -> tuple[DeeperAnalysis | None, str]:
+def _parse(text: str, schema: type[DeeperAnalysis] | type[CareReview] = DeeperAnalysis) -> tuple[DeeperAnalysis | CareReview | None, str]:
     try:
         payload = extract_json(text)
     except JsonExtractionError as exc:
         return None, f"extraction: {exc}"
     try:
-        return DeeperAnalysis.parse(payload), ""
+        return schema.parse(payload), ""
     except SchemaError as exc:
         return None, f"schema[{exc.code}] {exc}"
 

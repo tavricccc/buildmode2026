@@ -197,11 +197,47 @@ export interface DailySummary {
   payload: ObserverRecord["metrics"] & { l2_failures?: number };
 }
 
+export interface HealthSample {
+  sample_id?: string;
+  metric: string;
+  value: number;
+  unit: string;
+  source: string;
+  observed_at_ms: number;
+}
+
 export interface StatisticsPayload {
   days: number;
   summaries: DailySummary[];
   observer_status_counts: Partial<Record<ObserverState, number>>;
   recent_observations: ObserverRecord[];
+  health_samples: HealthSample[];
+}
+
+export interface CareReview {
+  summary: string;
+  risk_level: "none" | "low" | "medium" | "high" | "critical";
+  confidence: number;
+  recommendations: string[];
+  positive_signals: string[];
+  attention_items: string[];
+  data_limitations: string[];
+}
+
+export interface CareReviewPayload {
+  ok: true;
+  days: number;
+  generated_at_ms: number;
+  call_id: string;
+  finding_id: string;
+  model: string;
+  analysis: CareReview;
+  data_counts: {
+    daily_summaries: number;
+    health_measurements: number;
+    care_events: number;
+    observer_records: number;
+  };
 }
 
 export interface SetupStep {

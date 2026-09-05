@@ -1,5 +1,5 @@
 import type {
-  CareAction, CareEvent, CascadeTestResult, EventDetail, PipelineRun,
+  CareAction, CareEvent, CareReviewPayload, CascadeTestResult, EventDetail, PipelineRun,
   ObserverRecord, ObserverSchedulerStatus, RunStats, SettingsPayload, SetupState,
   StatisticsPayload, Status,
 } from "../types/api";
@@ -59,5 +59,6 @@ export const api = {
   startSource: (kind: string, target: string) => post<unknown>("/api/source/start", { kind, target }),
   stopSource: () => post<unknown>("/api/source/stop"),
   runObserver: () => post<unknown>("/api/observer/run"),
+  analyzeAll: (days: 1 | 3 | 7 | 30) => post<CareReviewPayload>("/api/observer/analyze-all", { days }),
   sourceSnapshotUrl: () => `/api/source/snapshot?t=${Date.now()}`,
 };
