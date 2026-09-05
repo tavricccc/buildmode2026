@@ -1,8 +1,8 @@
 # HANDOFF — Care Agent v5 Frontend（接手第 2 輪）
 
-_Updated: 2026-09-05 22:27 · 5h usage: 15%（03:10 重置）· 7d: 61% · ctx: 16%_
+_Updated: 2026-09-05 22:45 · 5h usage: ~17%（03:10 重置）· ctx: 22%_
 
-Branch: `frontend` · Head: `67a5222` · Base: `origin/main` @ `ceea44a`
+Branch: `frontend` · Head: `1fe8308` · Base: `origin/main` @ `ceea44a`
 
 ## Goal
 
@@ -53,14 +53,18 @@ Branch: `frontend` · Head: `67a5222` · Base: `origin/main` @ `ceea44a`
 
 ## Next（從這裡繼續）
 
-1. **Gemini（L2）仍未量測** — 這台機器上沒有任何 Gemini key（secret store、環境變數、`gemini api test/.env` 都沒有）。拿到 key 後：
-   ```bash
-   cd v5 && bun run probe:gemini -- --key-file /path/to/key
-   ```
-   然後更新 `v5/docs/MEASURED_CAPABILITIES.md` 的「L2 · Gemini」段（目前標示 **Not yet measured**）。
-   特別注意 native audio：v5 01 明講「一定理解音訊」不可未經量測寫成 runtime 假設。
-   目前 `providers.l2.stub = true`、`active = "stub-l2"`，L2 latency 恆為 5 ms 就是 stub。
-2. **前端沒有跑過瀏覽器實測** — 這一輪只做到 typecheck、build 與 API 契約比對。playwright MCP 這個 session 沒掛上，`.playwright-mcp/` 是上一輪留下的。建議下一輪掛上後逐頁截圖，特別是 1150px / 760px 兩個斷點。
+1. **push** — 三個 commit 在等,auto mode 的權限分類器擋掉了 `git push`,需要你在輸入框打 `! git push origin frontend`。
+2. **用真影像驗證語意層** — 這是目前最大的缺口。scripted fixture 的影格是 64×64、242 bytes 的空白灰底,真 L2 每個 window 都正確回 `occluded_view` 且不建立事件;只有 stub L2 能把跌倒/飲水狀態機推到 `confirmed`。要驗證語意需要真的影片:RTSP,或用 `replay_file` 餵一段錄影。
+3. **前端瀏覽器實測** — 目前只做到 typecheck、build 與 API 契約比對。playwright MCP 這個 session 沒掛上。建議逐頁截圖,特別是 1150px / 760px 兩個斷點。
+
+## 已完成:Gemini 量測（commit `1fe8308`）
+
+`GEMINIAPI.txt` 已放在 repo 根目錄（已 gitignore）,key 已寫入 secret store。
+
+- `bun run probe:gemini` → **9/9 全過**。auth（50 models，168 ms）、`gemini-3.5-flash-lite` 在清單內、JSON-only 輸出通過 `GeminiObservation`、`inline_data` 影片（1,078 tokens）、Files API + ACTIVE poll（5,936 ms）、`file_uri` 生成、壞 model id 回 `model_not_found`。全程 0 次 JSON repair。
+- **native audio 通過** — v5 01 明令不可未經量測假設的那一項。送 440 Hz 正弦波,模型回 `{"audio_heard": true, "description": "A continuous 440 Hz sine tone..."}`,是描述音訊而不是複述 prompt。
+- 兩層都關掉 stub 的 e2e:L2 12 個 window（11 called、1 heartbeat）、latency 1,241/1,731/2,337 ms、0 repair 0 error;L3 1 次 escalation、6,434 ms、`risk_level: none`。無任何 error log。
+- 結果寫進 `v5/docs/MEASURED_CAPABILITIES.md`,原本的 **Not yet measured** 已移除。
 
 ## ⚠️ Blockers / 需要決定
 
@@ -77,10 +81,10 @@ bun run verify                      # ✅ 124 tests + typecheck + ffmpeg
 bun run build                       # ✅ Vite production build
 CARE_PORT=8010 bun start -- --source fall
 bun run probe:minimax               # ✅ 8/8
-bun run probe:gemini                # ❌ 尚無 key
+bun run probe:gemini                # ✅ 9/9（含 native audio）
 ```
 
 ## Working tree
 
-`67a5222` 已 commit。未追蹤：`GMIAPI.txt`（已 ignore）、`v5/node_modules/.bun/@phosphor-icons*`（見上方 blocker）。
-尚未 push — `origin/frontend` 還在 `ab5eec6`。
+乾淨,全部已 commit。key 檔案 `GMIAPI.txt` 與 `GEMINIAPI.txt` 都在根目錄且已被 `*API.txt` 規則忽略。
+**尚未 push** — `origin/frontend` 還在 `ab5eec6`,本地領先 4 個 commit。
