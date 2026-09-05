@@ -21,6 +21,7 @@ data/captures/
 
 # Runtime data (database, clips, secrets) — never committed
 src/data/care.sqlite3*
+src/data/debug/
 src/data/clips/*
 src/data/secrets.json
 src/data/models/

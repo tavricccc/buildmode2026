@@ -62,3 +62,27 @@ curl -X POST http://127.0.0.1:8200/api/pipeline/cascade-test \
 12. **通報與排程閉環**：Telegram 告警確認、Observer 每日基準線比對、設定版本 Rollback 皆能端到端完成驗證。
 13. **零金鑰外洩保證**：API Key 絕不出現在前端 Bundle、GET 回應、系統日誌、SQLite 原始資料表或 Git 儲存庫中。
 14. **跨平台開發相容**：系統可在 Windows 11 (原生及 WSL2)、macOS 與 Linux 正常開發與執行驗證。
+
+---
+
+## 4. 下一階段驗收補充（規劃中）
+
+### 長照端
+
+- 跌倒處於 `recovering` 時不得顯示「目前穩定」。
+- L3 `critical` 介入建議必須出現在首頁，並與 Policy 授權、通知送達分開呈現。
+- 資料不足、來源中斷、模型失敗與穩定狀態必須使用不同文案。
+
+### 運作監看
+
+- Production 只能讀取管線狀態；Debug 才顯示 generator 與故障注入控制。
+- 每個 Run 可逐步看到等待、執行、略過、降級、完成或失敗。
+- WebSocket 重連後可由 REST active-run snapshot 接續，不重複已保存步驟。
+
+### Debug 與 Replay
+
+- Production 與 Debug 的 SQLite、clips、logs 完全隔離。
+- 相同 seed 能重現相同的 45 天歷史與即時事件序列。
+- Contract mode 驗證狀態機、Policy、UI 與通知；Evaluation mode 不向模型洩漏預期答案。
+- 正常影片 EOF 進入 `completed`，停止新增 window，且不產生後續失敗 run。
+- FFmpeg 非零結束進入 `failed`，並提供經遮蔽的有限錯誤摘要。

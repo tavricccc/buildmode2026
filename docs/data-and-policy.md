@@ -91,3 +91,13 @@ Policy Gateway 是全系統**唯一**具備對外採取實質行動（發出通�
 2. **本機資料加密儲存**：
    - API 金鑰透過 `secretstore.py` 存放在本機受作業系統權限保護（`0600`）的檔案中。
    - 終端匯出日誌時自動遮蔽所有長輩個人姓名與金鑰雜湊。
+
+---
+
+## 6. Debug 資料隔離（規劃中）
+
+Debug runtime 使用 `data/debug/care.sqlite3`，並把 clips、logs 與生成情境限制在 `data/debug/`。Production 不讀取 Debug database，也不註冊 Debug API。
+
+生成資料帶 `simulation_id`、固定 `seed` 與 `generated=true`。歷史資料產生器先建立底層健康量測、飲水、事件與管線紀錄，再呼叫正式 Observer 彙總；不得只直接寫入 `daily_summaries` 偽造趨勢。
+
+詳見 [Debug Mode 與模擬資料系統](debug-and-simulation.md)。

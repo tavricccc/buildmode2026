@@ -122,6 +122,18 @@ class TestReadEndpoints(ApiTestCase):
         self.assertIn("recent_observations", payload)
         self.assertIn("health_samples", payload)
 
+    def test_care_summary_never_calls_missing_data_stable(self):
+        status, payload = self.call("GET", "/api/care/summary")
+        self.assertEqual(status, 200)
+        self.assertIn(payload["urgency"], {"unknown", "watch", "today", "immediate"})
+        if payload["urgency"] == "unknown":
+            self.assertNotEqual(payload["state"], "stable")
+
+    def test_production_does_not_expose_debug_routes(self):
+        status, payload = self.call("GET", "/api/debug/scenarios")
+        self.assertEqual(status, 404)
+        self.assertEqual(payload["error"]["code"], "not_found")
+
     def test_comprehensive_l3_review_uses_selected_dashboard_period(self):
         self.call("POST", "/api/health/sample", {
             "metric": "heart_rate", "value": 72, "unit": "bpm", "source": "test",
@@ -166,6 +178,9 @@ class TestCascadeThroughHttp(ApiTestCase):
         self.assertEqual(status, 200)
         self.assertTrue(payload["runs"])
         self.assertIn("skip_ratio", payload["stats"])
+        status, active = self.call("GET", "/api/pipeline/active")
+        self.assertEqual(status, 200)
+        self.assertTrue(active["recent"])
 
     def test_an_event_exposes_its_full_cascade_trace(self):
         for _ in range(3):

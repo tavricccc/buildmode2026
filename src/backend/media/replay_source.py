@@ -20,7 +20,7 @@ import subprocess
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from ..domain.timeutil import now_ms
 from . import ffmpeg
@@ -52,6 +52,7 @@ class ScriptedSource:
         source_id: str = "replay-scripted",
         fps: float = 4.0,
         realtime: bool = True,
+        on_terminal: Callable[[str, str | None], None] | None = None,
     ) -> None:
         self.manifest = manifest
         self.source_id = source_id
@@ -61,6 +62,9 @@ class ScriptedSource:
         self._stop = threading.Event()
         self._emitted = 0
         self._started_at_ms = 0
+        self._state = "stopped"
+        self._error: str | None = None
+        self._on_terminal = on_terminal
 
     @classmethod
     def from_file(cls, path: str | Path, **kwargs: Any) -> "ScriptedSource":
@@ -99,32 +103,43 @@ class ScriptedSource:
             return
         self._stop.clear()
         self._started_at_ms = now_ms()
+        self._state = "running"
+        self._error = None
 
         def run() -> None:
-            step = 1.0 / self.fps
-            loop = bool(self.manifest.get("loop", False))
-            while not self._stop.is_set():
-                for packet in self.frames(base_ms=now_ms()):
-                    if self._stop.is_set():
-                        return
-                    # Re-stamp so a looped fixture keeps advancing wall clock.
-                    sink(
-                        FramePacket(
-                            sequence=packet.sequence,
-                            captured_at_ms=now_ms(),
-                            jpeg=packet.jpeg,
-                            width=packet.width,
-                            height=packet.height,
-                            source_id=packet.source_id,
-                            source_kind=packet.source_kind,
-                            annotation=packet.annotation,
+            try:
+                step = 1.0 / self.fps
+                loop = bool(self.manifest.get("loop", False))
+                while not self._stop.is_set():
+                    for packet in self.frames(base_ms=now_ms()):
+                        if self._stop.is_set():
+                            self._state = "stopped"
+                            return
+                        # Re-stamp so a looped fixture keeps advancing wall clock.
+                        sink(
+                            FramePacket(
+                                sequence=packet.sequence,
+                                captured_at_ms=now_ms(),
+                                jpeg=packet.jpeg,
+                                width=packet.width,
+                                height=packet.height,
+                                source_id=packet.source_id,
+                                source_kind=packet.source_kind,
+                                annotation=packet.annotation,
+                            )
                         )
-                    )
-                    self._emitted += 1
-                    if self.realtime:
-                        self._stop.wait(step)
-                if not loop:
-                    return
+                        self._emitted += 1
+                        if self.realtime:
+                            self._stop.wait(step)
+                    if not loop:
+                        self._state = "completed"
+                        return
+            except Exception as exc:  # noqa: BLE001
+                self._error = str(exc)
+                self._state = "failed"
+            finally:
+                if self._on_terminal is not None:
+                    self._on_terminal(self._state, self._error)
 
         self._thread = threading.Thread(target=run, name="replay-scripted", daemon=True)
         self._thread.start()
@@ -134,14 +149,18 @@ class ScriptedSource:
         if self._thread is not None:
             self._thread.join(timeout=3)
             self._thread = None
+        if self._state == "running":
+            self._state = "stopped"
 
     def health(self) -> dict[str, object]:
         return {
             "source_id": self.source_id,
             "kind": self.source_kind,
-            "running": self._thread is not None and self._thread.is_alive(),
+            "running": self._state == "running",
+            "lifecycle": self._state,
             "frames_emitted": self._emitted,
             "scenario": self.manifest.get("name", "unnamed"),
+            "error": self._error,
         }
 
 
@@ -157,6 +176,7 @@ class ReplaySource:
         fps: float = 4.0,
         width: int = 640,
         loop: bool = False,
+        on_terminal: Callable[[str, str | None], None] | None = None,
     ) -> None:
         self.path = str(path)
         self.source_id = source_id
@@ -168,28 +188,43 @@ class ReplaySource:
         self._stop = threading.Event()
         self._emitted = 0
         self._error: str | None = None
+        self._state = "stopped"
+        self._on_terminal = on_terminal
 
     def start(self, sink: FrameSink) -> None:
         if self._thread is not None:
             return
         self._stop.clear()
+        self._state = "running"
+        self._error = None
 
         def run() -> None:
             while not self._stop.is_set():
                 try:
-                    self._pump(sink)
+                    return_code, error = self._pump(sink)
                 except Exception as exc:  # noqa: BLE001
                     self._error = str(exc)
-                    return
+                    self._state = "failed"
+                    break
+                if self._stop.is_set():
+                    self._state = "stopped"
+                    break
+                if return_code != 0:
+                    self._error = error or f"ffmpeg exited with code {return_code}"
+                    self._state = "failed"
+                    break
                 if not self.loop:
-                    return
+                    self._state = "completed"
+                    break
+            if self._on_terminal is not None:
+                self._on_terminal(self._state, self._error)
 
         self._thread = threading.Thread(target=run, name="replay-file", daemon=True)
         self._thread.start()
 
-    def _pump(self, sink: FrameSink) -> None:
+    def _pump(self, sink: FrameSink) -> tuple[int, str | None]:
         args = ffmpeg.decode_command(self.path, self.fps, self.width)
-        self._proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        self._proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         assert self._proc.stdout is not None
         seq = 0
         for jpeg in ffmpeg.iter_mjpeg(self._proc.stdout):
@@ -209,6 +244,14 @@ class ReplaySource:
                 )
             )
         self._proc.wait(timeout=5)
+        error = None
+        if self._proc.stderr is not None:
+            raw = self._proc.stderr.read(4096)
+            error = raw.decode("utf-8", errors="replace").strip() or None
+            self._proc.stderr.close()
+        if self._proc.stdout is not None:
+            self._proc.stdout.close()
+        return int(self._proc.returncode or 0), error
 
     def stop(self) -> None:
         self._stop.set()
@@ -221,12 +264,15 @@ class ReplaySource:
         if self._thread is not None:
             self._thread.join(timeout=3)
             self._thread = None
+        if self._state == "running":
+            self._state = "stopped"
 
     def health(self) -> dict[str, object]:
         return {
             "source_id": self.source_id,
             "kind": self.source_kind,
-            "running": self._proc is not None and self._proc.poll() is None,
+            "running": self._state == "running",
+            "lifecycle": self._state,
             "frames_emitted": self._emitted,
             "error": self._error,
             "path": self.path,

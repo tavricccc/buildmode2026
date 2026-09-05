@@ -120,12 +120,13 @@ export interface QueueMetrics {
 
 export interface Status {
   uptime_ms: number;
+  runtime: { mode: "production" | "debug"; debug: boolean };
   subject_id: string;
   config_version: string;
   source: {
     running?: boolean; kind?: string; frames_emitted?: number; scenario?: string;
     source_id?: string; reconnects?: number; last_frame_age_ms?: number | null;
-    error?: string | null; uri_host?: string;
+    error?: string | null; uri_host?: string; lifecycle?: "starting" | "running" | "completed" | "stopped" | "failed";
   };
   cascade: {
     windows_seen: number;
@@ -148,6 +149,49 @@ export interface Status {
     key_configured: boolean; active: string | null; stub: boolean;
   }>;
   secrets: Record<string, { configured: boolean; source: string; length: number }>;
+}
+
+export interface CareSummary {
+  state: "intervention_required" | "attention" | "recovering" | "stable" | "insufficient_evidence" | "source_unavailable";
+  urgency: "immediate" | "today" | "watch" | "none" | "unknown";
+  headline: string;
+  reasons: string[];
+  recommended_next_step: string;
+  confidence: number;
+  data_completeness: number;
+  policy_status: string;
+  delivery_status: string;
+  generated_at_ms: number;
+  source_event_id: string | null;
+  limitations: string[];
+  source_lifecycle: string;
+  runtime_mode: "production" | "debug";
+}
+
+export interface PipelineStep {
+  step_id: string;
+  run_id: string;
+  event_id: string | null;
+  step: string;
+  status: "waiting" | "running" | "succeeded" | "skipped" | "degraded" | "failed";
+  summary: string;
+  reason_codes: string[];
+  input: Record<string, unknown>;
+  output: Record<string, unknown>;
+  mode: "live" | "debug";
+  started_at_ms: number;
+  completed_at_ms: number | null;
+}
+
+export interface ActivePipeline {
+  active: PipelineStep[];
+  recent: PipelineStep[];
+  source: Status["source"];
+}
+
+export interface DebugStatus {
+  stream: { running: boolean; profile?: string; seed?: number; interval_sec?: number; events?: number; last_scenario?: string };
+  scenarios: { id: string; name: string }[];
 }
 
 export type ObserverState = "stable" | "attention" | "insufficient_evidence" | "anomaly" | "failed";

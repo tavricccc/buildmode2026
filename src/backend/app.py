@@ -54,6 +54,7 @@ class AppContext:
         self.broadcaster = Broadcaster()
         self.frames = FrameWindow(capacity=480)
         self.source: Any = None
+        self.source_terminal: dict[str, Any] | None = None
         self.browser_sessions: dict[str, Any] = {}
         self._source_lock = threading.Lock()
         self.started_at_ms = now_ms()
@@ -70,6 +71,10 @@ class AppContext:
         self.notifier = self._build_notifier()
         self.cascade = self._build_cascade()
         self.observer = ObserverScheduler(self, self.config.observer_interval_sec)
+        self.debug_simulator: Any = None
+        if self.config.debug:
+            from .debug.simulator import DebugSimulator
+            self.debug_simulator = DebugSimulator(self)
         if self.notifier is not None:
             self.notifier.start_polling()
         self.observer.start()
@@ -184,6 +189,8 @@ class AppContext:
         there is nowhere to send, so the Policy Gateway must keep treating
         notification as unavailable and downgrading to a dashboard alert.
         """
+        if self.config.debug:
+            return None
         token = self.secrets.get("TELEGRAM_BOT_TOKEN")
         chats = self.policy.notification.telegram_chat_ids
         if not token or not chats:
@@ -205,6 +212,7 @@ class AppContext:
             broadcast=self.broadcaster.publish,
             telegram_configured=self.notifier is not None and self.notifier.configured,
             notifier=self.notifier,
+            runtime_mode=self.config.runtime_mode,
         )
 
     def rebuild(self, reason: str = "manual") -> None:
@@ -237,12 +245,17 @@ class AppContext:
         """Attach a frame source. Replay and RTSP are interchangeable here."""
         with self._source_lock:
             self.stop_source()
+            self.frames.reset()
+            self.cascade.reset_source_state()
+            self.source_terminal = None
             if kind == "replay_scenario":
-                path = self.config.data_dir / "replays" / f"{target}.json"
+                path = self.config.replay_dir / f"{target}.json"
                 source: Any = ScriptedSource.from_file(path, fps=self.policy.cadence.clip_fps,
-                                                       realtime=True)
+                                                       realtime=True,
+                                                       on_terminal=self._on_source_terminal)
             elif kind == "replay_file":
-                source = ReplaySource(target, fps=self.policy.cadence.clip_fps, **kwargs)
+                source = ReplaySource(target, fps=self.policy.cadence.clip_fps,
+                                      on_terminal=self._on_source_terminal, **kwargs)
             elif kind == "rtsp":
                 source = RtspSource(target, fps=self.policy.cadence.clip_fps, **kwargs)
             else:
@@ -254,6 +267,41 @@ class AppContext:
             self.repos.log("info", "source", f"started {kind}", {"kind": kind})
             return source.health()
 
+    def start_scripted_source(self, manifest: dict[str, Any], source_id: str) -> dict[str, Any]:
+        with self._source_lock:
+            self.stop_source()
+            self.frames.reset()
+            self.cascade.reset_source_state()
+            self.source_terminal = None
+            source = ScriptedSource(
+                manifest, source_id=source_id, fps=self.policy.cadence.clip_fps,
+                realtime=True, on_terminal=self._on_source_terminal,
+            )
+            self.source = source
+            source.start(self.cascade.ingest)
+            self.cascade.start()
+            self.repos.log("info", "source", "started debug scenario", {"source_id": source_id})
+            return source.health()
+
+    def _on_source_terminal(self, lifecycle: str, error: str | None) -> None:
+        try:
+            self.source_terminal = {"lifecycle": lifecycle, "error": error, "at_ms": now_ms()}
+            if lifecycle in {"completed", "failed"}:
+                self.cascade.stop()
+            level = "error" if lifecycle == "failed" else "info"
+            self.repos.log(level, "source", f"source {lifecycle}", {"error": error} if error else {})
+            source_id = str(getattr(self.source, "source_id", ""))
+            if self.config.debug and source_id.startswith("simulation:"):
+                simulation_id = source_id.split(":", 1)[1]
+                self.db.execute(
+                    "UPDATE simulation_runs SET status=?, completed_at_ms=? WHERE simulation_id=?",
+                    (lifecycle, now_ms(), simulation_id))
+            self.broadcaster.publish("source.lifecycle", self.source_terminal)
+        finally:
+            # Source callbacks run on their own thread; release its thread-local
+            # SQLite handle once the terminal event is recorded.
+            self.db.close()
+
     def stop_source(self) -> None:
         if self.source is not None:
             try:
@@ -263,6 +311,8 @@ class AppContext:
             self.source = None
 
     def shutdown(self) -> None:
+        if self.debug_simulator is not None:
+            self.debug_simulator.stop_stream()
         for session in list(self.browser_sessions.values()):
             try:
                 session.close()
@@ -282,10 +332,11 @@ class AppContext:
     def status(self) -> dict[str, Any]:
         return {
             "uptime_ms": now_ms() - self.started_at_ms,
+            "runtime": {"mode": self.config.runtime_mode, "debug": self.config.debug},
             "subject_id": self.config.subject_id,
             "config_version": self.policy.version,
             "migrations_applied": self.migrations_applied,
-            "source": self.source.health() if self.source else {"running": False},
+            "source": self.source.health() if self.source else {"running": False, "lifecycle": "stopped"},
             "browser_media": [session.health() for session in self.browser_sessions.values()],
             "cascade": self.cascade.status(),
             "realtime": self.broadcaster.metrics(),

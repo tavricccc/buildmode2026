@@ -17,6 +17,9 @@ export function SourcePage({ status }: { status: Status | null }) {
 
   const source = status?.source;
   const running = source?.running ?? false;
+  const completed = source?.lifecycle === "completed";
+  const failed = source?.lifecycle === "failed";
+  const sourceLabel = completed ? "錄影播放完成" : failed ? "來源失敗" : running ? "分析中" : "未啟動";
 
   useEffect(() => {
     void api.scenarios().then((data) => setScenarios(data.scenarios)).catch(() => undefined);
@@ -56,16 +59,16 @@ export function SourcePage({ status }: { status: Status | null }) {
     <div className="page-stack">
       <header className="page-heading">
         <div><span className="eyebrow">影像來源</span><h1>即時影像</h1><p>RTSP、模擬情境與本機錄影共用同一條分析管線。</p></div>
-        <Badge tone={running ? "ok" : "muted"} dot>{running ? "分析中" : "未啟動"}</Badge>
+        <Badge tone={failed ? "bad" : completed ? "muted" : running ? "ok" : "muted"} dot>{sourceLabel}</Badge>
       </header>
 
       <div className="source-layout">
         <Card className="preview-card">
           <div className="preview-frame">
-            {running ? <img src={snapshot} alt="最新分析影格" /> : (
+            {running || completed ? <img src={snapshot} alt={completed ? "錄影最後一個分析影格" : "最新分析影格"} /> : (
               <div className="preview-empty"><VideoCamera size={38} /><b>尚未接收影像</b><span>啟動來源後顯示最新取樣影格</span></div>
             )}
-            <div className="preview-label"><i className={`status-dot ${running ? "ok" : "muted"}`} />分析用低頻預覽</div>
+            <div className="preview-label"><i className={`status-dot ${failed ? "bad" : running ? "ok" : "muted"}`} />{completed ? "錄影播放完成 · 最後影格" : "分析用低頻預覽"}</div>
           </div>
           <div className="source-metrics">
             <span><b>{source?.kind ?? "—"}</b>來源</span>

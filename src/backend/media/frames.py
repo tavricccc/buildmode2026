@@ -72,6 +72,11 @@ class RingBuffer(Generic[T]):
         with self._lock:
             self._items.clear()
 
+    def reset(self) -> None:
+        with self._lock:
+            self._items.clear()
+            self._dropped = 0
+
     @property
     def dropped(self) -> int:
         return self._dropped
@@ -91,6 +96,11 @@ class FrameWindow:
 
     def ingest(self, packet: FramePacket) -> None:
         self.buffer.push(packet)
+
+    def reset(self) -> None:
+        self.buffer.reset()
+        with self._lock:
+            self._sequence = 0
 
     def next_sequence(self) -> int:
         with self._lock:

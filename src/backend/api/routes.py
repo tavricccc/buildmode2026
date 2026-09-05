@@ -16,6 +16,7 @@ import time
 from typing import Any, Callable
 
 from ..config import PROVIDER_LABELS, SLOT_PROVIDERS, provider_config
+from ..care_summary import build_care_summary
 from ..domain.enums import L2Outcome
 from ..domain.timeutil import day_key, now_ms
 from ..l1.detector import DETECTOR_REGISTRY, build_detector
@@ -76,6 +77,20 @@ def route(method: str, pattern: str) -> Callable[[Handler], Handler]:
 @route("GET", "/api/status")
 def get_status(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
     return 200, ctx.status()
+
+
+@route("GET", "/api/care/summary")
+def get_care_summary(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    return 200, build_care_summary(ctx)
+
+
+@route("GET", "/api/pipeline/active")
+def get_active_pipeline(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    return 200, {
+        "active": ctx.repos.list_pipeline_steps(100, active_only=True),
+        "recent": ctx.repos.list_pipeline_steps(min(request.q_int("limit", 120), 300)),
+        "source": ctx.source.health() if ctx.source else {"running": False, "lifecycle": "stopped"},
+    }
 
 
 @route("GET", "/api/pipeline/runs")
@@ -447,7 +462,7 @@ def post_secret(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
 def get_setup(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
     """What Setup still needs. Nothing here downloads anything (docs/04_SETUP_DEPLOY_VERIFY.md)."""
     detector_health = ctx.detector.health()
-    scenarios = sorted(p.stem for p in (ctx.config.data_dir / "replays").glob("*.json"))
+    scenarios = sorted(p.stem for p in ctx.config.replay_dir.glob("*.json"))
     steps = [
         {"id": "runtime", "label": "Runtime & FFmpeg",
          "done": ffmpeg.available(), "detail": ffmpeg.version()},
@@ -535,7 +550,7 @@ def cascade_test(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
     layers agree on a contract, not merely that each one answers a ping.
     """
     scenario = str(request.body.get("scenario", "fall"))
-    path = ctx.config.data_dir / "replays" / f"{scenario}.json"
+    path = ctx.config.replay_dir / f"{scenario}.json"
     if not path.exists():
         raise ApiError(404, "no_scenario", f"no replay scenario {scenario!r}")
 
@@ -586,7 +601,7 @@ def get_media_streams(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
 @route("GET", "/api/replay/scenarios")
 def get_scenarios(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
     out = []
-    for path in sorted((ctx.config.data_dir / "replays").glob("*.json")):
+    for path in sorted(ctx.config.replay_dir.glob("*.json")):
         try:
             manifest = ScriptedSource.from_file(path).manifest
         except (OSError, ValueError):
@@ -613,6 +628,68 @@ def post_source_stop(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
     ctx.stop_source()
     ctx.cascade.stop()
     return 200, {"stopped": True}
+
+
+# ---------------------------------------------------------------------
+# Debug-only simulation API
+# ---------------------------------------------------------------------
+
+
+def _debug(ctx: Any) -> Any:
+    if not ctx.config.debug or ctx.debug_simulator is None:
+        raise ApiError(404, "not_found", "debug routes are not available")
+    return ctx.debug_simulator
+
+
+@route("GET", "/api/debug/scenarios")
+def get_debug_scenarios(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    simulator = _debug(ctx)
+    return 200, simulator.status()
+
+
+@route("POST", "/api/debug/history/generate")
+def post_debug_history(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    simulator = _debug(ctx)
+    try:
+        result = simulator.generate_history(
+            days=int(request.body.get("days", 45)),
+            profile=str(request.body.get("profile", "mixed")),
+            seed=int(request.body.get("seed", 20260906)),
+        )
+    except (TypeError, ValueError) as exc:
+        raise ApiError(400, "bad_simulation", str(exc)) from None
+    return 200, result
+
+
+@route("POST", "/api/debug/scenarios/trigger")
+def post_debug_trigger(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    simulator = _debug(ctx)
+    try:
+        return 200, simulator.trigger(
+            str(request.body.get("scenario", "normal")),
+            str(request.body.get("mode", "contract")),
+        )
+    except ValueError as exc:
+        raise ApiError(400, "bad_simulation", str(exc)) from None
+
+
+@route("POST", "/api/debug/stream/start")
+def post_debug_stream_start(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    simulator = _debug(ctx)
+    try:
+        result = simulator.start_stream(
+            profile=str(request.body.get("profile", "mixed")),
+            seed=int(request.body.get("seed", 20260906)),
+            interval_sec=float(request.body.get("interval_sec", 12)),
+        )
+    except (TypeError, ValueError) as exc:
+        raise ApiError(400, "bad_simulation", str(exc)) from None
+    return 200, result
+
+
+@route("POST", "/api/debug/stream/stop")
+def post_debug_stream_stop(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    return 200, _debug(ctx).stop_stream()
 
 
 @route("GET", "/api/source/snapshot")

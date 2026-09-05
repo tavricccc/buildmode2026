@@ -1,18 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  ChartLineUp, Database, GearSix, House, Pulse, SlidersHorizontal, VideoCamera, Wrench,
+  ChartLineUp, Database, GearSix, House, Pulse, SlidersHorizontal, VideoCamera, Wrench, FlowArrow,
 } from "@phosphor-icons/react";
 import { api } from "./api/client";
 import { RealtimeClient } from "./api/ws";
 import { DashboardPage } from "./dashboard/Page";
 import { MaintenancePage } from "./maintenance/Page";
+import { OperationsPage } from "./operations/Page";
 import { SettingsPage } from "./settings/Page";
 import { SetupPage } from "./setup/Wizard";
 import { SourcePage } from "./source/Page";
 import { StatisticsPage } from "./statistics/Page";
 import type { Status } from "./types/api";
 
-export type AppTab = "dashboard" | "source" | "statistics" | "maintenance" | "setup" | "settings";
+export type AppTab = "dashboard" | "source" | "statistics" | "operations" | "maintenance" | "setup" | "settings";
 
 const CARE_NAV: { id: AppTab; label: string; icon: typeof House }[] = [
   { id: "dashboard", label: "照護總覽", icon: House },
@@ -21,6 +22,7 @@ const CARE_NAV: { id: AppTab; label: string; icon: typeof House }[] = [
 ];
 
 const ADMIN_NAV: { id: AppTab; label: string; icon: typeof House }[] = [
+  { id: "operations", label: "運作監看", icon: FlowArrow },
   { id: "maintenance", label: "系統維護", icon: GearSix },
   { id: "setup", label: "初始設定", icon: Wrench },
   { id: "settings", label: "系統設定", icon: SlidersHorizontal },
@@ -81,6 +83,7 @@ export default function App() {
         {tab === "dashboard" && <DashboardPage status={status} realtime={realtime} onNavigate={setTab} />}
         {tab === "source" && <SourcePage status={status} />}
         {tab === "statistics" && <StatisticsPage />}
+        {tab === "operations" && <OperationsPage status={status} realtime={realtime} />}
         {tab === "maintenance" && <MaintenancePage status={status} realtime={realtime} />}
         {tab === "setup" && <SetupPage onDone={() => setTab("dashboard")} />}
         {tab === "settings" && <SettingsPage />}

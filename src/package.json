@@ -12,6 +12,10 @@
   "scripts": {
     "start": "bun run scripts/start.ts",
     "dev": "bun run scripts/start.ts --dev",
+    "debug": "bun run scripts/start.ts --debug --stubs",
+    "debug:live": "bun run scripts/start.ts --debug",
+    "debug:seed": "bun run scripts/debug.ts seed",
+    "debug:stream": "bun run scripts/debug.ts stream",
     "migrate": "bun run scripts/migrate.ts",
     "verify": "bun run scripts/verify.ts",
     "build": "cd frontend && bun run build",

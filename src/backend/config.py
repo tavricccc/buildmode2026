@@ -67,13 +67,15 @@ class ProviderConfig:
 
 @dataclass
 class AppConfig:
+    runtime_mode: str = field(default_factory=lambda: _env("CARE_MODE", "production").lower())
     host: str = field(default_factory=lambda: _env("CARE_HOST", "127.0.0.1"))
     # Keep the care API separate from the local vLLM OpenAI endpoint.
     port: int = field(default_factory=lambda: _env_int("CARE_PORT", 8200))
-    data_dir: Path = field(default_factory=lambda: Path(_env("CARE_DATA_DIR", str(REPO_ROOT / "data"))))
+    data_dir: Path | None = None
     db_path: Path = field(init=False)
     clips_dir: Path = field(init=False)
     secret_path: Path = field(init=False)
+    replay_dir: Path = field(default_factory=lambda: REPO_ROOT / "data" / "replays")
     subject_id: str = field(default_factory=lambda: _env("CARE_SUBJECT_ID", "subject-1"))
     observer_interval_sec: int = field(
         default_factory=lambda: _env_int("CARE_OBSERVER_INTERVAL_SEC", 900)
@@ -83,8 +85,17 @@ class AppConfig:
     static_dir: Path = field(default_factory=lambda: REPO_ROOT / "frontend" / "dist")
 
     def __post_init__(self) -> None:
+        if self.runtime_mode not in {"production", "debug"}:
+            raise ValueError("CARE_MODE must be 'production' or 'debug'")
+        if self.data_dir is None:
+            if self.runtime_mode == "debug":
+                default_dir = Path(_env("CARE_DEBUG_DATA_DIR", str(REPO_ROOT / "data" / "debug")))
+            else:
+                default_dir = Path(_env("CARE_DATA_DIR", str(REPO_ROOT / "data")))
+            self.data_dir = default_dir
         self.data_dir = Path(self.data_dir)
-        self.db_path = Path(_env("CARE_DB_PATH", str(self.data_dir / "care.sqlite3")))
+        db_env = "CARE_DEBUG_DB_PATH" if self.runtime_mode == "debug" else "CARE_DB_PATH"
+        self.db_path = Path(_env(db_env, str(self.data_dir / "care.sqlite3")))
         self.clips_dir = self.data_dir / "clips"
         self.secret_path = self.data_dir / "secrets.json"
 
@@ -94,6 +105,10 @@ class AppConfig:
 
     def secret_store(self) -> SecretStore:
         return SecretStore(self.secret_path)
+
+    @property
+    def debug(self) -> bool:
+        return self.runtime_mode == "debug"
 
 
 #: Which providers may occupy each slot. L2 and L3 stay independent by

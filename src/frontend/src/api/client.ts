@@ -1,5 +1,6 @@
 import type {
-  CareAction, CareEvent, CareReviewPayload, CascadeTestResult, EventDetail, PipelineRun,
+  ActivePipeline, CareAction, CareEvent, CareReviewPayload, CareSummary, CascadeTestResult,
+  DebugStatus, EventDetail, PipelineRun,
   ObserverRecord, ObserverSchedulerStatus, RunStats, SettingsPayload, SetupState,
   StatisticsPayload, Status,
 } from "../types/api";
@@ -29,6 +30,8 @@ const post = <T>(path: string, body?: unknown) =>
 
 export const api = {
   status: () => call<Status>("/api/status"),
+  careSummary: () => call<CareSummary>("/api/care/summary"),
+  activePipeline: () => call<ActivePipeline>("/api/pipeline/active?limit=160"),
   setupState: () => call<SetupState>("/api/setup/state"),
 
   runs: (limit = 60) => call<{ runs: PipelineRun[]; stats: RunStats }>(`/api/pipeline/runs?limit=${limit}`),
@@ -61,4 +64,12 @@ export const api = {
   runObserver: () => post<unknown>("/api/observer/run"),
   analyzeAll: (days: 1 | 3 | 7 | 30) => post<CareReviewPayload>("/api/observer/analyze-all", { days }),
   sourceSnapshotUrl: () => `/api/source/snapshot?t=${Date.now()}`,
+  debugStatus: () => call<DebugStatus>("/api/debug/scenarios"),
+  generateDebugHistory: (days: number, profile: string, seed: number) =>
+    post<Record<string, unknown>>("/api/debug/history/generate", { days, profile, seed }),
+  triggerDebugScenario: (scenario: string, mode: "contract" | "evaluation") =>
+    post<Record<string, unknown>>("/api/debug/scenarios/trigger", { scenario, mode }),
+  startDebugStream: (profile: string, seed: number, interval_sec: number) =>
+    post<Record<string, unknown>>("/api/debug/stream/start", { profile, seed, interval_sec }),
+  stopDebugStream: () => post<Record<string, unknown>>("/api/debug/stream/stop"),
 };

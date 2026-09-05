@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ArrowRight, Brain, Drop, Heartbeat, PersonSimpleWalk, ShieldCheck,
-  Sparkle, VideoCamera, Warning,
+  ArrowRight, ClipboardText, Drop, Heartbeat, PersonSimpleWalk, ShieldCheck,
+  VideoCamera, Warning,
 } from "@phosphor-icons/react";
 import type { AppTab } from "../App";
 import { api } from "../api/client";
 import type { RealtimeClient } from "../api/ws";
 import { Badge, Card, Empty, ErrorBanner, clock, errorText, riskTone } from "../components/ui";
 import type {
-  CareAction, CareEvent, CareReviewPayload, HealthSample, ObserverRecord,
+  CareAction, CareEvent, CareReviewPayload, CareSummary, HealthSample, ObserverRecord,
   StatisticsPayload, Status,
 } from "../types/api";
 
@@ -35,6 +35,11 @@ const eventStatus = (status: string) => ({
   suspect: "待確認", confirmed: "已確認", recovering: "恢復中", resolved: "已解除",
   completed: "已完成", dismissed: "已排除", idle: "無事件",
 }[status] ?? status);
+const policyLabel = (status: string) => ({ not_requested: "未要求通知", authorised: "已授權通知", suppressed: "通知已抑制", dashboard_only: "僅建立頁面提醒" }[status] ?? status);
+const deliveryLabel = (status: string) => ({ not_sent: "未發送", pending: "等待發送", sent: "已送達", acknowledged: "已確認", false_alarm: "已標記誤報", failed: "發送失敗" }[status] ?? status);
+const actionReason = (action: CareAction) => action.rule === "l3_advisory_not_authorised"
+  ? "AI 建議聯繫照護人員；目前僅顯示頁面提醒"
+  : action.rule === "fall_confirmed" ? "系統已確認跌倒事件" : action.reason;
 
 const observerTone = (record: ObserverRecord | null) =>
   record?.status === "anomaly" ? "bad"
@@ -70,6 +75,7 @@ export function DashboardPage({ status, realtime, onNavigate }: {
   const [actions, setActions] = useState<CareAction[]>([]);
   const [observer, setObserver] = useState<ObserverRecord | null>(null);
   const [review, setReview] = useState<CareReviewPayload | null>(null);
+  const [careSummary, setCareSummary] = useState<CareSummary | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reviewError, setReviewError] = useState<string | null>(null);
@@ -78,9 +84,9 @@ export function DashboardPage({ status, realtime, onNavigate }: {
   const refresh = useCallback(async () => {
     const results = await Promise.allSettled([
       api.statistics(days), api.hydration(), api.health(), api.events(100),
-      api.actions(40), api.observerStatus(),
+      api.actions(40), api.observerStatus(), api.careSummary(),
     ]);
-    const [statistics, hydrationData, healthData, eventData, actionData, observerData] = results;
+    const [statistics, hydrationData, healthData, eventData, actionData, observerData, careSummaryData] = results;
     if (statistics.status === "fulfilled") { setData(statistics.value); setError(null); }
     else setError(errorText(statistics.reason));
     if (hydrationData.status === "fulfilled") setHydration(hydrationData.value);
@@ -88,6 +94,7 @@ export function DashboardPage({ status, realtime, onNavigate }: {
     if (eventData.status === "fulfilled") setEvents(eventData.value.events);
     if (actionData.status === "fulfilled") setActions(actionData.value.actions);
     if (observerData.status === "fulfilled") setObserver(observerData.value.latest);
+    if (careSummaryData.status === "fulfilled") setCareSummary(careSummaryData.value);
   }, [days]);
 
   useEffect(() => {
@@ -107,10 +114,11 @@ export function DashboardPage({ status, realtime, onNavigate }: {
 
   const since = Date.now() - days * 86_400_000;
   const periodEvents = events.filter((event) => event.occurred_at_ms >= since);
-  const unsafe = periodEvents.some((event) => event.event_type === "fall" && ["suspect", "confirmed"].includes(event.status));
+  const unsafe = periodEvents.some((event) => event.event_type === "fall" && ["suspect", "confirmed", "recovering"].includes(event.status));
   const sourceStarved = status?.cascade.starved_since_ms !== null;
-  const stateLabel = sourceStarved ? "影像中斷" : unsafe ? "需要注意" : "目前穩定";
-  const stateTone = sourceStarved ? "warn" : unsafe ? "bad" : "ok";
+  const stateLabel = careSummary?.headline ?? (sourceStarved ? "影像中斷" : unsafe ? "需要注意" : "資料不足，暫時無法判讀");
+  const stateTone = careSummary?.urgency === "immediate" ? "bad"
+    : ["today", "watch", "unknown"].includes(careSummary?.urgency ?? "unknown") ? "warn" : "ok";
   const summaries = data?.summaries ?? [];
   const totals = summaries.reduce((sum, day) => ({
     hydration: sum.hydration + Number(day.hydration_ml || 0),
@@ -118,6 +126,7 @@ export function DashboardPage({ status, realtime, onNavigate }: {
     activity: sum.activity + Number(day.payload.activity_ratio || 0),
   }), { hydration: 0, falls: 0, activity: 0 });
   const activity = summaries.length ? Math.round((totals.activity / summaries.length) * 100) : 0;
+  const fallCount = Math.max(totals.falls, periodEvents.filter((event) => event.event_type === "fall").length);
   const currentPosture = observer?.metrics.current_posture ?? "未知";
   const confidence = Math.round((observer?.confidence ?? 0) * 100);
   const unsuppressedActions = actions.filter((action) => !action.suppressed).slice(0, 4);
@@ -150,16 +159,16 @@ export function DashboardPage({ status, realtime, onNavigate }: {
   return <div className="page-stack dashboard-page">
     <header className="care-hero">
       <div className="resident-title"><span className="eyebrow">住民照護總覽</span><h1>{status.subject_id}</h1><p>最後更新 {new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</p></div>
-      <div className={`care-state ${stateTone}`}><ShieldCheck size={30} weight="fill" /><div><span>目前狀態</span><b>{stateLabel}</b><small>{observer?.headline ?? "等待第一筆觀察資料"}</small></div></div>
-      <button className="source-quick" onClick={() => onNavigate("source")}><VideoCamera size={20} /><div><span>即時影像</span><b>{status.source.running ? "分析中" : "尚未啟動"}</b></div><ArrowRight size={16} /></button>
+      <div className={`care-state ${stateTone}`}><ShieldCheck size={30} weight="fill" /><div><span>目前狀態</span><b>{stateLabel}</b><small>{careSummary?.recommended_next_step ?? "等待第一筆觀察資料"}</small></div></div>
+      <button className="source-quick" onClick={() => onNavigate("source")}><VideoCamera size={20} /><div><span>即時影像</span><b>{status.source.lifecycle === "completed" ? "錄影播放完成" : status.source.running ? "分析中" : "尚未啟動"}</b></div><ArrowRight size={16} /></button>
     </header>
 
     <div className="dashboard-toolbar">
       <div><span className="toolbar-label">查看期間</span><div className="segmented compact period-switcher">
         {PERIODS.map((period) => <button key={period} aria-selected={days === period} onClick={() => setDays(period)}>{period}d</button>)}
       </div></div>
-      <button className="action primary l3-review-button" disabled={busy} onClick={() => void analyze()}>
-        <Sparkle size={18} weight="fill" />{busy ? "L3 分析中…" : "交給 L3 分析全部資料"}
+      <button className="action review-button" disabled={busy} onClick={() => void analyze()}>
+        <ClipboardText size={18} />{busy ? "正在更新評估…" : "更新照護評估"}
       </button>
     </div>
 
@@ -167,15 +176,22 @@ export function DashboardPage({ status, realtime, onNavigate }: {
     {error && <ErrorBanner>無法讀取照護趨勢：{error}</ErrorBanner>}
     {reviewError && <ErrorBanner>L3 分析未完成：{reviewError}</ErrorBanner>}
 
+    {careSummary && ["immediate", "today", "watch"].includes(careSummary.urgency) && <section className={`intervention-card ${careSummary.urgency}`} role="status">
+      <div><span className="eyebrow">介入建議</span><h2>{careSummary.headline}</h2><p>{careSummary.recommended_next_step}</p></div>
+      <div className="intervention-meta"><Badge tone={stateTone === "bad" ? "bad" : "warn"} dot>{careSummary.urgency === "immediate" ? "立即介入" : careSummary.urgency === "today" ? "今日處理" : "持續留意"}</Badge><span>信心 {Math.round(careSummary.confidence * 100)}%</span><span>Policy：{policyLabel(careSummary.policy_status)}</span><span>通知：{deliveryLabel(careSummary.delivery_status)}</span></div>
+      {careSummary.reasons.length > 0 && <ul>{careSummary.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>}
+      <small>AI 建議、Policy 授權與通知送達是三個不同狀態；此資訊不是醫療診斷。</small>
+    </section>}
+
     <section className="care-metrics" aria-label={`最近 ${days} 天照護摘要`}>
       <div className="care-metric hydration"><span className="metric-icon"><Drop size={22} weight="fill" /></span><div><small>{days === 1 ? "今日飲水" : `${days} 天飲水`}</small><b>{Math.round(days === 1 && hydration ? hydration.total_ml : totals.hydration)} <em>ml</em></b><span>{days === 1 && hydration ? `${Math.round(hydration.progress * 100)}% 日目標` : `${summaries.length} 天有彙總`}</span></div></div>
       <div className="care-metric activity"><span className="metric-icon"><PersonSimpleWalk size={22} weight="fill" /></span><div><small>平均活動比例</small><b>{activity || "—"}{activity ? <em>%</em> : null}</b><span>依可用影像觀察估算</span></div></div>
-      <div className={`care-metric falls ${totals.falls ? "attention" : ""}`}><span className="metric-icon"><Warning size={22} weight="fill" /></span><div><small>跌倒相關事件</small><b>{totals.falls}</b><span>{totals.falls ? "請查看事件與照護紀錄" : "所選期間未記錄"}</span></div></div>
+      <div className={`care-metric falls ${fallCount ? "attention" : ""}`}><span className="metric-icon"><Warning size={22} weight="fill" /></span><div><small>跌倒相關事件</small><b>{fallCount}</b><span>{fallCount ? "請查看事件與照護紀錄" : "所選期間未記錄"}</span></div></div>
       <div className="care-metric posture"><span className="metric-icon"><Heartbeat size={22} weight="fill" /></span><div><small>最近觀察姿勢</small><b>{currentPosture}</b><span>{confidence ? `判讀信心 ${confidence}%` : "尚無可用信心值"}</span></div></div>
     </section>
 
     {review && <section className="l3-review" aria-live="polite">
-      <div className="review-heading"><div className="ai-icon"><Brain size={24} weight="duotone" /></div><div><span className="eyebrow">L3 照護分析 · {review.days} 天</span><h2>{review.analysis.summary}</h2></div><Badge tone={riskTone(review.analysis.risk_level)} dot>{review.analysis.risk_level} risk</Badge></div>
+      <div className="review-heading"><div><span className="eyebrow">照護評估 · {review.days} 天</span><h2>{review.analysis.summary}</h2></div><Badge tone={riskTone(review.analysis.risk_level)} dot>{review.analysis.risk_level} risk</Badge></div>
       <div className="review-columns">
         <div><h3>建議</h3>{review.analysis.recommendations.length ? <ul>{review.analysis.recommendations.map((item) => <li key={item}>{item}</li>)}</ul> : <p>目前沒有額外建議。</p>}</div>
         <div><h3>需要留意</h3>{review.analysis.attention_items.length ? <ul>{review.analysis.attention_items.map((item) => <li key={item}>{item}</li>)}</ul> : <p>沒有從資料中發現新的警訊。</p>}</div>
@@ -196,7 +212,7 @@ export function DashboardPage({ status, realtime, onNavigate }: {
         </div>}
       </Card>
 
-      <Card title="AI 最近觀察" className="span-4 observer-card">
+      <Card title="長期趨勢觀察" className="span-4 observer-card">
         {!observer ? <Empty>Observer 尚未建立紀錄。</Empty> : <>
           <Badge tone={observerTone(observer)} dot>{observer.status}</Badge>
           <h3>{observer.headline}</h3><p>{observer.detail}</p>
@@ -218,7 +234,7 @@ export function DashboardPage({ status, realtime, onNavigate }: {
       <Card title="近期照護事件" className="span-4">
         {!periodEvents.length && !unsuppressedActions.length ? <Empty>所選期間沒有需要處理的事件。</Empty> : <div className="care-event-list">
           {periodEvents.slice(0, 5).map((event) => <div key={event.event_id}><span className={`event-dot ${event.event_type === "fall" ? "bad" : "ok"}`} /><div><b>{eventLabel(event)}</b><span>{eventStatus(event.status)} · 信心 {Math.round(event.confidence * 100)}%</span></div><time>{clock(event.occurred_at_ms)}</time></div>)}
-          {unsuppressedActions.slice(0, Math.max(0, 5 - periodEvents.length)).map((action) => <div key={action.action_id}><span className="event-dot warn" /><div><b>照護動作</b><span>{action.reason}</span></div><time>{clock(action.created_at)}</time></div>)}
+          {unsuppressedActions.slice(0, Math.max(0, 5 - periodEvents.length)).map((action) => <div key={action.action_id}><span className="event-dot warn" /><div><b>照護提醒</b><span>{actionReason(action)}</span></div><time>{clock(action.created_at)}</time></div>)}
         </div>}
       </Card>
     </div>

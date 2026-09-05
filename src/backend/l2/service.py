@@ -78,9 +78,16 @@ class L2Service:
         transcript: str | None = None,
         heartbeat: bool = False,
         purpose: str = "window_observation",
+        simulation_context: dict[str, Any] | None = None,
     ) -> L2Result:
         window_sec = clip.duration_sec if clip else 0.0
         prompt = observation_prompt(window_sec, event_state, transcript, heartbeat)
+        if simulation_context:
+            prompt += (
+                "\n\nDEBUG EVALUATION CONTEXT\n"
+                + self._redact(str(simulation_context))[:1200]
+                + "\nReturn the normal observation contract. The context describes evidence, not an expected answer."
+            )
         call = ModelCall(
             layer=Layer.l2_gemini.value,
             provider=self.provider,

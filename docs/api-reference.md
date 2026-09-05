@@ -189,3 +189,14 @@ Care Agent 後端提供標準 REST API 與 WebSocket 即時資料流（預設監
   - `event_state_change`：狀態機狀態躍遷（如跌倒由 `suspect` 轉為 `confirmed`）。
   - `hydration_update`：飲水週期累計更新。
   - `config_updated`：系統設定發生異動。
+
+---
+
+## 7. 下一階段 API（規劃中）
+
+以下端點尚未實作。詳細契約見 [長照端介入建議](caregiver-intervention-workflow.md)、[運作監看](operator-console.md) 與 [Debug Mode](debug-and-simulation.md)。
+
+- `GET /api/care/summary`：回傳合併事件、L3、Policy、通知、Observer 與來源健康度後的單一照護摘要。
+- `GET /api/pipeline/active`：回傳重新連線時仍在執行或等待的 Runs 與 steps。
+- WebSocket `pipeline.step`：推送每個分析步驟的等待、執行、略過、降級、成功與失敗狀態。
+- `/api/debug/*`：只在 Debug mode 註冊；Production 必須回傳 404。

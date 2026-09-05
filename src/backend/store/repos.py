@@ -214,6 +214,61 @@ class Repositories:
         stats["skip_ratio"] = round(stats.get("skipped_by_l1", 0) / windows, 4) if windows else 0.0
         return stats
 
+    # -- live operator trace ---------------------------------------------
+
+    def save_pipeline_step(self, *, run_id: str, step: str, status: str,
+                           summary: str, reason_codes: list[str] | None = None,
+                           input_data: dict[str, Any] | None = None,
+                           output_data: dict[str, Any] | None = None,
+                           mode: str = "live", event_id: str | None = None,
+                           step_id: str | None = None, started_at_ms: int | None = None,
+                           completed_at_ms: int | None = None) -> str:
+        identity = step_id or new_id("step")
+        started = started_at_ms or now_ms()
+        self.db.execute(
+            """INSERT INTO pipeline_steps
+               (step_id, run_id, event_id, step, status, summary, reason_codes_json,
+                input_json, output_json, mode, started_at_ms, completed_at_ms, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+               ON CONFLICT(step_id) DO UPDATE SET
+                 event_id=excluded.event_id, status=excluded.status,
+                 summary=excluded.summary, reason_codes_json=excluded.reason_codes_json,
+                 input_json=excluded.input_json, output_json=excluded.output_json,
+                 completed_at_ms=excluded.completed_at_ms""",
+            (identity, run_id, event_id, step, status, summary[:600],
+             _json(reason_codes or []), _json(input_data or {}), _json(output_data or {}),
+             mode, started, completed_at_ms, iso()),
+        )
+        return identity
+
+    def list_pipeline_steps(self, limit: int = 200, active_only: bool = False) -> list[dict[str, Any]]:
+        where = "WHERE status IN ('waiting','running')" if active_only else ""
+        rows = self.db.query(
+            f"SELECT * FROM pipeline_steps {where} ORDER BY started_at_ms DESC LIMIT ?",
+            (limit,),
+        )
+        out = []
+        for row in rows:
+            item = _row(row)
+            for source, target, fallback in (
+                ("reason_codes_json", "reason_codes", []),
+                ("input_json", "input", {}),
+                ("output_json", "output", {}),
+            ):
+                try:
+                    item[target] = json.loads(item.pop(source) or _json(fallback))
+                except json.JSONDecodeError:
+                    item[target] = fallback
+            out.append(item)
+        return out
+
+    def prune_pipeline_steps(self, keep: int = 5000) -> int:
+        return self.db.execute(
+            "DELETE FROM pipeline_steps WHERE step_id NOT IN "
+            "(SELECT step_id FROM pipeline_steps ORDER BY started_at_ms DESC LIMIT ?)",
+            (keep,),
+        )
+
     # -- events ----------------------------------------------------------
 
     def upsert_event(

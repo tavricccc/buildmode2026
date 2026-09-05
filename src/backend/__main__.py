@@ -21,9 +21,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--rtsp", default=None, help="RTSP URI to start immediately")
     parser.add_argument("--stubs", action="store_true",
                         help="force the offline stub backends even if keys are configured")
+    parser.add_argument("--debug", action="store_true",
+                        help="use the isolated debug runtime and simulation API")
     args = parser.parse_args(argv)
 
-    config = AppConfig()
+    config = AppConfig(runtime_mode="debug" if args.debug else "production")
     if args.host:
         config.host = args.host
     if args.port:
@@ -32,7 +34,7 @@ def main(argv: list[str] | None = None) -> int:
     ctx = AppContext(config, use_stubs=True if args.stubs else None)
     server = serve(ctx)
     print(f"[care-agent] http://{config.host}:{config.port}  "
-          f"config={ctx.policy.version}  db={config.db_path}", flush=True)
+          f"mode={config.runtime_mode}  config={ctx.policy.version}  db={config.db_path}", flush=True)
 
     if args.rtsp:
         ctx.start_source("rtsp", args.rtsp)
