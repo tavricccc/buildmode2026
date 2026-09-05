@@ -37,6 +37,10 @@ class VideoClip:
     size_bytes: int
     started_at_ms: int
     frame_count: int
+    #: Replay ground truth, mirroring ``FramePacket.annotation``. Present
+    #: only for fixture-driven clips; the stub L2 backend reads it so that
+    #: v5 04 gate 1 is deterministic. Real adapters ignore it.
+    annotation: dict[str, Any] | None = None
 
     def is_inline_eligible(self, limit_bytes: int) -> bool:
         """<=20MB goes inline; larger media needs the Files API (v5 01)."""
