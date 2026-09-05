@@ -313,12 +313,19 @@ class CareRequestHandler(BaseHTTPRequestHandler):
                 start_sec = max(0.0, float((query.get("start_sec") or ["0"])[0]))
             except (TypeError, ValueError):
                 start_sec = -1.0
+            try:
+                expected_bytes = max(0, int((query.get("file_size") or ["0"])[0]))
+            except (TypeError, ValueError):
+                expected_bytes = 0
             upload_id = f"upload-{uuid.uuid4().hex[:16]}"
             upload_dir = self.ctx.config.data_dir / "uploads"
             incoming_path = upload_dir / "incoming" / f"{upload_id}.bin"
             compressed_path = upload_dir / f"{upload_id}-480p.mp4"
             try:
-                upload = BrowserUploadSession(incoming_path, filename, start_sec)
+                upload = BrowserUploadSession(
+                    incoming_path, filename, start_sec,
+                    expected_bytes=expected_bytes or None,
+                )
             except (OSError, ValueError) as exc:
                 try:
                     sock.sendall(encode_frame(json.dumps({
@@ -352,6 +359,9 @@ class CareRequestHandler(BaseHTTPRequestHandler):
                             upload.mark_failed("upload_too_large")
                             break
                         upload.receive(payload)
+                        sock.sendall(encode_frame(json.dumps({
+                            "type": "media.stream.ack", "payload": upload.health(),
+                        }).encode("utf-8")))
                         if upload.chunks_received % 4 == 0:
                             sock.sendall(encode_frame(json.dumps({
                                 "type": "media.stream.progress", "payload": upload.health(),
@@ -368,6 +378,12 @@ class CareRequestHandler(BaseHTTPRequestHandler):
                             break
                         try:
                             upload.finish()
+                            if upload.expected_bytes is not None and upload.bytes_received != upload.expected_bytes:
+                                upload.mark_failed(
+                                    f"upload_incomplete: received {upload.bytes_received} bytes, "
+                                    f"expected {upload.expected_bytes}"
+                                )
+                                raise RuntimeError(upload.error or "upload_incomplete")
                             sock.sendall(encode_frame(json.dumps({
                                 "type": "media.stream.processing", "payload": upload.health(),
                             }).encode("utf-8")))

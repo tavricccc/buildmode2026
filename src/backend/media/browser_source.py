@@ -174,10 +174,12 @@ class BrowserMediaSession:
 class BrowserUploadSession:
     """Collect one browser upload before replaying it through the real source."""
 
-    def __init__(self, path: str | Path, filename: str, start_sec: float = 0.0) -> None:
+    def __init__(self, path: str | Path, filename: str, start_sec: float = 0.0,
+                 expected_bytes: int | None = None) -> None:
         self.path = Path(path)
         self.filename = filename
         self.start_sec = start_sec
+        self.expected_bytes = expected_bytes
         self.started_at_ms = now_ms()
         self.bytes_received = 0
         self.chunks_received = 0
@@ -230,6 +232,8 @@ class BrowserUploadSession:
             "state": self.state,
             "start_sec": self.start_sec,
             "bytes_received": self.bytes_received,
+            "expected_bytes": self.expected_bytes,
+            "upload_complete": self.expected_bytes is None or self.bytes_received == self.expected_bytes,
             "chunks_received": self.chunks_received,
             "compressed_path": Path(self.compressed_path).name if self.compressed_path else None,
             "compressed_bytes": self.compressed_bytes,

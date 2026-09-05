@@ -57,6 +57,7 @@ export function SourcePage({ status }: { status: Status | null }) {
   const reconnectTimerRef = useRef<number | null>(null);
   const reconnectAttemptRef = useRef(0);
   const intentionalCloseRef = useRef(false);
+  const uploadAckBytesRef = useRef(0);
 
   const source = status?.source;
   const running = source?.running ?? false;
@@ -117,6 +118,17 @@ export function SourcePage({ status }: { status: Status | null }) {
     streamRef.current = null;
     if (videoRef.current) videoRef.current.srcObject = null;
   };
+
+  const waitForUploadAck = (socket: WebSocket, minimumBytes: number) => new Promise<void>((resolve, reject) => {
+    const deadline = Date.now() + 30_000;
+    const poll = () => {
+      if (uploadAckBytesRef.current >= minimumBytes) { resolve(); return; }
+      if (socket.readyState !== WebSocket.OPEN) { reject(new Error("影片上傳連線已中斷")); return; }
+      if (Date.now() >= deadline) { reject(new Error("後端未確認收到完整影片分片")); return; }
+      window.setTimeout(poll, 50);
+    };
+    poll();
+  });
 
   const stopBrowserCamera = () => {
     intentionalCloseRef.current = true;
@@ -251,9 +263,10 @@ export function SourcePage({ status }: { status: Status | null }) {
     setBusy(true); setMessage(null); setError(null); setBrowserHealth(null); setSentChunks(0); setUploadProgress(0);
     intentionalCloseRef.current = false;
     reconnectAttemptRef.current = 0;
+    uploadAckBytesRef.current = 0;
     setBrowserState("connecting");
     const mediaType = file.type || "video/webm";
-    const socket = new WebSocket(`${mediaSocketUrl(mediaType, "browser-upload", "demo_upload")}&filename=${encodeURIComponent(file.name)}&start_sec=${encodeURIComponent(String(uploadStartSec))}`);
+    const socket = new WebSocket(`${mediaSocketUrl(mediaType, "browser-upload", "demo_upload")}&filename=${encodeURIComponent(file.name)}&file_size=${file.size}&start_sec=${encodeURIComponent(String(uploadStartSec))}`);
     socket.binaryType = "arraybuffer";
     socketRef.current = socket;
     socket.onopen = async () => {
@@ -265,9 +278,11 @@ export function SourcePage({ status }: { status: Status | null }) {
             await new Promise<void>((resolve) => window.setTimeout(resolve, 50));
             if (intentionalCloseRef.current || socket.readyState !== WebSocket.OPEN) throw new Error("影片上傳連線已中斷");
           }
-          socket.send(await file.slice(offset, Math.min(offset + chunkSize, file.size)).arrayBuffer());
+          const end = Math.min(offset + chunkSize, file.size);
+          socket.send(await file.slice(offset, end).arrayBuffer());
           setSentChunks((current) => current + 1);
-          setUploadProgress(Math.round((Math.min(offset + chunkSize, file.size) / file.size) * 100));
+          setUploadProgress(Math.round((end / file.size) * 100));
+          await waitForUploadAck(socket, end);
         }
         setBrowserState("streaming");
         setMessage("影片已上傳，後端正在壓成 480p，完成後會依影片內時長慢速送入相同分析管線…");
@@ -283,9 +298,12 @@ export function SourcePage({ status }: { status: Status | null }) {
       if (typeof event.data !== "string") return;
       try {
         const payload = JSON.parse(event.data) as { type?: string; payload?: MediaEventPayload };
+        if (payload.type === "media.stream.ack" && payload.payload && "bytes_received" in payload.payload) {
+          uploadAckBytesRef.current = Math.max(uploadAckBytesRef.current, payload.payload.bytes_received);
+        }
         if (payload.type === "media.stream.processing") {
           setBrowserState("processing");
-          setMessage("影片已壓成 480p，正在依影片內時長排隊分析；不會瞬間灌入請求。 ");
+          setMessage("影片正在壓成 480p，完成後會依影片內時長排隊分析；不會瞬間灌入請求。 ");
         }
         if ((payload.type === "media.stream.ready" || payload.type === "media.stream.progress") && payload.payload && "camera_id" in payload.payload) setBrowserHealth(payload.payload);
         if (payload.type === "media.stream.completed") {
@@ -294,7 +312,7 @@ export function SourcePage({ status }: { status: Status | null }) {
           releaseBrowserResources();
         }
         if (payload.type === "media.stream.failed") {
-          setError(`後端無法處理影片（${payload.payload?.error_code ?? "unknown"}）。`);
+          setError(`後端無法處理影片（${payload.payload?.error_code ?? payload.payload?.error ?? "unknown"}）。`);
           intentionalCloseRef.current = true; socket.close(); releaseBrowserResources(); setBrowserState("error"); setBusy(false);
         }
       } catch { setError("收到無法辨識的影片處理狀態。"); }

@@ -45,12 +45,13 @@ class TestVideoUpload(unittest.TestCase):
 
     def test_upload_session_persists_chunks_until_transcode(self) -> None:
         incoming = self.tmp / "incoming" / "upload.bin"
-        session = BrowserUploadSession(incoming, "測試影片.webm", start_sec=12)
+        session = BrowserUploadSession(incoming, "測試影片.webm", start_sec=12, expected_bytes=11)
         session.receive(b"first")
         session.receive(b"second")
         session.finish()
         self.assertEqual(session.health()["state"], "uploaded")
         self.assertEqual(session.health()["bytes_received"], 11)
+        self.assertTrue(session.health()["upload_complete"])
         self.assertEqual(incoming.read_bytes(), b"firstsecond")
         session.close()
         self.assertFalse(incoming.exists())
