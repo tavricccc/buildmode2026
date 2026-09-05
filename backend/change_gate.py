@@ -6,6 +6,28 @@ from io import BytesIO
 from typing import Any
 
 
+def observation_override_reasons(*, last_observation_mono: float | None, now_mono: float,
+                                 heartbeat_seconds: float, fall_event_open: bool,
+                                 hydration_session_open: bool) -> list[str]:
+    """Reasons an unchanged window must still reach the observation layer.
+
+    The change gate is an accelerator, not a filter. A person who has fallen
+    and then lies still stops producing pixel change exactly when continued
+    observation matters most, and the fall state machine needs a second
+    observation to leave `candidate`. Without these overrides the one scenario
+    the system exists for is the one it stays silent on.
+    """
+    reasons: list[str] = []
+    if heartbeat_seconds > 0 and (last_observation_mono is None
+                                  or (now_mono - last_observation_mono) >= heartbeat_seconds):
+        reasons.append("baseline_heartbeat")
+    if fall_event_open:
+        reasons.append("fall_event_open")
+    if hydration_session_open:
+        reasons.append("hydration_session_open")
+    return reasons
+
+
 def audio_level(audio_pcm: bytes | None) -> float | None:
     if not audio_pcm or len(audio_pcm) < 4:
         return None

@@ -10,7 +10,7 @@ from pydantic import ValidationError
 
 from backend.config import Settings
 from backend.agent import MainAgentPolicy, evaluate_change_gate
-from backend.change_gate import detect_frame_change
+from backend.change_gate import detect_frame_change, observation_override_reasons
 import backend.adapters as adapter_module
 from backend.adapters import VllmVisionAdapter
 from backend.db import Database
@@ -31,6 +31,42 @@ class CareContractsTest(unittest.TestCase):
 
     def tearDown(self):
         self.tmp.cleanup()
+
+    def test_motionless_window_is_still_observed_while_a_fall_is_open(self):
+        """A fall candidate must keep receiving windows after motion stops.
+
+        The gate sees no pixel change once the person is on the floor and
+        still; if that suppressed the observation the fall state machine would
+        never reach the second supporting observation it needs to confirm.
+        """
+        reasons = observation_override_reasons(
+            last_observation_mono=100.0, now_mono=105.0, heartbeat_seconds=15.0,
+            fall_event_open=True, hydration_session_open=False)
+        self.assertIn("fall_event_open", reasons)
+
+    def test_baseline_heartbeat_fires_when_nothing_changes(self):
+        reasons = observation_override_reasons(
+            last_observation_mono=100.0, now_mono=115.0, heartbeat_seconds=15.0,
+            fall_event_open=False, hydration_session_open=False)
+        self.assertEqual(reasons, ["baseline_heartbeat"])
+
+    def test_quiet_window_inside_the_heartbeat_is_not_forced(self):
+        reasons = observation_override_reasons(
+            last_observation_mono=100.0, now_mono=104.0, heartbeat_seconds=15.0,
+            fall_event_open=False, hydration_session_open=False)
+        self.assertEqual(reasons, [])
+
+    def test_first_window_is_always_observed(self):
+        reasons = observation_override_reasons(
+            last_observation_mono=None, now_mono=0.0, heartbeat_seconds=15.0,
+            fall_event_open=False, hydration_session_open=False)
+        self.assertEqual(reasons, ["baseline_heartbeat"])
+
+    def test_heartbeat_can_be_disabled_without_dropping_open_events(self):
+        reasons = observation_override_reasons(
+            last_observation_mono=None, now_mono=999.0, heartbeat_seconds=0.0,
+            fall_event_open=True, hydration_session_open=False)
+        self.assertEqual(reasons, ["fall_event_open"])
 
     def test_vision_schema_rejects_invalid_model_output(self):
         with self.assertRaises(ValidationError):

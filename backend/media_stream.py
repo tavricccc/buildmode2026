@@ -45,6 +45,7 @@ class StreamSession:
     observation_windows: int = 0
     vlm_buffer: deque[tuple[int, bytes]] = field(default_factory=deque)
     vlm_last_window_mono: float | None = None
+    last_observation_mono: float | None = None
     focus_request: dict[str, Any] | None = None
     focus_windows: int = 0
     detail_buffer: deque[tuple[int, bytes]] = field(default_factory=deque)

@@ -19,7 +19,7 @@ from fastapi.responses import JSONResponse
 
 from .agent import MainAgentPolicy, build_main_agent_context, build_main_agent_notes, evaluate_change_gate
 from .adapters import FrigateAdapter, MiniMaxAdapter, TelegramAdapter, VllmVisionAdapter
-from .change_gate import detect_frame_change
+from .change_gate import detect_frame_change, observation_override_reasons
 from .config import get_settings
 from .db import Database
 from .frigate_mqtt import FrigateMqttWorker
@@ -111,8 +111,22 @@ async def ensure_scene_context(session, image_bytes: tuple[bytes, ...], window: 
         return session.scene_context
 
 
+def session_observation_overrides(session) -> list[str]:
+    """Bind the pure gate-override policy to live session and store state."""
+    return observation_override_reasons(
+        last_observation_mono=session.last_observation_mono, now_mono=time.monotonic(),
+        heartbeat_seconds=settings.observation_heartbeat_seconds,
+        fall_event_open=bool((store.get_state("fall_state") or {}).get("candidate_event_id")),
+        hydration_session_open=bool((store.get_state("hydration_state") or {}).get("event_id")))
+
+
 async def handle_change_gate(session, image_bytes: tuple[bytes, ...], window: dict[str, Any], audio_pcm: bytes | None) -> None:
-    """Run the cheap L0 gate and only promote changed windows to L1 VLM."""
+    """Run the cheap L0 gate, then decide whether the window reaches L1.
+
+    A changed window always goes through. An unchanged one still goes through
+    on the baseline heartbeat or while a fall/hydration event is open, so the
+    gate stays an accelerator rather than a filter.
+    """
     gate = detect_frame_change(image_bytes, threshold=settings.change_gate_threshold,
                                 audio_pcm=audio_pcm, previous_audio_level=session.last_gate_audio_level,
                                 audio_delta_threshold=settings.change_gate_audio_delta_threshold,
@@ -120,7 +134,9 @@ async def handle_change_gate(session, image_bytes: tuple[bytes, ...], window: di
                                 strong_score_multiplier=settings.change_gate_strong_score_multiplier)
     session.last_gate_audio_level = gate.get("audio_level")
     saved = store.record_change_gate(stream_id=session.id, window=window, gate=gate)
+    forced_reasons = [] if gate["changed"] else session_observation_overrides(session)
     window = {**window, "change_gate_triggered": bool(gate["changed"]), "change_gate": saved,
+              "observation_forced": bool(forced_reasons), "observation_force_reasons": forced_reasons,
               "change_summary": gate.get("change_summary", ""), "change_reasons": gate.get("change_reasons", [])}
     if gate["changed"]:
         session.gate_changed_windows += 1
@@ -129,10 +145,12 @@ async def handle_change_gate(session, image_bytes: tuple[bytes, ...], window: di
     await broadcaster.send({"type": "change_gate.completed", "correlation_id": window["window_id"],
                             "payload": {"stream_id": session.id, "window": window, "gate": saved,
                                         "changed": bool(gate["changed"]), "change_summary": gate.get("change_summary", ""),
+                                        "observation_forced": bool(forced_reasons), "observation_force_reasons": forced_reasons,
                                         "method": gate.get("method", "local_pixel_delta")}})
-    if not gate["changed"]:
+    if not gate["changed"] and not forced_reasons:
         return
 
+    session.last_observation_mono = time.monotonic()
     session.observation_windows += 1
     session.vlm_windows += 1
     session.vlm_window_frames = len(image_bytes)

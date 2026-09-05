@@ -48,6 +48,7 @@ class Settings:
     vllm_max_frame_width: int = field(default_factory=lambda: int(os.getenv("VLLM_MAX_FRAME_WIDTH", "1280")))
     vllm_max_concurrency: int = field(default_factory=lambda: max(1, int(os.getenv("VLLM_MAX_CONCURRENCY", "2"))))
     vllm_max_pending_windows: int = field(default_factory=lambda: max(1, int(os.getenv("VLLM_MAX_PENDING_WINDOWS", "8"))))
+    observation_heartbeat_seconds: float = field(default_factory=lambda: max(0.0, float(os.getenv("OBSERVATION_HEARTBEAT_SECONDS", "15"))))
     change_gate_threshold: float = field(default_factory=lambda: max(0.005, min(0.5, float(os.getenv("CHANGE_GATE_THRESHOLD", "0.06")))))
     change_gate_audio_delta_threshold: float = field(default_factory=lambda: max(0.005, min(0.5, float(os.getenv("CHANGE_GATE_AUDIO_DELTA_THRESHOLD", "0.06")))))
     change_gate_min_changed_pairs: int = field(default_factory=lambda: max(1, int(os.getenv("CHANGE_GATE_MIN_CHANGED_PAIRS", "2"))))
