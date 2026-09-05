@@ -8,7 +8,8 @@ load-bearing and each one is here rather than in the caller:
 (``frames_to_enter``, default 2) and leaving it is deliberately expensive
 (``frames_to_exit``, default 4). The asymmetry is the safety margin: the
 cost of a false *present* is one extra Gemini call, the cost of a false
-*absent* is a missed fall.
+*absent* is a missed fall. For the same reason the gate starts in the
+present state, so a cold start cannot skip a window on its first reading.
 
 *Staleness.*  A reading older than ``stale_after_ms`` stops being an
 answer. It becomes ``stale``, which does not permit a skip.
@@ -32,7 +33,12 @@ class PersonGate:
     def __init__(self, policy: L1Policy) -> None:
         self.policy = policy
         self._last: PersonGateReading | None = None
-        self._state: bool = False
+        # Cold start assumes someone *is* present. With no evidence either
+        # way, "absent" is the unsafe default: it would let the very first
+        # healthy reading authorise a skip and bypass the exit hysteresis
+        # entirely. Starting present means the room has to be shown empty
+        # frames_to_exit times before any window is skipped.
+        self._state: bool = True
         self._streak_present = 0
         self._streak_absent = 0
         self._flips = 0
@@ -162,6 +168,6 @@ class PersonGate:
 
     def reset(self) -> None:
         self._last = None
-        self._state = False
+        self._state = True
         self._streak_present = 0
         self._streak_absent = 0

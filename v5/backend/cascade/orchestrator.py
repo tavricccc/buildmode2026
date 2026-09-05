@@ -690,7 +690,9 @@ class Cascade:
         run.l3_call_id = result.call.call_id
         run.l3_model = result.call.model
         run.l3_latency_ms = result.call.latency_ms
-        run.l3_error = result.call.error_message if not result.ok else None
+        run.l3_error = (
+            f"{result.call.error_code}: {result.call.error_message}" if not result.ok else None
+        )
         self.repos.save_model_call(result.call)
 
         if result.ok:

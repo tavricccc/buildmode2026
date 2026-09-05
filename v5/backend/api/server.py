@@ -49,6 +49,18 @@ class CareRequestHandler(BaseHTTPRequestHandler):
     def ctx(self) -> Any:
         return self.server.ctx  # type: ignore[attr-defined]
 
+    def finish(self) -> None:
+        # ThreadingHTTPServer runs one thread per connection and Database
+        # keeps a connection per thread, so without this every client
+        # connection would leak a SQLite handle for the process's lifetime.
+        try:
+            super().finish()
+        finally:
+            try:
+                self.server.ctx.db.close()  # type: ignore[attr-defined]
+            except Exception:  # noqa: BLE001
+                pass
+
     def log_message(self, fmt: str, *args: Any) -> None:
         # The default logger writes to stderr on every request, which buries
         # the pipeline's own logs. Errors still surface via log_error.
