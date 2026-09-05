@@ -29,7 +29,16 @@ Frigate、MQTT 與 RTSP adapter 仍保留，等需要時再接回；它們不是
 
 ## 文件入口
 
-請先讀 [docs/README.md](docs/README.md)，再讀 [SPEC.md](SPEC.md)。完整執行契約與部署驗收在 [docs-implementation-v2/README.md](docs-implementation-v2/README.md)。
+**現行規格書是 [docs-implementation-v4](docs-implementation-v4/README.md)。** 規格衝突時依序採用 v4 → v3 → v2 → `docs/`。
+
+| 目錄 | 角色 |
+|---|---|
+| [`docs-implementation-v4/`](docs-implementation-v4/README.md) | **現行執行契約**。硬體中立、cloud-only P0、模型能力槽位與 provider 限制 |
+| [`docs-implementation-v3/`](docs-implementation-v3/README.md) | 前一版,綁定特定模型與 Apple Silicon,已由 v4 取代 |
+| [`docs-implementation-v2/`](docs-implementation-v2/README.md) | Frigate 時期的執行契約,保留供追溯 |
+| [`docs/`](docs/README.md) | 產品與架構背景,非執行契約 |
+
+實際 provider 能力與已知限制見 [14 · Provider 能力與限制](docs-implementation-v4/14_PROVIDER_CONSTRAINTS.md);交付階段 P0/P1/P2 見 [00 · 產品範圍與完成定義](docs-implementation-v4/00_SCOPE_AND_DEFINITION_OF_DONE.md)。
 
 1. [執行摘要](docs/00_EXECUTIVE_OVERVIEW.md)
 2. [系統架構](docs/01_SYSTEM_ARCHITECTURE.md)
