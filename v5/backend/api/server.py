@@ -263,3 +263,14 @@ def serve(ctx: Any) -> CareHTTPServer:
     thread = threading.Thread(target=server.serve_forever, name="http", daemon=True)
     thread.start()
     return server
+
+
+def stop(server: CareHTTPServer) -> None:
+    """Stop serving *and* release the listening socket.
+
+    ``shutdown()`` alone only breaks the serve_forever loop; the bound
+    socket stays open, which leaks a descriptor and makes an immediate
+    restart fail with EADDRINUSE.
+    """
+    server.shutdown()
+    server.server_close()

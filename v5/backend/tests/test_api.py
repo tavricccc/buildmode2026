@@ -18,7 +18,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from ..api.server import serve
+from ..api.server import serve, stop
 from ..api.ws import accept_key, encode_frame
 from ..app import AppContext
 from ..config import AppConfig
@@ -52,7 +52,7 @@ class ApiTestCase(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        cls.server.shutdown()
+        stop(cls.server)
         cls.ctx.shutdown()
         shutil.rmtree(cls.tmp, ignore_errors=True)
         os.environ.pop("CARE_DATA_DIR", None)
@@ -66,7 +66,8 @@ class ApiTestCase(unittest.TestCase):
             with urllib.request.urlopen(request, timeout=20) as response:
                 return response.status, json.loads(response.read().decode())
         except urllib.error.HTTPError as exc:
-            return exc.code, json.loads(exc.read().decode())
+            with exc:
+                return exc.code, json.loads(exc.read().decode())
 
 
 class TestReadEndpoints(ApiTestCase):
@@ -104,6 +105,7 @@ class TestReadEndpoints(ApiTestCase):
 
     def test_non_api_paths_fall_back_to_the_dashboard_page(self):
         with urllib.request.urlopen(self.base + "/dashboard", timeout=10) as response:
+            response.read()
             self.assertEqual(response.status, 200)
             self.assertIn("text/html", response.headers["Content-Type"])
 
@@ -181,12 +183,14 @@ class TestSettings(ApiTestCase):
         request.add_header("Content-Type", "application/json")
         with self.assertRaises(urllib.error.HTTPError) as caught:
             urllib.request.urlopen(request, timeout=10)
-        self.assertEqual(caught.exception.code, 400)
+        with caught.exception:
+            self.assertEqual(caught.exception.code, 400)
 
 
 class TestWebSocket(ApiTestCase):
     def test_handshake_and_push(self):
         sock = socket.create_connection(("127.0.0.1", self.ctx.config.port), timeout=15)
+        self.addCleanup(sock.close)
         key = base64.b64encode(os.urandom(16)).decode()
         sock.sendall(
             f"GET /ws HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\n"
@@ -222,7 +226,6 @@ class TestWebSocket(ApiTestCase):
         message = json.loads(recv_exact(length))
         self.assertIn("topic", message)
         self.assertIn("seq", message)
-        sock.close()
 
     def test_a_plain_get_on_ws_is_rejected(self):
         status, payload = self.call("GET", "/ws")

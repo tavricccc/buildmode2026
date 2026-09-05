@@ -7,7 +7,7 @@ import signal
 import sys
 import threading
 
-from .api.server import serve
+from .api.server import serve, stop
 from .app import AppContext
 from .config import AppConfig
 
@@ -54,7 +54,7 @@ def main(argv: list[str] | None = None) -> int:
             stopping.wait(0.5)
     finally:
         print("[care-agent-v5] shutting down", flush=True)
-        server.shutdown()
+        stop(server)
         ctx.shutdown()
     return 0
 

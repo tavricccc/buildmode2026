@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ..domain.enums import (
+    ActionKind,
     EscalationTrigger,
     EventStatus,
     EventType,
@@ -118,6 +119,7 @@ class Cascade:
         subject_id: str = "subject-1",
         broadcast: Callable[[str, dict[str, Any]], None] | None = None,
         telegram_configured: bool = False,
+        notifier: Any = None,
     ) -> None:
         self.policy = policy
         self.repos = repos
@@ -130,6 +132,9 @@ class Cascade:
         self.subject_id = subject_id
         self.broadcast = broadcast or (lambda topic, payload: None)
         self.telegram_configured = telegram_configured
+        #: Set only when a bot token *and* an allow-listed chat exist. The
+        #: Policy Gateway decides whether to notify; this only delivers.
+        self.notifier = notifier
 
         self.policy_gateway = PolicyGateway(policy.notification)
         self.l2_queue = LayerQueue("l2", on_drop=self._on_drop)
@@ -731,7 +736,25 @@ class Cascade:
             self.repos.save_action(decision, run.run_id)
             if decision.kind.value != "log_only":
                 self.broadcast("action.created", decision.to_dict())
+            self._deliver(decision, request.event_id)
         return decisions
+
+    def _deliver(self, decision: PolicyDecision, event_id: str) -> None:
+        """Hand an authorised decision to a channel. Delivery cannot fail loudly.
+
+        A transport problem must not roll back the event or the action row:
+        the decision was made and is recorded either way, and the delivery
+        row carries whether it actually reached anyone.
+        """
+        if self.notifier is None or decision.suppressed:
+            return
+        if decision.kind is not ActionKind.notify_telegram:
+            return
+        try:
+            event = self.repos.get_event(event_id) if event_id else None
+            self.notifier.dispatch(decision, event)
+        except Exception as exc:  # noqa: BLE001
+            self.repos.log("error", "cascade", f"notification dispatch failed: {exc}")
 
     # -- persistence / introspection --------------------------------------
 
@@ -765,4 +788,9 @@ class Cascade:
                 "today": self._escalations_today,
             },
             "events": self._tracked_snapshot(),
+            "notifier": {
+                "channel": "telegram",
+                "configured": self.notifier is not None and self.notifier.configured,
+                "chats": len(self.notifier.chat_ids) if self.notifier is not None else 0,
+            },
         }

@@ -31,6 +31,7 @@ from .l3.stub import StubL3Backend
 from .media.frames import FrameWindow
 from .media.replay_source import ReplaySource, ScriptedSource
 from .media.rtsp_source import RtspSource
+from .notify.telegram import TelegramNotifier
 from .store import Database, Repositories, migrate
 
 
@@ -59,7 +60,10 @@ class AppContext:
         self.gate = PersonGate(self.policy.l1)
         self.l2 = self._build_l2()
         self.l3 = self._build_l3()
+        self.notifier = self._build_notifier()
         self.cascade = self._build_cascade()
+        if self.notifier is not None:
+            self.notifier.start_polling()
 
     # -- configuration ---------------------------------------------------
 
@@ -142,6 +146,19 @@ class AppContext:
             redact=self.secrets.redact,
         )
 
+    def _build_notifier(self) -> TelegramNotifier | None:
+        """Only a real token *and* an allow-listed chat make this live.
+
+        A token with no configured recipient is not "almost configured" —
+        there is nowhere to send, so the Policy Gateway must keep treating
+        notification as unavailable and downgrading to a dashboard alert.
+        """
+        token = self.secrets.get("TELEGRAM_BOT_TOKEN")
+        chats = self.policy.notification.telegram_chat_ids
+        if not token or not chats:
+            return None
+        return TelegramNotifier(token, chats, self.repos, redact=self.secrets.redact)
+
     def _build_cascade(self) -> Cascade:
         return Cascade(
             policy=self.policy,
@@ -154,18 +171,24 @@ class AppContext:
             clips_dir=self.config.clips_dir,
             subject_id=self.config.subject_id,
             broadcast=self.broadcaster.publish,
-            telegram_configured=self.secrets.configured("TELEGRAM_BOT_TOKEN"),
+            telegram_configured=self.notifier is not None and self.notifier.configured,
+            notifier=self.notifier,
         )
 
     def rebuild(self, reason: str = "manual") -> None:
         """Rebuild the layers against the current policy and secrets."""
         was_running = bool(self.cascade._threads)
         self.cascade.stop()
+        if self.notifier is not None:
+            self.notifier.stop_polling()
         self.detector = self._build_detector()
         self.gate = PersonGate(self.policy.l1)
         self.l2 = self._build_l2()
         self.l3 = self._build_l3()
+        self.notifier = self._build_notifier()
         self.cascade = self._build_cascade()
+        if self.notifier is not None:
+            self.notifier.start_polling()
         if was_running:
             self.cascade.start()
         self.repos.log("info", "app", f"layers rebuilt ({reason})",
@@ -204,6 +227,8 @@ class AppContext:
 
     def shutdown(self) -> None:
         self.stop_source()
+        if self.notifier is not None:
+            self.notifier.stop_polling()
         self.cascade.stop()
         self.db.close()
 

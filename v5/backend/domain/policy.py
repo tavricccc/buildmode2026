@@ -79,6 +79,9 @@ class EscalationPolicy:
 @dataclass(frozen=True)
 class NotificationPolicy:
     telegram_enabled: bool = False
+    #: Chat ids allowed to receive alerts and to answer them. A model can
+    #: never add to this list; only Settings can (v5 02 §Telegram).
+    telegram_chat_ids: tuple[str, ...] = ()
     #: only these deterministic conditions may notify
     notify_on_fall_confirmed: bool = True
     notify_on_no_recovery: bool = True
@@ -125,6 +128,8 @@ class CarePolicy:
             allowed = {k: v for k, v in raw.items() if k in klass.__dataclass_fields__}
             if name == "escalation" and "force_on_states" in allowed:
                 allowed["force_on_states"] = tuple(allowed["force_on_states"])
+            if name == "notification" and "telegram_chat_ids" in allowed:
+                allowed["telegram_chat_ids"] = tuple(str(c) for c in allowed["telegram_chat_ids"])
             kwargs[name] = klass(**allowed)
         return cls(**kwargs)
 

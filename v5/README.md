@@ -1,0 +1,196 @@
+# Care Agent v5
+
+An eldercare monitoring pipeline that watches a single resident's home for
+falls and hydration, and spends as little as possible doing it.
+
+The specification of record is [`../docs-implementation-v5/`](../docs-implementation-v5/README.md).
+This directory is the implementation.
+
+## The idea
+
+v4 abstracted every model behind one OpenAI-compatible serving runtime.
+That abstraction cost more than it bought: it forced Gemini into a shape
+it does not speak, and it meant every window paid for the most expensive
+model available.
+
+v5 replaces it with three fixed layers, each doing the cheapest thing that
+is sufficient:
+
+```
+RTSP / Replay
+      │
+      ▼
+┌─────────────────────────────────────────────────────────────┐
+│ L1 · local person gate            cost: ~0                  │
+│ "is a person in frame?" — and nothing else                  │
+└─────────────────────────────────────────────────────────────┘
+      │ no person → skip, but keep a sparse safety heartbeat
+      │ person, or L1 unhealthy, or a fall being tracked
+      ▼
+┌─────────────────────────────────────────────────────────────┐
+│ L2 · Gemini 3.5 Flash Lite        cost: per window          │
+│ structured observation + an explicit escalation decision    │
+└─────────────────────────────────────────────────────────────┘
+      │
+      ▼  deterministic state machines
+      │  fall:      idle → suspect → confirmed → recovering → resolved
+      │  hydration: idle → suspect → confirmed → active → completed
+      │
+      │ escalation.required, or a high-risk state
+      ▼
+┌─────────────────────────────────────────────────────────────┐
+│ L3 · MiniMax M3                   cost: per escalation      │
+│ sees the clip itself, may contradict L2, recommends only    │
+└─────────────────────────────────────────────────────────────┘
+      │
+      ▼
+┌─────────────────────────────────────────────────────────────┐
+│ Deterministic Policy Gateway                                │
+│ the only place an action is authorised — no model reaches   │
+│ a threshold, a channel or a recipient                       │
+└─────────────────────────────────────────────────────────────┘
+      │
+      ▼   SQLite → WebSocket → Dashboard / Telegram
+```
+
+## Three rules the code is built to make unbreakable
+
+**A broken detector is not an empty room.** `L1Decision` is four-valued —
+`person_present`, `no_person`, `stale`, `unavailable` — and only a fresh,
+healthy `no_person` may authorise a skip. Staleness, an unavailable
+detector, a degraded one, and a cold start all fail open toward spending a
+model call. `L1Decision.permits_skip()` is the single predicate, and there
+is a test asserting it returns `True` for exactly one member of the enum.
+
+**A model may argue; only policy acts.** `DeeperAnalysis` has no
+recipient, no channel and no threshold field — not as a convention, but
+because those keys do not exist in the contract. When L3 recommends
+contacting a caregiver and the operator has not enabled
+`notify_on_l3_high_risk`, the recommendation surfaces as a dashboard alert
+with the rule name `l3_advisory_not_authorised`. It is downgraded, and the
+downgrade is recorded; it is never silently dropped.
+
+**Every window is reconstructible.** One `pipeline_runs` row per window —
+including the skipped ones — carries the L1 decision, why L2 was called or
+skipped, whether it escalated and why, whether L3 ran, was degraded to
+text-only or failed, the latencies, the model ids, the config version and
+the evidence reference. Click an event in the Dashboard and you get that
+path back, sourced entirely from the audit tables.
+
+## Quick start
+
+Requirements: **Python 3.11+**, **bun**, **ffmpeg**. No pip install, no
+virtualenv, no model download — the backend imports only the Python
+standard library, which is what lets a fresh clone reach the Setup UI on
+Windows/WSL, macOS or Linux with nothing else installed.
+
+```bash
+cd v5
+bun install
+bun run migrate          # create data/care.sqlite3
+bun start                # http://127.0.0.1:8000
+```
+
+With no API keys configured, both model slots fall back to offline stubs
+that reproduce the providers' *contracts* — so schema validation, the
+repair path, the state machines, escalation and the audit trail are all
+exercised for real. Open **Setup**, run a scenario, and watch the cascade:
+
+```bash
+bun start -- --source fall     # or: empty_room, hydration, l1_false_negative
+```
+
+Then configure real providers in **Settings**. L2 and L3 are configured
+independently, by design.
+
+```bash
+bun run verify           # compile check + 122 tests + frontend typecheck
+bun run probe:gemini     # measure what this Gemini deployment can do
+bun run probe:minimax    # measure what this MiniMax deployment can do
+```
+
+## Layout
+
+```
+backend/
+  domain/        contracts and thresholds — no I/O, no provider knowledge
+  media/         ring buffer, RTSP/replay sources, the only ffmpeg caller
+  l1/            person detectors (stub · motion · YOLO11n) + the gate
+  l2/            Gemini native REST client, prompt, service, offline stub
+  l3/            MiniMax OpenAI-compatible client, prompt, service, stub
+  cascade/       the scheduler, the bounded queues, the orchestrator
+  state_machines/ pure fall and hydration transitions
+  policy/        the Policy Gateway
+  store/         SQLite schema, migrations, repositories
+  api/           REST routes, the HTTP server, the RFC 6455 upgrade
+  notify/        Telegram delivery and acknowledgement
+  observer/      daily rollups and baseline comparison
+  tests/         122 tests, including v5 04's required-scenario list
+frontend/        React + TypeScript Dashboard, Setup and Settings
+scripts/         bun orchestration and the capability probes
+data/replays/    annotated scenarios — no camera or video file needed
+docs/            measured provider capabilities
+```
+
+## Choosing an L1 detector
+
+| id | Install | Honest limitation |
+|---|---|---|
+| `stub` | none | Reads replay ground truth. Fixtures and tests only. |
+| `motion` | none | FFmpeg frame differencing. **Cannot see a motionless person.** |
+| `yolo11n` | `onnxruntime` + weights | The real one. Downloaded from Setup, never at startup. |
+
+The motion detector's weakness is exactly the case that matters, so the
+system is built to survive it structurally rather than to pretend
+otherwise: leaving "present" takes twice as many readings as entering it,
+an empty room still gets a sparse heartbeat, and a tracked fall bypasses
+L1 completely.
+
+## What is verified, and how
+
+`bun run verify` runs 122 tests. The scenario classes in
+`backend/tests/test_cascade.py` map one-to-one onto v5 04's 必測情境 list,
+and run the real cascade against the real SQLite schema with only the
+model backends stubbed:
+
+| Scenario | Asserted |
+|---|---|
+| Empty room | Most windows skipped; the sparse heartbeat still calls L2 |
+| L1 crash | Fails open; the fall is still caught while the detector is down |
+| Fall suspect | Forced follow-ups bypass L1; hydration deliberately does not |
+| Escalation | L3 receives frames **and** the structured reading |
+| MiniMax timeout | Events, SQLite and deterministic policy keep working |
+| Gemini timeout | Event state is **not** advanced — an unread window is not a safe one |
+| Replay re-run | Hydration is not double-counted; dedup keys stay unique |
+| Secret scan | A canary key never appears in `/api/status` or `/api/settings` |
+| Config rollback | A new version is created and can be rolled back |
+
+Live measurements against a real MiniMax M3 deployment — including the
+token-delta evidence that the frames actually reach the model, and a run
+where the model correctly contradicted its upstream layer — are in
+[`docs/MEASURED_CAPABILITIES.md`](docs/MEASURED_CAPABILITIES.md).
+
+## Secrets
+
+API keys, the RTSP password and the Telegram token live in the backend
+secret store (`data/secrets.json`, 0600) or the process environment. They
+are never returned by any endpoint: `SecretStore.describe()` reports
+`configured` / `source` / `length` and nothing else, and `redact()` runs
+over every string bound for a log, an error response or a SQLite row —
+because providers echo request context into their error bodies, which is a
+realistic way for a key to end up in a database.
+
+## Status
+
+Implemented and verified: the full L1 → L2 → L3 → Policy cascade, both
+state machines, the SQLite schema with `pipeline_runs`, the REST API and
+WebSocket push, the Dashboard with the three-layer panel and the cascade
+trace, Setup and Settings with versioning and rollback, Telegram delivery
+with opaque single-use acknowledgement tokens, the daily observer, RTSP
+and replay ingest, and both capability probes.
+
+Known gaps: the Gemini probe has not been run against a real key (see
+`docs/MEASURED_CAPABILITIES.md`); the audio/ASR path is specified and has
+its storage and retention in place, but no ASR engine is wired in; the
+YOLO11n detector needs `onnxruntime` and weights that Setup does not yet
+fetch automatically.
