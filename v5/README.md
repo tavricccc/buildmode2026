@@ -188,10 +188,17 @@ model backends stubbed:
 | Secret scan | A canary key never appears in `/api/status` or `/api/settings` |
 | Config rollback | A new version is created and can be rolled back |
 
-Live measurements against a real MiniMax M3 deployment — including the
-token-delta evidence that the frames actually reach the model, and a run
-where the model correctly contradicted its upstream layer — are in
-[`docs/MEASURED_CAPABILITIES.md`](docs/MEASURED_CAPABILITIES.md).
+Live measurements against both real deployments are in
+[`docs/MEASURED_CAPABILITIES.md`](docs/MEASURED_CAPABILITIES.md): Gemini
+9/9 including native audio input, MiniMax 8/8 including the token-delta
+evidence that the frames actually reach the model, and the runs where each
+model correctly refused to confirm what it could not see.
+
+One consequence is worth reading before trusting a green scenario: the
+scripted replay fixtures exercise **contracts, not vision**. Their frames
+are blank placeholders, so a real L2 correctly reports `occluded_view` and
+creates no event; only the stub L2 drives the fall and hydration state
+machines to `confirmed`. Validating semantics needs real footage.
 
 ## Secrets
 

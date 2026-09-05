@@ -1,6 +1,7 @@
 # Measured provider capabilities
 
-_Measured 2026-09-05. Re-run with `bun run probe:gemini` / `bun run probe:minimax`._
+_Measured 2026-09-05, both providers against live deployments.
+Re-run with `bun run probe:gemini` / `bun run probe:minimax`._
 
 v5 04 sets the rule this file exists to keep:
 
@@ -81,23 +82,76 @@ dashboard alert, because `notify_on_l3_high_risk` was not enabled.
 
 ## L2 · Gemini
 
-`scripts/probe_gemini.py` covers auth and model listing, JSON-only output
-validated against `GeminiObservation`, a clip through `inline_data`, the
-resumable Files API including the ACTIVE poll, native audio input, and
-the error shape for a bad model id.
+Endpoint `https://generativelanguage.googleapis.com/v1beta`, model
+`gemini-3.5-flash-lite`, the config default.
 
-**Not yet measured** — no Gemini key was configured on the machine that
-ran the L3 probe. Until it is, treat the L2 numbers in the spec as
-unverified, and in particular do not assume native audio works: v5 01 is
-explicit that "一定理解音訊" may not be written into runtime assumptions
-without measurement, which is why the probe reports what the model said
-about a 440 Hz test tone rather than what a docs page claims.
+| Check | Result | Measurement |
+|---|---|---|
+| Auth / list models | ✅ | 50 models visible, 168 ms |
+| Configured model is listed | ✅ | `gemini-3.5-flash-lite` present |
+| Text-only structured output | ✅ | parsed and satisfied `GeminiObservation`, 1,250 ms |
+| Video via `inline_data` | ✅ | valid `GeminiObservation`, 1,078 tokens, 2,003 ms |
+| Files API upload + ACTIVE poll | ✅ | `files/61oefbfik45a` reached `ACTIVE` in 5,936 ms |
+| Generate from a `file_uri` | ✅ | valid `GeminiObservation`, 2,342 ms |
+| **Native audio input** | ✅ | see below |
+| Bad model id returns a structured error | ✅ | `model_not_found`, 121 ms |
 
-Run it with:
+9/9. The JSON parser never had to repair a response across the probe or
+the end-to-end run below.
 
-```bash
-bun run probe:gemini -- --key-file /path/to/key
+### Native audio is now measured
+
+v5 01 is explicit that 「一定理解音訊」 may not be written into runtime
+assumptions without measurement. It has now been measured. Sent a 4 s clip
+carrying a continuous 440 Hz sine tone, the model answered:
+
+```json
+{"audio_heard": true,
+ "description": "A continuous 440 Hz sine tone is playing on the audio track."}
 ```
+
+It described the tone rather than restating the prompt, which is the part
+that distinguishes a model that received the audio track from one that
+inferred an answer from the wording. Audio may now be relied on for this
+deployment — and only this one; the probe is the evidence, so re-run it
+against any other endpoint before assuming the same.
+
+### End-to-end with both layers real
+
+`CARE_PORT=8010 bun start -- --source fall`, no stubs on either slot
+(`providers.l2.stub=false`, `providers.l3.stub=false`):
+
+| | Measurement |
+|---|---|
+| L2 windows | 12 (11 `called`, 1 `heartbeat`) |
+| L2 latency | 1,241 / 1,731 / 2,337 ms (min/avg/max) |
+| L2 repairs, L2 errors | 0, 0 |
+| L3 escalations | 1 called, 11 `not_required` |
+| L3 latency | 6,434 ms, `risk_level: none`, no error |
+
+### The scripted fixtures test contracts, not vision
+
+Real Gemini returned `escalation.reasons = [occluded_view,
+low_confidence]` on every window of the `fall` scenario, and **no fall
+event was created**. That is the correct answer, not a regression: the
+scripted replay frames are 64×64, 242-byte grey placeholders, and the
+ground truth lives in metadata that only the stub L2 reads. Asked what it
+could actually see, the model said "not enough", escalated on degraded
+evidence — which is what the escalation path is for — and M3 then agreed
+there was nothing to act on.
+
+This is the same effect already recorded for M3 above, now confirmed one
+layer earlier, and it bounds what the fixtures can prove:
+
+* They **do** exercise contracts, schema validation, the queues, the state
+  machines, escalation routing, SQLite and the audit trail against live
+  providers.
+* They **cannot** exercise fall or hydration *semantics* against a real
+  model, because there is nothing in the pixels to see. Only the stub L2
+  drives those state machines to `confirmed`.
+
+Validating the semantic layer needs real footage — an RTSP feed or a
+recording through `replay_file` — not a scripted fixture.
 
 ## What the code does with all this
 
@@ -107,5 +161,5 @@ bun run probe:gemini -- --key-file /path/to/key
 | Explicit UA needed | `USER_AGENT` in both clients |
 | Truncation must fail loudly | `context_length_exceeded_behavior="error"` |
 | Provider JSON is not guaranteed | `backend/jsonio.py` + one repair attempt |
-| Audio is unproven | never sent as a runtime assumption; probe-gated |
+| Audio works on this Gemini deployment | measured, not assumed; re-probe any other endpoint |
 | Rate limits happen | L3 failure is contained; the cascade continues |
