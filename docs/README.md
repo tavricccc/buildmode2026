@@ -32,13 +32,13 @@ docs/
 
 | 分類 | 文件名稱 | 說明 | 適用對象 |
 | --- | --- | --- | --- |
-| **Tutorials** | [快速安裝與執行指南](getting-started.md) | 從零開始安裝相依、初始化資料庫並啟動 `/setup` 介面 | 新手、初次建置者 |
+| **Tutorials** | [快速安裝與執行指南](getting-started.md) | 從零開始安裝相依、初始化資料庫並啟動 Setup 設定分頁 | 新手、初次建置者 |
 | **How-To** | [測試驗收與情境回放](verification-and-testing.md) | 執行驗證套件、回放測試情境（跌倒、飲水、空房）與查驗 DoD | 開發者、CI、評選書審 |
 | **Explanation** | [核心架構與設計原則](architecture.md) | 三層成本最佳化、Fail-open 機制、狀態機與確定性策略閘道 | 系統架構師、研究人員 |
 | **Explanation** | [三層事件管線 (Pipeline)](pipeline.md) | RTSP 影音切片、L1 存在過濾、L2 常規分析與 L3 深度升級細節 | 演算法工程師 |
 | **Explanation** | [資料模型、策略與隱私防線](data-and-policy.md) | SQLite 綱要、視窗可追溯性稽核與邊緣隱私隔離設計 | 後端工程師、資料工程師 |
 | **Reference** | [API 與 WebSocket 規格參考](api-reference.md) | 完整 REST API、WebSocket 即時串流格式與結構化 Payload | 前端開發者、系統整合者 |
-| **Reference** | [模型能力實測報告](measured-capabilities.md) | Gemini 原生 REST 與 MiniMax M3 多模態 Token 差值實測結果 | AI 工程師、評審委員 |
+| **Reference** | [模型能力實測報告](measured-capabilities.md) | 推薦雲端組合 Gemini 與 MiniMax M3 的多模態能力實測結果 | AI 工程師、評審委員 |
 
 ---
 

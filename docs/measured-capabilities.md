@@ -52,7 +52,7 @@ _實測時間：2026-09-05，針對線上正式環境進行完整探測。可隨
 ## 2. L2 · Google Gemini 3.5 Flash Lite (原生 REST)
 
 - **端點位置**：`https://generativelanguage.googleapis.com/v1beta`
-- **測試模型**：`gemini-3.5-flash-lite`（系統預設）
+- **測試模型**：`gemini-3.5-flash-lite`（目前建議的 L2 Provider）
 - **通訊方式**：Google 原生 REST API（非包裝之 OpenAI 相容模式）
 
 | 探測項目 | 結果 | 實測紀錄 |

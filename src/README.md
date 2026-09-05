@@ -93,9 +93,12 @@ bun run migrate          # create data/care.sqlite3
 bun start                # http://127.0.0.1:8200
 ```
 
-By default, L2, L3 and the legacy Main Agent use one local vLLM
-OpenAI-compatible endpoint (`VLLM_BASE_URL`, model `nemotron_omni`). Use
-`--stubs` when vLLM is unavailable; the stubs reproduce the provider
+Both L2 and L3 are provider-selectable: local vLLM is available for either
+slot, while the currently implemented and recommended cloud combination is
+Gemini for L2 and MiniMax for L3. A fresh checkout still starts with one local
+vLLM OpenAI-compatible endpoint (`VLLM_BASE_URL`, model `nemotron_omni`) so
+the process can boot without cloud credentials. Use `--stubs` when vLLM is
+unavailable; the stubs reproduce the provider
 contracts so schema validation, repair, state machines, escalation and the
 audit trail can still be exercised:
 
@@ -105,8 +108,9 @@ bun start -- --stubs --source fall  # offline contract trial
 ```
 
 The care API uses port 8200 so it does not collide with local vLLM on port
-8000. Gemini and MiniMax adapters remain available with `L2_PROVIDER=gemini`
-and `L3_PROVIDER=minimax`.
+8000. Switch to the recommended cloud combination with
+`L2_PROVIDER=gemini L3_PROVIDER=minimax` and configure both keys. The same
+provider choices are available from Settings.
 
 ```bash
 bun run verify           # compile check + 126 tests + frontend typecheck
@@ -193,7 +197,7 @@ model backends stubbed:
 | Config rollback | A new version is created and can be rolled back |
 
 Live measurements against both real deployments are in
-[`../docs/MEASURED_CAPABILITIES.md`](../docs/MEASURED_CAPABILITIES.md): Gemini
+[`../docs/measured-capabilities.md`](../docs/measured-capabilities.md): Gemini
 9/9 including native audio input, MiniMax 8/8 including the token-delta
 evidence that the frames actually reach the model, and the runs where each
 model correctly refused to confirm what it could not see.

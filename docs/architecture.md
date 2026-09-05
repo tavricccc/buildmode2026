@@ -2,7 +2,7 @@
 
 Care Agent 旨在解決高齡獨居長輩之居家安全防護與失能趨勢觀測。系統的核心技術理念為：**「模型提供證據、規則把關動作、人做臨床決策」**。
 
-早期的系統架構常試圖將所有模型包裝在單一的「OpenAI 相容伺服」抽象層後，這種做法代價高昂：既抹煞了不同多模態模型（如 Google 原生 REST 與 Files API）的原生特長，又迫使系統在每個觀測視窗都必須負擔最昂貴的運算成本。Care Agent 將管線重構為三層固定職責鏈路，各自承擔性價比最佳的工作。
+早期的系統架構常試圖將所有模型包裝在單一的「OpenAI 相容伺服」抽象層後，這種做法代價高昂：既抹煞了不同多模態模型（如 Google 原生 REST 與 Files API）的原生特長，又迫使系統在每個觀測視窗都必須負擔最昂貴的運算成本。Care Agent 將管線重構為三層固定職責鏈路；L2 與 L3 可分別選擇本機或雲端 Provider，目前已實作且建議的雲端組合是 Gemini 與 MiniMax。
 
 ---
 
@@ -20,8 +20,8 @@ graph TD
         GATE -- "有人 / 故障 / 追蹤中" --> DISPATCH["切出 5-10 秒短影音"]
     end
 
-    subgraph L2 ["L2 · 常規語意觀測 (Gemini 3.5 Flash Lite)"]
-        DISPATCH --> L2_CALL["Google Native REST API"]
+    subgraph L2 ["L2 · 常規語意觀測 (推薦 Gemini / 可選本地 vLLM)"]
+        DISPATCH --> L2_CALL["推薦：Google Native REST API\n可選：本地 vLLM OpenAI-compatible"]
         L2_CALL --> OBS["GeminiObservation 結構化觀測\n包含跌倒/飲水標記與 escalation 旗標"]
     end
 
@@ -30,8 +30,8 @@ graph TD
         SM --> COND{"滿足升級條件？\n- L2 提出 escalation.required\n- 狀態機處於高風險\n- 策略強制二度判讀"}
     end
 
-    subgraph L3 ["L3 · 深度覆核審查 (MiniMax M3)"]
-        COND -- "是 (少數視窗)" --> L3_CALL["GMI Cloud OpenAI-compatible API\n送入原始多模態影格與文字情境"]
+    subgraph L3 ["L3 · 深度覆核審查 (推薦 MiniMax / 可選本地 vLLM)"]
+        COND -- "是 (少數視窗)" --> L3_CALL["推薦：GMI Cloud OpenAI-compatible API\n可選：本地 vLLM OpenAI-compatible\n送入原始多模態影格與文字情境"]
         L3_CALL --> DEEP["DeeperAnalysis 深度分析\n具備推翻或支持 L2 之論理依據"]
     end
 
@@ -100,9 +100,9 @@ graph TD
 
 ## 邊緣隱私防線與安全邊界
 
-1. **原始影音不出本機**：
+1. **原始串流不作長期留存**：
    - 本地 FFmpeg 環形緩衝區僅保留數十秒的視訊片段。
-   - 僅在有人或故障時，抽取 5–10 秒之短影音上傳至經過加密通道之雲端模型 API。
+   - 使用雲端 Provider 時，僅在有人或故障時抽取 5–10 秒短影音，透過加密通道送至所選模型；使用本機 Provider 時，影音留在本機處理。
 2. **多模態影格隔離**：
    - L3 深度審查接收之影格序列為定格取樣（預設 10 幀），不傳送完整原始碼流。
 3. **長期偏好與通報欄位隔離**：

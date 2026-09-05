@@ -26,7 +26,7 @@ Care Agent 採用「端邊協同、分級過濾、深度覆核」的視覺與音
 
 L1 負責在邊緣端以極低功耗進行初步篩選，避免空房時無意義消耗昂貴的雲端多模態推論費用。
 
-- **預設實作**：以 YOLO11n 針對 `person` 類別進行高速定格偵測（支援 ONNX Runtime / CPU / GPU），亦可抽換為其他輕量檢測器或 Stub。
+- **可選實作**：支援 `stub`、motion 與 YOLO11n `person` 類別偵測。新安裝時預設為 `stub`；實際部署可在 Settings 切換，YOLO11n 需要使用者準備 ONNX Runtime 與模型權重。
 - **輸出資料契約**：
   ```python
   class L1Decision(Enum):
@@ -37,20 +37,20 @@ L1 負責在邊緣端以極低功耗進行初步篩選，避免空房時無意�
   ```
 - **防漏失（Anti-False-Negative）關鍵機制**：
   1. **遲滯防抖 (Hysteresis & Debounce)**：人物進入畫面需維持連續若干幀，離開畫面需經過冷卻視窗，避免走動遮擋引發閃爍誤判。
-  2. **稀疏安全心跳 (Safety Heartbeat)**：在連續無人的狀態下，系統仍會每隔 30–60 秒強制執行一次稀疏的 L2 Gemini 巡檢，確保房間背景狀態健全。
+  2. **稀疏安全心跳 (Safety Heartbeat)**：在連續無人的狀態下，系統仍會每隔 30–60 秒強制執行一次稀疏的 L2 巡檢，使用目前選定的 Provider 確保房間背景狀態健全。
   3. **失效保全 (Fail-Open)**：若 L1 程式崩潰或畫面卡死超過設定閥值，決策轉為 `stale` 或 `unavailable`，此時 `permits_skip()` 回傳 `False`，強制啟動 L2 檢查。
   4. **高風險狀態覆寫**：若跌倒狀態機已處於 `suspect` 或 `confirmed`，無論 L1 是否判斷有人，均**強制繞過 L1** 進行連續 L2 追蹤。
 
 ---
 
-## 3. L2 常規語意觀測層 (Gemini 3.5 Flash Lite)
+## 3. L2 常規語意觀測層 (推薦 Gemini / 可選本地 vLLM)
 
-L2 為系統日常運作的核心多模態理解層，預設採用 Google 原生之 `gemini-3.5-flash-lite`。
+L2 為系統日常運作的核心多模態理解層。目前建議採用 Google 原生之 `gemini-3.5-flash-lite`；也可切換至本機 vLLM OpenAI-compatible endpoint。新安裝的 runtime 預設使用本機 vLLM，方便無雲端金鑰的環境啟動。
 
 - **通訊方式**：
-  - 呼叫原生 REST API（`POST https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent`）。
-  - **<= 20MB**：直接將短影音轉換為 Base64 透過 `inline_data` 發送，延遲約 1.5–2 秒。
-  - **> 20MB**：自動呼叫 Google Files API 進行分塊續傳，輪詢狀態至 `ACTIVE` 後以 `file_data.file_uri` 提交。
+  - 選擇 Gemini 時呼叫原生 REST API（`POST https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent`）。
+  - Gemini **<= 20MB**：直接將短影音轉換為 Base64 透過 `inline_data` 發送；**> 20MB** 時使用 Google Files API，輪詢狀態至 `ACTIVE` 後以 `file_data.file_uri` 提交。
+  - 選擇本機 vLLM 時使用 OpenAI-compatible chat endpoint，送入取樣影格與可選的瀏覽器音訊資料。
 - **結構化輸出 (GeminiObservation)**：
   要求模型輸出符合 JSON Schema 的觀測結構，包含：
   ```json
@@ -77,9 +77,9 @@ L2 為系統日常運作的核心多模態理解層，預設採用 Google 原生
 
 ---
 
-## 4. L3 深度覆核審查層 (MiniMax M3)
+## 4. L3 深度覆核審查層 (推薦 MiniMax / 可選本地 vLLM)
 
-L3 扮演高階法醫覆核專家，專門處理具有高度爭議或高風險的異常視窗，預設採用 GMI Cloud 託管之 `MiniMaxAI/MiniMax-M3`。
+L3 扮演高階覆核專家，專門處理具有高度爭議或高風險的異常視窗。目前建議採用 GMI Cloud 託管之 `MiniMaxAI/MiniMax-M3`；也可切換至本機 vLLM。
 
 - **觸發條件（非全時運作）**：
   1. L2 回傳 `escalation.required = true`；
@@ -87,7 +87,7 @@ L3 扮演高階法醫覆核專家，專門處理具有高度爭議或高風險�
   3. 確定性策略規則要求二次多模態驗證；
   4. 操作員於儀表板發起手動深度分析。
 - **證據封包 (Evidence Bundle)**：
-  MiniMax 審查時必須獲得第一手原始影音素材，不可僅依賴 L2 的二手文字摘要。封包內含：
+  L3 審查時必須獲得第一手原始影音素材，不可僅依賴 L2 的二手文字摘要。使用 MiniMax 時封包內含：
   - **10 幀等間距取樣之影格序列**（採 `WIRE_FORMAT_FRAMES` 格式傳輸）；
   - L2 產出之觀測報告與升級原因代碼；
   - 當前狀態機狀態、時間戳記與可選之語音逐字稿上下文。
@@ -100,14 +100,14 @@ L3 扮演高階法醫覆核專家，專門處理具有高度爭議或高風險�
 
 ## 5. 語音事件與逐字稿管線 (Audio & ASR)
 
-- **原生音軌**：短影音切片內含之音訊可隨多模態請求直接送交 Gemini 或 MiniMax 原生處理。
-- **ASR 隔離區**：需要逐字稿時，透過麥克風/音訊串流經過語音活動偵測（VAD）切出語音片段，送至 ASR 模型生成文字。逐字稿設有過期清除機制（TTL），嚴禁未經授權長期儲存長輩談話隱私。
+- **可選音訊**：瀏覽器 WebM 的音訊可送入支援的本機模型與變化閘道；目前 RTSP 擷取路徑以影像分析為主。
+- **ASR 隔離區**：逐字稿資料表與 TTL 已準備，但目前尚未接入 ASR 引擎；需要逐字稿時仍須另外接入 VAD/ASR 流程。
 
 ---
 
 ## 6. 佇列管理與背壓機制 (Queues & Backpressure)
 
-為防止雲端 API 網路延遲累積導致記憶體暴增，後端為 L2 與 L3 各維護一個有界佇列：
+為防止所選模型 Provider 的網路延遲累積導致記憶體暴增，後端為 L2 與 L3 各維護一個有界佇列：
 - **佇列容量**：預設各為 `1 running + 1 pending` 視窗。
 - **淘汰策略**：當新視窗抵達且佇列已滿時，普通的常規視窗允許被後續最新視窗覆蓋（丟舊留新）；但**包含跌倒疑慮等高風險視窗受系統保護，嚴禁被覆蓋丟棄**。
 - **模型故障隔離**：

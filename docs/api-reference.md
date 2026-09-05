@@ -15,15 +15,19 @@ Care Agent 後端提供標準 REST API 與 WebSocket 即時資料流（預設監
 
 ### `GET /api/status`
 取得系統各模組運行健康度、啟動時間與當前配置。
-- **回應範例**：
+- L2 與 L3 的 `provider`、`model` 會隨設定變化；以下以目前建議的 Gemini + MiniMax 雲端組合示範。
+- **回應範例**（Provider 會依設定變化）：
   ```json
   {
-    "status": "ok",
-    "uptime_sec": 3600,
-    "l1": { "status": "ok", "detector_id": "yolo11n" },
-    "l2": { "provider": "gemini", "model": "gemini-3.5-flash-lite", "healthy": true },
-    "l3": { "provider": "minimax", "model": "MiniMaxAI/MiniMax-M3", "healthy": true },
-    "source": { "type": "rtsp", "fps": 10 }
+    "uptime_ms": 3600000,
+    "subject_id": "subject-1",
+    "config_version": "policy.v5.0",
+    "source": { "running": false },
+    "providers": {
+      "l2": { "name": "gemini", "model": "gemini-3.5-flash-lite" },
+      "l3": { "name": "minimax", "model": "MiniMaxAI/MiniMax-M3" }
+    },
+    "cascade": { "windows_seen": 0 }
   }
   ```
 

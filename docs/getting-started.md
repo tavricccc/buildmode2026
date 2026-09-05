@@ -56,31 +56,30 @@ bun start
 
 ### 開發熱重載模式 (Development Mode)
 ```bash
-bun run dev
+CARE_BACKEND=http://127.0.0.1:8200 bun run dev
 ```
-此模式會同時啟動後端 API 伺服器與 Vite 前端熱重載（HMR）開發伺服器。
+此模式會同時啟動後端 API 伺服器與 Vite 前端熱重載（HMR）開發伺服器；前端開啟 `http://localhost:5173`。
 
 ---
 
-## 步驟四：初次設定精靈 (/setup)
+## 步驟四：初次設定精靈
 
-初次啟動且尚未設定金鑰或偵測器時，瀏覽器開啟 `http://127.0.0.1:8200` 會自動導引至 `/setup` 介面：
+正式模式開啟 `http://127.0.0.1:8200` 後，從側邊欄進入「初始設定」分頁。此分頁會顯示環境與模型狀態，並提供逐層測試：
 
 1. **硬體與環境自我檢測**：
-   - 自動檢查 Python 執行期版本、FFmpeg 執行檔路徑、攝影機 RTSP 來源可用性及磁碟儲存空間。
+   - 顯示 FFmpeg、資料庫、L1 偵測器、L2/L3 Provider 與影像來源的狀態；RTSP 是否可用會在實際啟動來源時確認。
 2. **L1 存在感測器選擇**：
-   - 選擇使用 `YOLO11n (CPU/GPU)` 或 `Stub (離線模擬)`。選擇實際模型時，系統於此步驟按需下載約數十 MB 輕量權重。
-3. **L2 Gemini 常規語意層配置**：
-   - 輸入 Google Gemini API 金鑰。
-   - 預設模型名稱：`gemini-3.5-flash-lite`（原生 REST 端點：`https://generativelanguage.googleapis.com/v1beta`）。
-4. **L3 MiniMax 深度覆核層配置**：
-   - 輸入 MiniMax / GMI Cloud API 金鑰。
-   - 預設端點：`https://api.gmi-serving.com/v1`，模型名稱：`MiniMaxAI/MiniMax-M3`。
+   - 選擇 `stub`、`motion` 或 `YOLO11n (CPU/GPU)`。YOLO11n 需要使用者自行準備 `onnxruntime` 與模型權重，Setup 不會自動下載。
+3. **L2 Provider 配置**：
+   - 可選本機 vLLM 或 Google Gemini；目前建議使用 `gemini-3.5-flash-lite`（原生 REST 端點：`https://generativelanguage.googleapis.com/v1beta`）。
+4. **L3 Provider 配置**：
+   - 可選本機 vLLM 或 MiniMax / GMI Cloud；目前建議使用 `MiniMaxAI/MiniMax-M3`（端點：`https://api.gmi-serving.com/v1`）。
+   - Provider、模型名稱與 Base URL 可在「系統設定」的模型槽切換。
 5. **分層連線測試與級聯測試 (Cascade Test)**：
    - 提供個別測試按鈕驗證 L1、L2、L3 連線能力，並執行一次完整的 E2E 模擬資料流測試。
 6. **通報與安全設定**：
    - 設定 Telegram Bot Token 與受信照護者聊天室 ID。
-   - 配置心跳頻率（無人時建議 30–60 秒）、事件佇列與觀察者日報時間。
+   - 心跳頻率、事件佇列與 Observer 間隔可在「系統設定」調整。
 
 ---
 
@@ -103,9 +102,9 @@ bun run dev
 
 ## 離線樁模組模式 (Stubs Mode)
 
-若暫時缺乏外部 API 金鑰或處於無網路測試環境，系統提供完整離線樁模組。Stubs 嚴格重現真實 Provider 的資料結構與例外行為（包含狀態機流轉、Schema 驗證與多模態回傳），可用於完整演練前端介面：
+若暫時缺乏外部 API 金鑰或處於無網路測試環境，請使用 `--stubs` 啟動完整離線樁模組。Stubs 嚴格重現真實 Provider 的資料結構與例外行為（包含狀態機流轉、Schema 驗證與多模態回傳），可用於完整演練前端介面：
 
 ```bash
 # 指定使用離線 Stubs 啟動
-L2_PROVIDER=stub L3_PROVIDER=stub bun start
+bun start -- --stubs --source fall
 ```
