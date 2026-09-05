@@ -14,7 +14,7 @@
 
 一般窗口建議 5–10 秒。Gemini 收短影片與 prompt，必要時可附 transcript 或其他文字 context。
 
-呼叫方式直接沿用 `gemini api test`：小檔 `inline_data`，大檔 Files API。API key 存 backend secret store / `GEMINI_API_KEY`。
+呼叫方式見 `v5/backend/l2/gemini_client.py`：小檔 `inline_data`，大檔 Files API。API key 存 backend secret store / `GEMINI_API_KEY`。
 
 輸出至少包含：person visible、fall observation、hydration observation、confidence，以及：
 
