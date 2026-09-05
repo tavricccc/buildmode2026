@@ -96,17 +96,45 @@ class AppConfig:
         return SecretStore(self.secret_path)
 
 
-def default_l2() -> ProviderConfig:
-    provider = _env("L2_PROVIDER", "local_vllm").lower()
-    if provider == "gemini":
-        return ProviderConfig(
-            name="gemini",
-            model=_env("GEMINI_MODEL", "gemini-3.5-flash-lite"),
-            base_url=_env("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta"),
-            api_style="gemini",
-            secret_key="GEMINI_API_KEY",
-            timeout_sec=_env_float("GEMINI_TIMEOUT_SEC", 45.0),
-        )
+#: Which providers may occupy each slot. L2 and L3 stay independent by
+#: design (v5 03), so the menus are separate rather than one shared list.
+SLOT_PROVIDERS: dict[str, tuple[str, ...]] = {
+    "l2": ("local_vllm", "gemini"),
+    "l3": ("local_vllm", "minimax"),
+}
+
+#: Shown in Settings so the operator sees what a slot will need before
+#: switching to it, rather than after the first failed call.
+PROVIDER_LABELS: dict[str, str] = {
+    "local_vllm": "本機 vLLM",
+    "gemini": "Gemini",
+    "minimax": "MiniMax",
+}
+
+
+def _gemini_config() -> ProviderConfig:
+    return ProviderConfig(
+        name="gemini",
+        model=_env("GEMINI_MODEL", "gemini-3.5-flash-lite"),
+        base_url=_env("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta"),
+        api_style="gemini",
+        secret_key="GEMINI_API_KEY",
+        timeout_sec=_env_float("GEMINI_TIMEOUT_SEC", 45.0),
+    )
+
+
+def _minimax_config() -> ProviderConfig:
+    return ProviderConfig(
+        name="minimax",
+        model=_env("MINIMAX_MODEL", "MiniMaxAI/MiniMax-M3"),
+        base_url=_env("MINIMAX_BASE_URL", "https://api.gmi-serving.com/v1"),
+        api_style="openai",
+        secret_key="MINIMAX_API_KEY",
+        timeout_sec=_env_float("MINIMAX_TIMEOUT_SEC", 90.0),
+    )
+
+
+def _local_vllm_config() -> ProviderConfig:
     return ProviderConfig(
         name="local_vllm",
         model=_env("VLLM_MODEL", "nemotron_omni"),
@@ -116,25 +144,34 @@ def default_l2() -> ProviderConfig:
         timeout_sec=_env_float("VLLM_TIMEOUT_SEC", 90.0),
         enabled=_env("VLLM_ENABLED", "true").lower() not in {"0", "false", "no", "off"},
     )
+
+
+_BUILDERS = {
+    "gemini": _gemini_config,
+    "minimax": _minimax_config,
+    "local_vllm": _local_vllm_config,
+}
+
+
+def provider_config(slot: str, name: str) -> ProviderConfig:
+    """Fresh defaults for one provider in one slot.
+
+    Settings switches a slot by replacing its config wholesale rather than
+    patching ``name``: a base URL, an API style and a secret key belong to
+    a provider, and carrying a vLLM URL into a Gemini slot would leave a
+    configuration that looks valid and cannot work.
+    """
+    allowed = SLOT_PROVIDERS.get(slot, ())
+    if name not in allowed:
+        raise ValueError(f"{name!r} is not available for {slot}; choose one of {allowed}")
+    return _BUILDERS[name]()
+
+
+def default_l2() -> ProviderConfig:
+    name = _env("L2_PROVIDER", "local_vllm").lower()
+    return provider_config("l2", name if name in SLOT_PROVIDERS["l2"] else "local_vllm")
 
 
 def default_l3() -> ProviderConfig:
-    provider = _env("L3_PROVIDER", "local_vllm").lower()
-    if provider == "minimax":
-        return ProviderConfig(
-            name="minimax",
-            model=_env("MINIMAX_MODEL", "MiniMaxAI/MiniMax-M3"),
-            base_url=_env("MINIMAX_BASE_URL", "https://api.gmi-serving.com/v1"),
-            api_style="openai",
-            secret_key="MINIMAX_API_KEY",
-            timeout_sec=_env_float("MINIMAX_TIMEOUT_SEC", 90.0),
-        )
-    return ProviderConfig(
-        name="local_vllm",
-        model=_env("VLLM_MODEL", "nemotron_omni"),
-        base_url=_env("VLLM_BASE_URL", "http://127.0.0.1:8000/v1"),
-        api_style="openai",
-        secret_key="VLLM_API_KEY",
-        timeout_sec=_env_float("VLLM_TIMEOUT_SEC", 90.0),
-        enabled=_env("VLLM_ENABLED", "true").lower() not in {"0", "false", "no", "off"},
-    )
+    name = _env("L3_PROVIDER", "local_vllm").lower()
+    return provider_config("l3", name if name in SLOT_PROVIDERS["l3"] else "local_vllm")

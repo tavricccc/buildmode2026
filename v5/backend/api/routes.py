@@ -15,6 +15,7 @@ import re
 import time
 from typing import Any, Callable
 
+from ..config import PROVIDER_LABELS, SLOT_PROVIDERS, provider_config
 from ..domain.enums import L2Outcome
 from ..domain.timeutil import now_ms
 from ..l1.detector import DETECTOR_REGISTRY, build_detector
@@ -332,6 +333,16 @@ def get_settings(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
         "policy": ctx.policy.to_dict(),
         "providers": {"l2": ctx.l2_config.describe(ctx.secrets),
                       "l3": ctx.l3_config.describe(ctx.secrets)},
+        # The menu comes from the backend so Settings cannot offer a
+        # provider this build has no adapter for.
+        "provider_options": {
+            slot: [{"name": name,
+                    "label": PROVIDER_LABELS.get(name, name),
+                    "secret_key": provider_config(slot, name).secret_key,
+                    "default_model": provider_config(slot, name).model}
+                   for name in names]
+            for slot, names in SLOT_PROVIDERS.items()
+        },
         "secrets": ctx.secrets.describe(),
         "detectors": DETECTOR_REGISTRY,
         "versions": ctx.repos.list_config_versions(),
@@ -363,11 +374,30 @@ def post_rollback(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
 
 @route("POST", "/api/settings/providers")
 def post_providers(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
-    """Model id / base URL / timeout per slot. L2 and L3 are independent."""
-    for slot, config in (("l2", ctx.l2_config), ("l3", ctx.l3_config)):
+    """Provider / model id / base URL / timeout per slot.
+
+    L2 and L3 are independent by design (v5 03), so each slot is switched
+    on its own. Switching replaces the slot's config with that provider's
+    defaults rather than patching ``name``: the base URL, API style and
+    secret key belong to the provider, and keeping a vLLM URL in a Gemini
+    slot would look configured and fail on the first call. Any model or
+    base URL sent in the same request is applied on top, so the UI can
+    switch and rename in one round trip.
+    """
+    for slot in ("l2", "l3"):
         update = request.body.get(slot)
         if not isinstance(update, dict):
             continue
+        config = getattr(ctx, f"{slot}_config")
+
+        name = update.get("name")
+        if isinstance(name, str) and name.strip() and name.strip() != config.name:
+            try:
+                config = provider_config(slot, name.strip())
+            except ValueError as exc:
+                raise ApiError(400, "unknown_provider", str(exc)) from exc
+            setattr(ctx, f"{slot}_config", config)
+
         for field in ("model", "base_url"):
             if isinstance(update.get(field), str) and update[field].strip():
                 setattr(config, field, update[field].strip())

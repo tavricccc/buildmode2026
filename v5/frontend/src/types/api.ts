@@ -237,9 +237,20 @@ export interface PolicyPayload {
   notification: Record<string, number | boolean>;
 }
 
+/** One entry in a slot's provider menu, as the backend advertises it. */
+export interface ProviderOption {
+  name: string;
+  label: string;
+  secret_key: string;
+  default_model: string;
+}
+
 export interface SettingsPayload {
   policy: PolicyPayload;
   providers: Record<"l2" | "l3", { name: string; model: string; base_url: string; timeout_sec: number; key_configured: boolean }>;
+  /** What each slot may be switched to. Sourced from the backend so the UI
+   *  cannot offer a provider this build has no adapter for. */
+  provider_options: Record<"l2" | "l3", ProviderOption[]>;
   secrets: Record<string, { configured: boolean; source: string; length: number }>;
   detectors: Record<string, string>;
   versions: { version: string; note: string; is_active: number; created_at: string }[];

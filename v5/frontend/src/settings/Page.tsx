@@ -4,6 +4,11 @@ import { Badge, Card, Empty, ErrorBanner, errorText } from "../components/ui";
 import type { SettingsPayload } from "../types/api";
 import { SecretInput } from "./SecretInput";
 
+const SLOT_ROLE: Record<"l2" | "l3", string> = {
+  l2: "常態語意觀察",
+  l3: "升級深度判讀",
+};
+
 const GROUPS: { key: keyof SettingsPayload["policy"]; label: string; hint: string }[] = [
   { key: "l1", label: "L1 Person Gate", hint: "只負責在場判斷；進入與離開需要不同數量的連續觀察。" },
   { key: "cadence", label: "分析頻率", hint: "控制各層執行頻率；Heartbeat 讓空房跳過後仍保留稀疏安全檢查。" },
@@ -79,16 +84,26 @@ export function SettingsPage() {
     finally { setBusy(false); }
   };
 
-  const saveProvider = (slot: "l2" | "l3", patch: Record<string, string>) => {
-    void api.saveProviders({ [slot]: patch })
-      .then(load)
-      .catch((exc) => setMessage(`Provider 設定未儲存：${errorText(exc)}`));
+  // A provider change makes the backend rebuild both layers and restart the
+  // cascade, so it holds `busy`: the switch takes a moment, and two of them
+  // in flight at once would race the rebuild.
+  const saveProvider = async (slot: "l2" | "l3", patch: Record<string, string>) => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      await api.saveProviders({ [slot]: patch });
+      await load();
+    } catch (exc) {
+      setMessage(`Provider 設定未儲存：${errorText(exc)}`);
+    } finally { setBusy(false); }
   };
 
   return (
     <div className="stack">
       <header className="page-heading"><div><span className="eyebrow">Policy & Providers</span><h1>系統設定</h1><p>模型、Secrets 與 Policy 版本均可稽核；只有 Policy 能授權通知。</p></div></header>
       <Card title="Secrets" aside={<span className="muted" style={{ fontSize: 12 }}>僅可寫入，API 永不回傳原值</span>}>
+        <SecretInput label="本機 vLLM API Key（選填）" secretKey="VLLM_API_KEY"
+                     state={settings.secrets["VLLM_API_KEY"]} onSaved={load} />
         <SecretInput label="Gemini API Key（L2）" secretKey="GEMINI_API_KEY"
                      state={settings.secrets["GEMINI_API_KEY"]} onSaved={load} />
         <SecretInput label="MiniMax API Key（L3）" secretKey="MINIMAX_API_KEY"
@@ -101,22 +116,53 @@ export function SettingsPage() {
 
       <Card title="模型槽" aside={<span className="muted" style={{ fontSize: 12 }}>L2 與 L3 分別設定</span>}>
         <div className="grid cols-2">
-          {(["l2", "l3"] as const).map((slot) => (
-            <div key={slot}>
-              <h2 style={{ marginBottom: ".5rem" }}>{slot.toUpperCase()} · {settings.providers[slot].name}</h2>
-              <label className="field"><span>模型</span>
-                <input defaultValue={settings.providers[slot].model}
-                       onBlur={(event) => saveProvider(slot, { model: event.target.value })} />
-              </label>
-              <label className="field"><span>Base URL</span>
-                <input defaultValue={settings.providers[slot].base_url}
-                       onBlur={(event) => saveProvider(slot, { base_url: event.target.value })} />
-              </label>
-              <Badge tone={settings.providers[slot].key_configured ? "ok" : "warn"}>
-                {settings.providers[slot].key_configured ? "已設定 API Key" : "未設定 Key，使用 offline stub"}
-              </Badge>
-            </div>
-          ))}
+          {(["l2", "l3"] as const).map((slot) => {
+            const provider = settings.providers[slot];
+            const options = settings.provider_options[slot];
+            const active = options.find((option) => option.name === provider.name);
+            const local = provider.name === "local_vllm";
+            return (
+              <div key={slot}>
+                <h2 style={{ marginBottom: ".5rem" }}>
+                  {slot.toUpperCase()} · {SLOT_ROLE[slot]}
+                </h2>
+
+                <div className="segmented compact" role="group" aria-label={`${slot.toUpperCase()} 服務供應商`}>
+                  {options.map((option) => (
+                    <button key={option.name} aria-selected={option.name === provider.name}
+                            disabled={busy}
+                            onClick={() => void saveProvider(slot, { name: option.name })}>
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Switching a slot replaces its base URL, API style and secret
+                    key with that provider's defaults, so these two inputs are
+                    remounted on the provider name — a stale defaultValue would
+                    otherwise keep showing the previous provider's model. */}
+                <label className="field" style={{ marginTop: 12 }}><span>模型名稱</span>
+                  <input key={`${slot}-model-${provider.name}`}
+                         defaultValue={provider.model}
+                         placeholder={active?.default_model}
+                         spellCheck={false}
+                         onBlur={(event) => void saveProvider(slot, { model: event.target.value })} />
+                </label>
+                <label className="field"><span>Base URL</span>
+                  <input key={`${slot}-url-${provider.name}`}
+                         defaultValue={provider.base_url}
+                         spellCheck={false}
+                         onBlur={(event) => void saveProvider(slot, { base_url: event.target.value })} />
+                </label>
+
+                <Badge tone={provider.key_configured || local ? "ok" : "warn"}>
+                  {local ? "本機端點，不需要 API Key"
+                    : provider.key_configured ? "已設定 API Key"
+                    : `未設定 ${active?.secret_key ?? "API Key"}，使用 offline stub`}
+                </Badge>
+              </div>
+            );
+          })}
         </div>
       </Card>
 
