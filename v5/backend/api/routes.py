@@ -88,6 +88,14 @@ def get_runs(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
     return 200, {"runs": runs, "stats": ctx.repos.run_stats(now_ms() - window_ms)}
 
 
+@route("GET", "/api/observations")
+def get_observations(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    """Return every saved L2 observation, newest first, bounded by the UI request."""
+    return 200, {"observations": ctx.repos.list_observations(
+        ctx.config.subject_id, min(request.q_int("limit", 12), 200),
+    )}
+
+
 @route("GET", "/api/logs")
 def get_logs(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
     return 200, {"logs": ctx.repos.recent_logs(min(request.q_int("limit", 100), 500),
@@ -143,6 +151,77 @@ def get_hydration(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
 @route("GET", "/api/actions")
 def get_actions(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
     return 200, {"actions": ctx.repos.list_actions(min(request.q_int("limit", 50), 200))}
+
+
+# ---------------------------------------------------------------------
+# Original Longcare-compatible Main Agent, memory and interaction
+# ---------------------------------------------------------------------
+
+
+@route("GET", "/api/agent/runs")
+def get_agent_runs(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    return 200, {"runs": ctx.repos.list_agent_runs(
+        limit=min(request.q_int("limit", 50), 200),
+        agent_name=request.q("agent") or None,
+    )}
+
+
+@route("POST", "/api/agent/main")
+def post_main_agent(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    observation = request.body.get("observation")
+    if not isinstance(observation, dict):
+        raise ApiError(400, "bad_request", "observation object is required")
+    window = request.body.get("window")
+    if not isinstance(window, dict):
+        window = {"window_id": f"api:{now_ms()}", "frame_count": 0}
+    result = ctx.legacy_flow.run_main_agent(
+        window=window, observation=observation,
+        persisted=request.body.get("persisted") if isinstance(request.body.get("persisted"), dict) else {},
+        trigger_type=str(request.body.get("trigger_type", "api_request")),
+    )
+    return 200, result
+
+
+@route("GET", "/api/memory")
+def get_memory(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    return 200, {"memories": ctx.repos.list_memories(
+        ctx.config.subject_id, request.q("status") or None,
+        min(request.q_int("limit", 50), 200),
+    )}
+
+
+@route("POST", "/api/memory/{memory_id}/status")
+def post_memory_status(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    status = str(request.body.get("status", ""))
+    if not ctx.repos.set_memory_status(request.params["memory_id"], status):
+        raise ApiError(404, "not_found", "memory not found or status invalid")
+    return 200, {"memory_id": request.params["memory_id"], "status": status}
+
+
+@route("GET", "/api/interaction/messages")
+def get_interaction_messages(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    conversation_id = request.q("conversation_id", "default")
+    return 200, {"messages": ctx.repos.interaction_messages(
+        ctx.config.subject_id, conversation_id, min(request.q_int("limit", 40), 200),
+    )}
+
+
+@route("POST", "/api/interaction/turn")
+def post_interaction_turn(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    text = str(request.body.get("text", "")).strip()
+    if not text:
+        raise ApiError(400, "bad_request", "text is required")
+    result = ctx.legacy_flow.interaction(
+        text, str(request.body.get("conversation_id", "default")),
+    )
+    return 200, result
+
+
+@route("POST", "/api/interaction/understanding")
+def post_interaction_understanding(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    return 200, ctx.legacy_flow.understanding(
+        str(request.body.get("conversation_id", "default")),
+    )
 
 
 # ---------------------------------------------------------------------
@@ -330,12 +409,12 @@ def get_setup(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
         {"id": "l1", "label": "L1 person detector",
          "done": detector_health.get("status") in {"ok", "degraded"},
          "detail": f"{ctx.policy.l1.detector_id}: {detector_health.get('status')}"},
-        {"id": "l2", "label": "Gemini (L2)",
-         "done": ctx.secrets.configured("GEMINI_API_KEY"),
-         "detail": ctx.l2_config.model},
-        {"id": "l3", "label": "MiniMax (L3)",
-         "done": ctx.secrets.configured("MINIMAX_API_KEY"),
-         "detail": ctx.l3_config.model},
+        {"id": "l2", "label": f"{ctx.l2_config.name} (L2)",
+         "done": ctx.l2_config.name == "local_vllm" or ctx.secrets.configured(ctx.l2_config.secret_key),
+         "detail": f"{ctx.l2_config.model} @ {ctx.l2_config.base_url}"},
+        {"id": "l3", "label": f"{ctx.l3_config.name} (L3)",
+         "done": ctx.l3_config.name == "local_vllm" or ctx.secrets.configured(ctx.l3_config.secret_key),
+         "detail": f"{ctx.l3_config.model} @ {ctx.l3_config.base_url}"},
         {"id": "source", "label": "Camera or replay",
          "done": ctx.source is not None,
          "detail": "replay scenarios: " + (", ".join(scenarios) or "none")},
@@ -449,6 +528,12 @@ def cascade_test(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
 # ---------------------------------------------------------------------
 # Sources
 # ---------------------------------------------------------------------
+
+
+@route("GET", "/api/media/streams")
+def get_media_streams(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    return 200, {"active": [session.health() for session in ctx.browser_sessions.values()],
+                 "source": ctx.source.health() if ctx.source else {"running": False}}
 
 
 @route("GET", "/api/replay/scenarios")

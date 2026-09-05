@@ -58,6 +58,11 @@ class PipelineRun:
     # -- downstream -------------------------------------------------------
     evidence_id: str | None = None
     clip_path: str | None = None
+    # Original Longcare L0 compatibility signal.  It is an accelerator only;
+    # high-risk states and safety heartbeats can still force L2.
+    change_detected: bool = True
+    change_score: float | None = None
+    change_reasons: list[str] = field(default_factory=list)
     event_ids: list[str] = field(default_factory=list)
     action_ids: list[str] = field(default_factory=list)
     created_at: str = field(default_factory=iso)

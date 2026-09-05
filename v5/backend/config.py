@@ -28,6 +28,13 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return default
+
+
 @dataclass
 class ProviderConfig:
     """One model slot. L2 and L3 are configured independently by design.
@@ -61,7 +68,8 @@ class ProviderConfig:
 @dataclass
 class AppConfig:
     host: str = field(default_factory=lambda: _env("CARE_HOST", "127.0.0.1"))
-    port: int = field(default_factory=lambda: _env_int("CARE_PORT", 8000))
+    # Keep the care API separate from the local vLLM OpenAI endpoint.
+    port: int = field(default_factory=lambda: _env_int("CARE_PORT", 8200))
     data_dir: Path = field(default_factory=lambda: Path(_env("CARE_DATA_DIR", str(REPO_ROOT / "data"))))
     db_path: Path = field(init=False)
     clips_dir: Path = field(init=False)
@@ -89,22 +97,44 @@ class AppConfig:
 
 
 def default_l2() -> ProviderConfig:
+    provider = _env("L2_PROVIDER", "local_vllm").lower()
+    if provider == "gemini":
+        return ProviderConfig(
+            name="gemini",
+            model=_env("GEMINI_MODEL", "gemini-3.5-flash-lite"),
+            base_url=_env("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta"),
+            api_style="gemini",
+            secret_key="GEMINI_API_KEY",
+            timeout_sec=_env_float("GEMINI_TIMEOUT_SEC", 45.0),
+        )
     return ProviderConfig(
-        name="gemini",
-        model=_env("GEMINI_MODEL", "gemini-3.5-flash-lite"),
-        base_url=_env("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta"),
-        api_style="gemini",
-        secret_key="GEMINI_API_KEY",
-        timeout_sec=float(_env("GEMINI_TIMEOUT_SEC", "45")),
+        name="local_vllm",
+        model=_env("VLLM_MODEL", "nemotron_omni"),
+        base_url=_env("VLLM_BASE_URL", "http://127.0.0.1:8000/v1"),
+        api_style="openai",
+        secret_key="VLLM_API_KEY",
+        timeout_sec=_env_float("VLLM_TIMEOUT_SEC", 90.0),
+        enabled=_env("VLLM_ENABLED", "true").lower() not in {"0", "false", "no", "off"},
     )
 
 
 def default_l3() -> ProviderConfig:
+    provider = _env("L3_PROVIDER", "local_vllm").lower()
+    if provider == "minimax":
+        return ProviderConfig(
+            name="minimax",
+            model=_env("MINIMAX_MODEL", "MiniMaxAI/MiniMax-M3"),
+            base_url=_env("MINIMAX_BASE_URL", "https://api.gmi-serving.com/v1"),
+            api_style="openai",
+            secret_key="MINIMAX_API_KEY",
+            timeout_sec=_env_float("MINIMAX_TIMEOUT_SEC", 90.0),
+        )
     return ProviderConfig(
-        name="minimax",
-        model=_env("MINIMAX_MODEL", "MiniMaxAI/MiniMax-M3"),
-        base_url=_env("MINIMAX_BASE_URL", "https://api.gmi-serving.com/v1"),
+        name="local_vllm",
+        model=_env("VLLM_MODEL", "nemotron_omni"),
+        base_url=_env("VLLM_BASE_URL", "http://127.0.0.1:8000/v1"),
         api_style="openai",
-        secret_key="MINIMAX_API_KEY",
-        timeout_sec=float(_env("MINIMAX_TIMEOUT_SEC", "90")),
+        secret_key="VLLM_API_KEY",
+        timeout_sec=_env_float("VLLM_TIMEOUT_SEC", 90.0),
+        enabled=_env("VLLM_ENABLED", "true").lower() not in {"0", "false", "no", "off"},
     )

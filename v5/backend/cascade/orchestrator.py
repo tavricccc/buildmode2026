@@ -62,6 +62,7 @@ from ..state_machines import (
     hydration_transition,
 )
 from .queue import LayerQueue, QueuedJob
+from .change_gate import detect_frame_change
 
 #: How many observations of each type to keep for corroboration.
 HISTORY_DEPTH = 8
@@ -117,6 +118,7 @@ class Cascade:
         frames: FrameWindow,
         clips_dir: Path,
         subject_id: str = "subject-1",
+        legacy_flow: Any = None,
         broadcast: Callable[[str, dict[str, Any]], None] | None = None,
         telegram_configured: bool = False,
         notifier: Any = None,
@@ -130,6 +132,7 @@ class Cascade:
         self.frames = frames
         self.clips_dir = Path(clips_dir)
         self.subject_id = subject_id
+        self.legacy_flow = legacy_flow
         self.broadcast = broadcast or (lambda topic, payload: None)
         self.telegram_configured = telegram_configured
         #: Set only when a bot token *and* an allow-listed chat exist. The
@@ -137,8 +140,12 @@ class Cascade:
         self.notifier = notifier
 
         self.policy_gateway = PolicyGateway(policy.notification)
-        self.l2_queue = LayerQueue("l2", on_drop=self._on_drop)
-        self.l3_queue = LayerQueue("l3", on_drop=self._on_drop)
+        self.l2_queue = LayerQueue(
+            "l2", on_drop=self._on_drop,
+            max_running=max(1, int(policy.cadence.max_parallel_observations)),
+            max_pending=max(1, int(policy.cadence.observation_queue_capacity)),
+        )
+        self.l3_queue = LayerQueue("l3", on_drop=self._on_drop, max_running=1, max_pending=8)
 
         self.tracked: dict[EventType, TrackedEvent] = {
             EventType.fall: TrackedEvent(EventType.fall),
@@ -150,6 +157,8 @@ class Cascade:
         self._state_lock = threading.Lock()
         self._last_l2_call_ms = 0
         self._last_heartbeat_ms = 0
+        self._last_audio_level: float | None = None
+        self._last_change_gate: dict[str, Any] | None = None
         self._last_escalation_ms: dict[str, int] = {}
         self._escalations_today = 0
         self._escalation_day = day_key()
@@ -163,12 +172,11 @@ class Cascade:
         if self._threads:
             return
         self._stop.clear()
-        for name, target in (
-            ("l1-sampler", self._sample_loop),
-            ("scheduler", self._schedule_loop),
-            ("l2-worker", self._l2_loop),
-            ("l3-worker", self._l3_loop),
-        ):
+        workers = [("l1-sampler", self._sample_loop), ("scheduler", self._schedule_loop)]
+        workers.extend((f"l2-worker-{index + 1}", self._l2_loop)
+                       for index in range(self.l2_queue.max_running))
+        workers.append(("l3-worker", self._l3_loop))
+        for name, target in workers:
             thread = threading.Thread(target=target, name=name, daemon=True)
             thread.start()
             self._threads.append(thread)
@@ -220,6 +228,21 @@ class Cascade:
             since_beat = (at - self._last_heartbeat_ms) / 1000.0 if self._last_heartbeat_ms else 1e9
 
         cadence = self.policy.cadence
+        packets = self.frames.window(int(cadence.window_seconds * 1000), at,
+                                     max(4, int(cadence.window_seconds * cadence.clip_fps)))
+        audio_pcm = getattr(packets[-1], "audio_pcm", None) if packets else None
+        change = detect_frame_change(
+            [packet.jpeg for packet in packets],
+            threshold=cadence.change_gate_threshold,
+            audio_pcm=audio_pcm,
+            previous_audio_level=self._last_audio_level,
+            audio_delta_threshold=cadence.change_gate_audio_delta_threshold,
+            min_changed_pairs=cadence.change_gate_min_changed_pairs,
+            strong_score_multiplier=cadence.change_gate_strong_score_multiplier,
+        ) if cadence.change_gate_enabled else {"changed": True, "change_score": 1.0,
+                                                "change_reasons": ["change_gate_disabled"]}
+        self._last_audio_level = change.get("audio_level")
+        self._last_change_gate = change
 
         if high_risk:
             if since_call < cadence.high_risk_interval_sec:
@@ -241,6 +264,14 @@ class Cascade:
 
         if since_call < cadence.l2_interval_sec:
             return WindowDecision(L2Outcome.skipped_l1, "cadence_not_due")
+
+        # Scripted replay fixtures intentionally use tiny identical JPEGs and
+        # carry truth in annotations; keep their deterministic contract. The
+        # real browser/RTSP inputs use the pixel/audio gate.
+        is_annotated_replay = bool(packets and packets[-1].source_kind == "replay"
+                                   and packets[-1].annotation is not None)
+        if cadence.change_gate_enabled and not is_annotated_replay and not change.get("changed", True):
+            return WindowDecision(L2Outcome.skipped_l1, "no_change_gate")
 
         return WindowDecision(L2Outcome.called, decision.reason)
 
@@ -306,6 +337,10 @@ class Cascade:
             l1_detector_id=gate.detector_id,
             l1_health=gate.health,
         )
+        change = self._last_change_gate or {}
+        run.change_detected = bool(change.get("changed", True))
+        run.change_score = change.get("change_score")
+        run.change_reasons = list(change.get("change_reasons") or [])
         run.mark_l2_skipped(decision.reason)
         run.mark_l3_not_required("l2_not_called")
         self.windows_seen += 1
@@ -333,6 +368,14 @@ class Cascade:
         span_ms = int(cadence.window_seconds * 1000)
         max_frames = max(4, int(cadence.window_seconds * cadence.clip_fps))
         packets = self.frames.window(span_ms, at_ms, max_frames)
+        change = self._last_change_gate or detect_frame_change(
+            [packet.jpeg for packet in packets],
+            threshold=cadence.change_gate_threshold,
+            audio_pcm=getattr(packets[-1], "audio_pcm", None) if packets else None,
+            previous_audio_level=self._last_audio_level,
+            min_changed_pairs=cadence.change_gate_min_changed_pairs,
+            strong_score_multiplier=cadence.change_gate_strong_score_multiplier,
+        )
 
         run = PipelineRun(
             subject_id=self.subject_id,
@@ -345,6 +388,9 @@ class Cascade:
             l1_health=gate.health,
             l2_outcome=decision.outcome.value,
             l2_reason=decision.reason,
+            change_detected=bool(change.get("changed", True)),
+            change_score=change.get("change_score"),
+            change_reasons=list(change.get("change_reasons") or []),
         )
         self.windows_seen += 1
 
@@ -365,6 +411,8 @@ class Cascade:
 
         result = self.l2.observe(
             clip,
+            frames=[p.jpeg for p in packets],
+            audio_pcm=getattr(packets[-1], "audio_pcm", None) if packets else None,
             event_state=state_before["fall"]["status"],
             transcript=self._transcript(run.window_started_at_ms),
             heartbeat=decision.heartbeat,
@@ -395,10 +443,35 @@ class Cascade:
         # raised inside _advance_state. save_run is INSERT OR REPLACE, so
         # the later _persist call updates this same row.
         self.repos.save_run(run)
+        self.repos.save_observation(
+            run.run_id, self.subject_id, at_ms,
+            observation.scene_summary, observation.confidence,
+            observation.to_dict(with_version=True),
+        )
 
         events, decisions = self._advance_state(observation, run, at_ms)
         run.event_ids = [e for e in events]
         run.action_ids = [d.action_id for d in decisions]
+
+        # Preserve the original Main Agent boundary: it receives the bounded
+        # current evidence plus typed state, runs independently, and remains
+        # advisory. Routine low-signal windows stay on the cheaper L2 path.
+        main_trigger = None
+        if decision.high_risk or observation.needs_escalation():
+            main_trigger = "high_risk_focus"
+        elif observation.fall.indicates_fall(self.policy.fall.min_confidence):
+            main_trigger = "multimodal_window"
+        elif observation.hydration.indicates_drinking(self.policy.hydration.min_confidence):
+            main_trigger = "multimodal_window"
+        if main_trigger and self.legacy_flow is not None:
+            self.legacy_flow.submit_main_agent(
+                window={"window_id": run.run_id, "frame_count": len(packets),
+                        "start_ms": run.window_started_at_ms, "end_ms": run.window_ended_at_ms},
+                observation=observation.to_dict(with_version=True),
+                persisted={"events": self.repos.list_events(limit=12)},
+                frames=[p.jpeg for p in packets],
+                trigger_type=main_trigger,
+            )
 
         trigger, reasons = self._escalation_trigger(observation, at_ms)
         if trigger is None:

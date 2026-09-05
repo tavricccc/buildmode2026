@@ -1,6 +1,6 @@
 """Bounded per-layer work queue (v5 01 §Failure behavior).
 
-"L2/L3 queue 預設各 1 running + 1 pending；高風險 pending 受保護."
+"L2/L3 queue 有明確的 running/pending 上限；高風險工作優先."
 
 Depth one is the whole idea. A camera produces windows faster than a
 cloud model can answer them, so an unbounded queue does not buy
@@ -31,12 +31,18 @@ class QueuedJob:
 
 
 class LayerQueue:
-    """One running slot, one pending slot, with high-risk protection."""
+    """Bounded queue with high-risk priority and fair routine draining."""
 
-    def __init__(self, name: str, on_drop: Callable[[QueuedJob, str], None] | None = None) -> None:
+    def __init__(self, name: str, on_drop: Callable[[QueuedJob, str], None] | None = None,
+                 *, max_running: int = 1, max_pending: int = 1) -> None:
+        if max_running <= 0 or max_pending <= 0:
+            raise ValueError("queue limits must be positive")
         self.name = name
-        self._pending: QueuedJob | None = None
-        self._running: QueuedJob | None = None
+        self.max_running = max_running
+        self.max_pending = max_pending
+        self._pending: list[QueuedJob] = []
+        self._running = 0
+        self._running_labels: list[str] = []
         self._lock = threading.Lock()
         self._not_empty = threading.Condition(self._lock)
         self._on_drop = on_drop
@@ -48,19 +54,20 @@ class LayerQueue:
     def offer(self, job: QueuedJob) -> tuple[bool, str]:
         """Try to enqueue. Returns ``(accepted, reason)``."""
         with self._not_empty:
-            existing = self._pending
-            if existing is not None:
-                if existing.high_risk and not job.high_risk:
-                    # Protected: a routine window may not evict a fall follow-up.
+            if len(self._pending) >= self.max_pending:
+                routine_indexes = [i for i, existing in enumerate(self._pending)
+                                   if not existing.high_risk]
+                if not job.high_risk and not routine_indexes:
+                    # All pending work is urgent; routine work waits for a slot.
                     self.rejected += 1
                     return False, f"{self.name}_busy_high_risk_pending"
-                self._pending = job
+                # Prefer retaining urgent work. For routine overflow, evict
+                # the oldest routine so newer evidence is not lost forever.
+                index = routine_indexes[0] if routine_indexes else 0
+                existing = self._pending.pop(index)
                 self.dropped += 1
-                self.accepted += 1
                 self._notify_drop(existing, "superseded_by_newer_window")
-                self._not_empty.notify()
-                return True, "replaced_pending"
-            self._pending = job
+            self._pending.append(job)
             self.accepted += 1
             self._not_empty.notify()
             return True, "queued"
@@ -68,17 +75,25 @@ class LayerQueue:
     def take(self, timeout: float | None = None) -> QueuedJob | None:
         """Block until a pending job exists, then move it to the running slot."""
         with self._not_empty:
-            if self._pending is None:
+            if not self._pending or self._running >= self.max_running:
                 self._not_empty.wait(timeout)
-            job, self._pending = self._pending, None
-            self._running = job
+            if not self._pending or self._running >= self.max_running:
+                return None
+            # Urgent work wins; within each class FIFO prevents starvation.
+            index = next((i for i, item in enumerate(self._pending) if item.high_risk), 0)
+            job = self._pending.pop(index)
+            self._running += 1
+            self._running_labels.append(job.label)
             return job
 
     def finish(self) -> None:
-        with self._lock:
-            if self._running is not None:
+        with self._not_empty:
+            if self._running > 0:
                 self.completed += 1
-            self._running = None
+                self._running -= 1
+                if self._running_labels:
+                    self._running_labels.pop(0)
+            self._not_empty.notify_all()
 
     def wake(self) -> None:
         """Unblock a waiting :meth:`take` so a worker can observe shutdown."""
@@ -96,10 +111,14 @@ class LayerQueue:
         with self._lock:
             return {
                 "name": self.name,
-                "running": self._running is not None,
-                "running_label": self._running.label if self._running else None,
-                "pending": self._pending is not None,
-                "pending_high_risk": bool(self._pending and self._pending.high_risk),
+                "running": self._running > 0,
+                "running_count": self._running,
+                "max_running": self.max_running,
+                "running_label": self._running_labels[0] if self._running_labels else None,
+                "pending_count": len(self._pending),
+                "max_pending": self.max_pending,
+                "pending": bool(self._pending),
+                "pending_high_risk": any(item.high_risk for item in self._pending),
                 "accepted": self.accepted,
                 "dropped": self.dropped,
                 "rejected": self.rejected,

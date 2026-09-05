@@ -18,6 +18,7 @@ import mimetypes
 import socket
 import threading
 import traceback
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -25,7 +26,8 @@ from urllib.parse import parse_qs, urlparse
 
 from ..domain.timeutil import iso
 from .routes import ROUTES, ApiError, Request
-from .ws import OP_CLOSE, OP_PING, OP_PONG, accept_key, encode_frame, read_frame
+from ..media.browser_source import BrowserMediaSession
+from .ws import OP_BINARY, OP_CLOSE, OP_PING, OP_PONG, accept_key, encode_frame, read_frame
 
 MAX_BODY_BYTES = 8 * 1024 * 1024
 
@@ -111,6 +113,9 @@ class CareRequestHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
+        if parsed.path == "/ws/media":
+            self._handle_media_websocket(parsed)
+            return
         if parsed.path == "/ws":
             self._handle_websocket()
             return
@@ -245,6 +250,74 @@ class CareRequestHandler(BaseHTTPRequestHandler):
             pass
         finally:
             broadcaster.remove(sock)
+            self.close_connection = True
+
+    def _handle_media_websocket(self, parsed: Any) -> None:
+        """Receive browser MediaRecorder WebM chunks into the v5 pipeline."""
+        key = self.headers.get("Sec-WebSocket-Key")
+        upgrade = (self.headers.get("Upgrade") or "").lower()
+        if not key or upgrade != "websocket":
+            self._send(400, {"error": {"code": "bad_upgrade", "message": "not a websocket handshake"}})
+            return
+        response = (
+            "HTTP/1.1 101 Switching Protocols\r\n"
+            "Upgrade: websocket\r\n"
+            "Connection: Upgrade\r\n"
+            f"Sec-WebSocket-Accept: {accept_key(key)}\r\n\r\n"
+        )
+        sock: socket.socket = self.connection
+        try:
+            sock.sendall(response.encode("ascii"))
+        except OSError:
+            return
+
+        query = parse_qs(parsed.query)
+        camera_id = (query.get("camera_id") or ["browser-camera"])[0][:100]
+        media_type = (query.get("media_type") or ["video/webm"])[0][:80]
+        session_id = f"media-{uuid.uuid4().hex[:16]}"
+        try:
+            session = BrowserMediaSession(
+                camera_id, media_type, self.ctx.cascade.ingest,
+                fps=self.ctx.policy.cadence.clip_fps,
+            )
+        except (OSError, ValueError) as exc:
+            try:
+                sock.sendall(encode_frame(json.dumps({
+                    "type": "media.stream.failed",
+                    "payload": {"error_code": type(exc).__name__},
+                }).encode("utf-8")))
+            except OSError:
+                pass
+            self.close_connection = True
+            return
+        self.ctx.browser_sessions[session_id] = session
+        try:
+            sock.sendall(encode_frame(json.dumps({
+                "type": "media.stream.ready", "payload": session.health(),
+            }).encode("utf-8")))
+            sock.settimeout(300)
+            while True:
+                frame = read_frame(sock)
+                if frame is None:
+                    break
+                opcode, payload = frame
+                if opcode == OP_CLOSE:
+                    break
+                if opcode == OP_PING:
+                    sock.sendall(encode_frame(payload, OP_PONG))
+                elif opcode == OP_BINARY:
+                    if len(payload) > MAX_BODY_BYTES:
+                        break
+                    session.receive(payload)
+                    if session.chunks_received % 4 == 0:
+                        sock.sendall(encode_frame(json.dumps({
+                            "type": "media.stream.progress", "payload": session.health(),
+                        }).encode("utf-8")))
+        except OSError:
+            pass
+        finally:
+            self.ctx.browser_sessions.pop(session_id, None)
+            session.close()
             self.close_connection = True
 
 

@@ -24,10 +24,11 @@ from .domain.policy import CarePolicy
 from .domain.timeutil import now_ms
 from .l1.detector import build_detector
 from .l1.gate import PersonGate
-from .l2.service import L2Service, build_gemini_l2
+from .l2.service import L2Service, build_gemini_l2, build_local_vllm_l2
 from .l2.stub import StubL2Backend
-from .l3.service import L3Service, build_minimax_l3
+from .l3.service import L3Service, build_local_vllm_l3, build_minimax_l3
 from .l3.stub import StubL3Backend
+from .legacy_flow import LegacyFlow
 from .media.frames import FrameWindow
 from .media.replay_source import ReplaySource, ScriptedSource
 from .media.rtsp_source import RtspSource
@@ -53,6 +54,7 @@ class AppContext:
         self.broadcaster = Broadcaster()
         self.frames = FrameWindow(capacity=480)
         self.source: Any = None
+        self.browser_sessions: dict[str, Any] = {}
         self._source_lock = threading.Lock()
         self.started_at_ms = now_ms()
 
@@ -61,6 +63,10 @@ class AppContext:
         self.gate = PersonGate(self.policy.l1)
         self.l2 = self._build_l2()
         self.l3 = self._build_l3()
+        self.legacy_flow = LegacyFlow(
+            self.repos, self.config.subject_id, self.l2.backend,
+            use_stub=bool(self.use_stubs), model=self.l2_config.model,
+        )
         self.notifier = self._build_notifier()
         self.cascade = self._build_cascade()
         self.observer = ObserverScheduler(self, self.config.observer_interval_sec)
@@ -103,6 +109,10 @@ class AppContext:
     def _stub_mode(self, secret_key: str) -> bool:
         if self.use_stubs is not None:
             return self.use_stubs
+        # Local vLLM normally has no API key.  Its reachability is checked by
+        # the model call itself, so a missing key must not silently demote it.
+        if secret_key == "VLLM_API_KEY":
+            return False
         return not self.secrets.configured(secret_key)
 
     def _build_detector(self) -> Any:
@@ -123,8 +133,18 @@ class AppContext:
             return build_detector("stub")
 
     def _build_l2(self) -> L2Service:
+        if not self.l2_config.enabled:
+            return L2Service(StubL2Backend(), provider="disabled", redact=self.secrets.redact)
         if self._stub_mode(self.l2_config.secret_key):
             return L2Service(StubL2Backend(), provider="stub", redact=self.secrets.redact)
+        if self.l2_config.name == "local_vllm":
+            return build_local_vllm_l2(
+                api_key=self.secrets.get(self.l2_config.secret_key) or "",
+                model=self.l2_config.model,
+                base_url=self.l2_config.base_url,
+                timeout_sec=self.l2_config.timeout_sec,
+                redact=self.secrets.redact,
+            )
         return build_gemini_l2(
             api_key=self.secrets.get(self.l2_config.secret_key) or "",
             model=self.l2_config.model,
@@ -135,10 +155,18 @@ class AppContext:
         )
 
     def _build_l3(self) -> L3Service | None:
-        if not self.policy.escalation.enabled:
+        if not self.policy.escalation.enabled or not self.l3_config.enabled:
             return None
         if self._stub_mode(self.l3_config.secret_key):
             return L3Service(StubL3Backend(), provider="stub", redact=self.secrets.redact)
+        if self.l3_config.name == "local_vllm":
+            return build_local_vllm_l3(
+                api_key=self.secrets.get(self.l3_config.secret_key) or "",
+                model=self.l3_config.model,
+                base_url=self.l3_config.base_url,
+                timeout_sec=self.l3_config.timeout_sec,
+                redact=self.secrets.redact,
+            )
         return build_minimax_l3(
             api_key=self.secrets.get(self.l3_config.secret_key) or "",
             model=self.l3_config.model,
@@ -170,6 +198,7 @@ class AppContext:
             gate=self.gate,
             l2_service=self.l2,
             l3_service=self.l3,
+            legacy_flow=self.legacy_flow,
             frames=self.frames,
             clips_dir=self.config.clips_dir,
             subject_id=self.config.subject_id,
@@ -188,6 +217,11 @@ class AppContext:
         self.gate = PersonGate(self.policy.l1)
         self.l2 = self._build_l2()
         self.l3 = self._build_l3()
+        self.legacy_flow.shutdown()
+        self.legacy_flow = LegacyFlow(
+            self.repos, self.config.subject_id, self.l2.backend,
+            use_stub=bool(self.use_stubs), model=self.l2_config.model,
+        )
         self.notifier = self._build_notifier()
         self.cascade = self._build_cascade()
         if self.notifier is not None:
@@ -229,11 +263,18 @@ class AppContext:
             self.source = None
 
     def shutdown(self) -> None:
+        for session in list(self.browser_sessions.values()):
+            try:
+                session.close()
+            except Exception:  # noqa: BLE001
+                pass
+        self.browser_sessions.clear()
         self.stop_source()
         self.observer.stop()
         if self.notifier is not None:
             self.notifier.stop_polling()
         self.cascade.stop()
+        self.legacy_flow.shutdown()
         self.db.close()
 
     # -- status ------------------------------------------------------------
@@ -245,6 +286,7 @@ class AppContext:
             "config_version": self.policy.version,
             "migrations_applied": self.migrations_applied,
             "source": self.source.health() if self.source else {"running": False},
+            "browser_media": [session.health() for session in self.browser_sessions.values()],
             "cascade": self.cascade.status(),
             "realtime": self.broadcaster.metrics(),
             "observer": self.observer.status(),
@@ -255,6 +297,11 @@ class AppContext:
                 "l3": {**self.l3_config.describe(self.secrets),
                        "active": getattr(getattr(self.l3, "backend", None), "model", None),
                        "stub": self.l3 is not None and isinstance(self.l3.backend, StubL3Backend)},
+            },
+            "legacy_flow": {
+                "provider": self.legacy_flow.provider,
+                "model": self.legacy_flow.model,
+                "pending_main_agent": len(self.legacy_flow._pending),
             },
             "secrets": self.secrets.describe(),
         }

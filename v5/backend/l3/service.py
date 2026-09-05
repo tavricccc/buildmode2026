@@ -166,3 +166,17 @@ def build_minimax_l3(api_key: str, model: str, base_url: str, timeout_sec: float
         max_frames=max_frames,
     )
     return L3Service(client, provider="minimax", redact=redact)
+
+
+def build_local_vllm_l3(api_key: str, model: str, base_url: str, timeout_sec: float,
+                        redact: Any = None, enable_thinking: bool = False) -> L3Service:
+    from ..local_vllm import LocalVllmClient
+
+    client = LocalVllmClient(
+        model=model,
+        base_url=base_url,
+        api_key=api_key,
+        timeout_sec=timeout_sec,
+        enable_thinking=enable_thinking,
+    )
+    return L3Service(client, provider="local_vllm", redact=redact)

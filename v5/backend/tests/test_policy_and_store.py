@@ -4,6 +4,7 @@ import os
 import shutil
 import tempfile
 import unittest
+import os
 from pathlib import Path
 
 from ..cascade.queue import LayerQueue, QueuedJob
@@ -128,6 +129,7 @@ class TestSecretStore(unittest.TestCase):
         with self.assertRaises(KeyError):
             self.store.set("SOME_OTHER_KEY", "x")
 
+    @unittest.skipIf(os.name == "nt", "Windows ACLs do not expose POSIX mode bits")
     def test_the_file_is_not_world_readable(self):
         self.store.set("GEMINI_API_KEY", "x" * 20)
         if os.name == "nt":
@@ -157,7 +159,13 @@ class TestStore(unittest.TestCase):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def test_migrations_are_idempotent(self):
-        self.assertEqual(self.applied, ["001_v5_initial.sql", "002_observer_runs.sql"])
+        # Both branches added a 002. migrate() keys on filename and applies in
+        # sorted filename order, so the duplicate number is cosmetic — but the
+        # order below is the one the runner actually produces.
+        self.assertEqual(self.applied, [
+            "001_v5_initial.sql", "002_legacy_flow.sql",
+            "002_observer_runs.sql", "003_observation_history.sql",
+        ])
         self.assertEqual(migrate(self.db), [])
 
     def test_the_schema_has_the_v5_audit_table(self):
