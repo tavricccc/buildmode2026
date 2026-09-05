@@ -104,9 +104,32 @@ Then configure real providers in **Settings**. L2 and L3 are configured
 independently, by design.
 
 ```bash
-bun run verify           # compile check + 122 tests + frontend typecheck
+bun run verify           # compile check + 124 tests + frontend typecheck
 bun run probe:gemini     # measure what this Gemini deployment can do
 bun run probe:minimax    # measure what this MiniMax deployment can do
+```
+
+### If the frontend build fails on macOS
+
+Two failures here are the machine, not the code.
+
+`ERR_DLOPEN_FAILED … library load disallowed by system policy` from rollup
+or `Error: The service was stopped` from esbuild means Gatekeeper is
+refusing the prebuilt native binaries `bun install` just unpacked: a
+checkout made by a quarantining client (Sourcetree, a browser download)
+passes `com.apple.quarantine` on to everything written under it. Clear it
+for this project's dependencies and rebuild:
+
+```bash
+xattr -dr com.apple.quarantine node_modules frontend/node_modules
+```
+
+`OSError: [Errno 48] Address already in use` means something else holds
+port 8000. The port is host-managed, so pass it in the environment rather
+than editing config:
+
+```bash
+CARE_PORT=8010 bun start
 ```
 
 ## Layout

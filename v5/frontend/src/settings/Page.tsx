@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api/client";
-import { Badge, Card, Empty } from "../components/ui";
+import { Badge, Card, Empty, ErrorBanner, errorText } from "../components/ui";
 import type { SettingsPayload } from "../types/api";
 import { SecretInput } from "./SecretInput";
 
@@ -19,15 +19,24 @@ export function SettingsPage() {
   const [note, setNote] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const data = await api.settings();
-    setSettings(data);
-    setDraft(structuredClone(data.policy));
+    try {
+      const data = await api.settings();
+      setSettings(data);
+      setDraft(structuredClone(data.policy));
+      setLoadError(null);
+    } catch (exc) {
+      setLoadError(errorText(exc));
+    }
   }, []);
 
   useEffect(() => { void load(); }, [load]);
 
+  // Without this the page sat on "載入中…" for ever whenever the backend was
+  // unreachable, which reads as "still working" rather than "it failed".
+  if (loadError) return <Card title="系統設定"><ErrorBanner>無法讀取設定：{loadError}</ErrorBanner></Card>;
   if (!settings || !draft) return <Card title="系統設定"><Empty>載入中…</Empty></Card>;
 
   const dirty = JSON.stringify(draft) !== JSON.stringify(settings.policy);
@@ -62,8 +71,18 @@ export function SettingsPage() {
 
   const rollback = async (version: string) => {
     setBusy(true);
+    setMessage(null);
+    // A rollback that fails silently leaves the caregiver believing a
+    // different policy version is live than the one actually running.
     try { await api.rollback(version); setMessage(`已回滾至 ${version}。`); await load(); }
+    catch (exc) { setMessage(`回滾失敗：${errorText(exc)}`); }
     finally { setBusy(false); }
+  };
+
+  const saveProvider = (slot: "l2" | "l3", patch: Record<string, string>) => {
+    void api.saveProviders({ [slot]: patch })
+      .then(load)
+      .catch((exc) => setMessage(`Provider 設定未儲存：${errorText(exc)}`));
   };
 
   return (
@@ -87,11 +106,11 @@ export function SettingsPage() {
               <h2 style={{ marginBottom: ".5rem" }}>{slot.toUpperCase()} · {settings.providers[slot].name}</h2>
               <label className="field"><span>模型</span>
                 <input defaultValue={settings.providers[slot].model}
-                       onBlur={(event) => void api.saveProviders({ [slot]: { model: event.target.value } }).then(load)} />
+                       onBlur={(event) => saveProvider(slot, { model: event.target.value })} />
               </label>
               <label className="field"><span>Base URL</span>
                 <input defaultValue={settings.providers[slot].base_url}
-                       onBlur={(event) => void api.saveProviders({ [slot]: { base_url: event.target.value } }).then(load)} />
+                       onBlur={(event) => saveProvider(slot, { base_url: event.target.value })} />
               </label>
               <Badge tone={settings.providers[slot].key_configured ? "ok" : "warn"}>
                 {settings.providers[slot].key_configured ? "已設定 API Key" : "未設定 Key，使用 offline stub"}

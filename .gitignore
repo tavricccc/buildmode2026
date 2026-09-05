@@ -26,3 +26,8 @@ v5/data/secrets.json
 v5/data/models/
 v5/frontend/dist/
 v5/frontend/node_modules/
+
+# Provider key files kept beside the checkout (v5 00 DoD 13: no key in Git)
+GMIAPI.txt
+*API.txt
+*.key

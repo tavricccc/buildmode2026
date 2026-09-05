@@ -84,6 +84,25 @@ export function clock(at: number | string | null | undefined): string {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
+/**
+ * One phrasing for every failed call.
+ *
+ * The Dashboard uses `Promise.allSettled` and degrades panel by panel; the
+ * other pages issue single calls, and a rejection there used to be swallowed
+ * by `void`. An empty page then read as "nothing has happened yet" — the one
+ * thing a care UI must never say when it simply could not ask.
+ */
+export function errorText(exc: unknown): string {
+  const error = exc as { code?: string; message?: string } | null;
+  const code = error?.code && error.code !== "unknown" ? `（${error.code}）` : "";
+  return `${error?.message || "無法連線至後端"}${code}`;
+}
+
+/** A failure the caregiver needs to see, in the same slot on every page. */
+export function ErrorBanner({ children }: { children: ReactNode }) {
+  return <p className="banner bad" role="alert">{children}</p>;
+}
+
 export function Empty({ children }: { children: ReactNode }) {
   return <p className="empty">{children}</p>;
 }

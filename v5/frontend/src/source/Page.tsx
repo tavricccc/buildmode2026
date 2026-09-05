@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ArrowClockwise, Play, Stop, VideoCamera } from "@phosphor-icons/react";
 import { api } from "../api/client";
-import { Badge, Card, Empty, ms } from "../components/ui";
+import { Badge, Card, Empty, ErrorBanner, errorText, ms } from "../components/ui";
 import type { Status } from "../types/api";
 
 type Scenario = { id: string; name: string; description: string };
@@ -12,46 +12,60 @@ export function SourcePage({ status }: { status: Status | null }) {
   const [target, setTarget] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [snapshot, setSnapshot] = useState(api.sourceSnapshotUrl());
+
+  const source = status?.source;
+  const running = source?.running ?? false;
 
   useEffect(() => {
     void api.scenarios().then((data) => setScenarios(data.scenarios)).catch(() => undefined);
-    const timer = window.setInterval(() => setSnapshot(api.sourceSnapshotUrl()), 2000);
-    return () => window.clearInterval(timer);
   }, []);
 
+  // Only poll while frames are actually arriving; an idle install has no
+  // snapshot to fetch and the <img> is not mounted anyway.
+  useEffect(() => {
+    if (!running) return;
+    const timer = window.setInterval(() => setSnapshot(api.sourceSnapshotUrl()), 2000);
+    return () => window.clearInterval(timer);
+  }, [running]);
+
   const start = async (kind: string, value: string) => {
-    if (!value) return;
-    setBusy(true); setMessage(null);
+    setBusy(true); setMessage(null); setError(null);
+    if (!value) {
+      setError("請先選擇或輸入來源，再啟動分析。");
+      setBusy(false);
+      return;
+    }
     try {
       await api.startSource(kind, value);
       setMessage("影像來源已啟動，分析管線正在接收畫面。");
     } catch (exc) {
-      setMessage((exc as Error).message);
+      setError(errorText(exc));
     } finally { setBusy(false); }
   };
 
   const stop = async () => {
-    setBusy(true);
+    setBusy(true); setMessage(null); setError(null);
     try { await api.stopSource(); setMessage("影像來源已停止。"); }
+    catch (exc) { setError(errorText(exc)); }
     finally { setBusy(false); }
   };
 
-  const source = status?.source;
   return (
     <div className="page-stack">
       <header className="page-heading">
         <div><span className="eyebrow">影像來源</span><h1>即時影像</h1><p>RTSP、模擬情境與本機錄影共用同一條分析管線。</p></div>
-        <Badge tone={source?.running ? "ok" : "muted"} dot>{source?.running ? "分析中" : "未啟動"}</Badge>
+        <Badge tone={running ? "ok" : "muted"} dot>{running ? "分析中" : "未啟動"}</Badge>
       </header>
 
       <div className="source-layout">
         <Card className="preview-card">
           <div className="preview-frame">
-            {source?.running ? <img src={snapshot} alt="最新分析影格" /> : (
+            {running ? <img src={snapshot} alt="最新分析影格" /> : (
               <div className="preview-empty"><VideoCamera size={38} /><b>尚未接收影像</b><span>啟動來源後顯示最新取樣影格</span></div>
             )}
-            <div className="preview-label"><i className={`status-dot ${source?.running ? "ok" : "muted"}`} />分析用低頻預覽</div>
+            <div className="preview-label"><i className={`status-dot ${running ? "ok" : "muted"}`} />分析用低頻預覽</div>
           </div>
           <div className="source-metrics">
             <span><b>{source?.kind ?? "—"}</b>來源</span>
@@ -79,9 +93,12 @@ export function SourcePage({ status }: { status: Status | null }) {
           </div>}
           <div className="button-row">
             <button className="action primary" disabled={busy || !target} onClick={() => void start(mode, target)}><Play size={17} weight="fill" />開始分析</button>
-            <button className="action" disabled={busy || !source?.running} onClick={() => void stop()}><Stop size={17} weight="fill" />停止</button>
-            <button className="action ghost" disabled={busy || !source?.running} onClick={() => void start(mode, target)}><ArrowClockwise size={17} />重新連線</button>
+            <button className="action" disabled={busy || !running} onClick={() => void stop()}><Stop size={17} weight="fill" />停止</button>
+            <button className="action ghost" disabled={busy || !running || !target}
+                    title={running && !target ? "重新連線需要先在上方指定來源" : undefined}
+                    onClick={() => void start(mode, target)}><ArrowClockwise size={17} />重新連線</button>
           </div>
+          {error && <ErrorBanner>{error}</ErrorBanner>}
           {message && <p className="banner">{message}</p>}
           <p className="privacy-note">此畫面僅顯示分析 Ring Buffer 的最新取樣影格，不是錄影儲存或 NVR。</p>
         </Card>

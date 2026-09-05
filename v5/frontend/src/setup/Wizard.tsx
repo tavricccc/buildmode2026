@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api/client";
-import { Badge, Card, Empty, ms, outcomeTone } from "../components/ui";
+import { Badge, Card, Empty, ErrorBanner, errorText, ms, outcomeTone } from "../components/ui";
 import type { CascadeTestResult, SetupState } from "../types/api";
 
 type ProbeResult = { ok: boolean; code?: string; message?: string; model_available?: boolean };
@@ -18,11 +18,17 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
   const [state, setState] = useState<SetupState | null>(null);
   const [probes, setProbes] = useState<Record<string, ProbeResult | string>>({});
   const [cascade, setCascade] = useState<CascadeTestResult | null>(null);
+  const [cascadeError, setCascadeError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  const load = useCallback(async () => setState(await api.setupState()), []);
+  const load = useCallback(async () => {
+    try { setState(await api.setupState()); setLoadError(null); }
+    catch (exc) { setLoadError(errorText(exc)); }
+  }, []);
   useEffect(() => { void load(); }, [load]);
 
+  if (loadError && !state) return <Card title="初始設定"><ErrorBanner>無法讀取設定狀態：{loadError}</ErrorBanner></Card>;
   if (!state) return <Card title="初始設定"><Empty>載入中…</Empty></Card>;
 
   const probe = async (name: string, fn: () => Promise<unknown>) => {
@@ -31,7 +37,7 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
       const result = await fn();
       setProbes((current) => ({ ...current, [name]: result as ProbeResult }));
     } catch (exc) {
-      setProbes((current) => ({ ...current, [name]: (exc as Error).message }));
+      setProbes((current) => ({ ...current, [name]: errorText(exc) }));
     } finally {
       setBusy(null);
       void load();
@@ -97,18 +103,24 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
       <Card title="端到端 Cascade 測試" aside={<span className="muted" style={{ fontSize: 12 }}>
         讓一個真實分析視窗通過全部三層
       </span>}>
-        <div className="row" style={{ marginBottom: cascade ? ".9rem" : 0 }}>
+        <div className="row" style={{ marginBottom: cascade || cascadeError ? ".9rem" : 0 }}>
           {state.scenarios.map((scenario) => (
             <button key={scenario} className="action primary" disabled={busy !== null}
                     onClick={() => void (async () => {
                       setBusy("cascade");
+                      setCascadeError(null);
+                      // Clearing the old trace matters: a stale green cascade
+                      // left on screen after a failed run reads as a pass.
+                      setCascade(null);
                       try { setCascade(await api.cascadeTest(scenario)); }
+                      catch (exc) { setCascadeError(errorText(exc)); }
                       finally { setBusy(null); }
                     })()}>
               執行「{scenario}」
             </button>
           ))}
         </div>
+        {cascadeError && <ErrorBanner>Cascade 測試未完成：{cascadeError}</ErrorBanner>}
         {cascade && (
           <div className="trace">
             {cascade.trace.map((step) => (
