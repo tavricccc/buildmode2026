@@ -61,12 +61,9 @@ export const api = {
       window_end_ms: number;
       sources: Record<string, unknown>;
       stats: {
-        events_count: number;
-        falls_count: number;
-        hydration_events_count: number;
-        observations_count: number;
-        health_metrics_count: number;
-        interactions_count: number;
+        warning_count: number;
+        follow_up_count: number;
+        privacy_safe: boolean;
       };
     }>("/api/social-work/auto-generate", { hours, record_type, author }),
   statusReports: () => call<{ reports: StatusReport[] }>("/api/reports/status"),
