@@ -1,8 +1,0 @@
-{
-  "name": "Empty room",
-  "description": "Nobody home. Most windows must be skipped by L1 while the sparse safety heartbeat still produces L2 calls (v5 00 items 3-4).",
-  "loop": true,
-  "segments": [
-    {"duration_sec": 60, "person": false}
-  ]
-}

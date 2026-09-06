@@ -1,0 +1,193 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# The backend imports only the Python standard library, so there is nothing to
+# install for it — that claim is worth keeping true, and these jobs are where
+# it would break first.
+
+jobs:
+  verify:
+    name: verify · Python ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # README says "Python 3.11+". Test the floor and the current release,
+        # otherwise the claim only covers whatever the last developer had.
+        python: ["3.11", "3.13"]
+    defaults:
+      run:
+        working-directory: src
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # `bun run verify` degrades instead of failing in two places: it skips the
+      # frontend typecheck when frontend/node_modules is absent, and it only
+      # prints a warning when ffmpeg is missing. Both still exit 0. On a fresh
+      # runner both are plausible, so assert them here — otherwise a green tick
+      # can mean two of the four steps never ran.
+      - name: Assert verify will not silently skip anything
+        run: |
+          set -euo pipefail
+          test -d frontend/node_modules \
+            || { echo "::error::frontend deps absent — verify would skip the typecheck and still pass"; exit 1; }
+          command -v ffmpeg >/dev/null \
+            || { echo "::error::ffmpeg absent — verify would only warn"; exit 1; }
+          echo "python3 is $(python3 -V), the version this job is meant to test"
+
+      - name: Compile check, unit tests, typecheck, ffmpeg
+        run: bun run verify
+
+      - name: Production build
+        run: bun run build
+
+  offline-cascade:
+    name: offline cascade · no API keys
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Create the database
+        run: bun run migrate
+
+      # The README's central claim is that a reviewer can clone this and run it
+      # with no key and no vLLM. No secret is configured in this job, and none
+      # can be: that is the point. If this step goes red, the claim is false.
+      - name: Drive the fall replay through L1 → L2 → L3 → Policy
+        env:
+          CARE_PORT: "8211"
+        run: |
+          set -euo pipefail
+
+          bun start -- --stubs --source fall > /tmp/care.log 2>&1 &
+          echo $! > /tmp/care.pid
+
+          # `bun start` builds the frontend before serving, so allow for that.
+          up=""
+          for _ in $(seq 1 90); do
+            if curl -sf "http://127.0.0.1:${CARE_PORT}/api/status" >/dev/null 2>&1; then
+              up=yes
+              break
+            fi
+            sleep 2
+          done
+          if [ -z "$up" ]; then
+            echo "::error::the backend never answered on port ${CARE_PORT}"
+            tail -80 /tmp/care.log
+            exit 1
+          fi
+
+          # The fixture is a fall with a slow recovery. Getting past "suspect"
+          # means L1 gated, the stub L2 returned a schema-valid observation and
+          # the state machine advanced on it — not merely that a port opened.
+          #
+          # Accept confirmed, recovering or resolved rather than confirmed
+          # alone: the machine is idle → suspect → confirmed → recovering →
+          # resolved, so all three prove confirmation happened, and waiting for
+          # the transient "confirmed" would go red whenever a poll lands either
+          # side of it.
+          #
+          # not named `status`: that is read-only in zsh, and this block is
+          # worth being able to paste into a local shell unchanged.
+          fall_state=""
+          for _ in $(seq 1 60); do
+            fall_state=$(
+              curl -sf "http://127.0.0.1:${CARE_PORT}/api/events" 2>/dev/null \
+                | jq -r '[.events[] | select(.event_type == "fall") | .status] | first // ""' \
+                || true
+            )
+            case "$fall_state" in
+              confirmed|recovering|resolved) break ;;
+            esac
+            sleep 2
+          done
+
+          kill "$(cat /tmp/care.pid)" 2>/dev/null || true
+
+          case "$fall_state" in
+            confirmed|recovering|resolved) ;;
+            *)
+              echo "::error::the fall was never confirmed (last state: '${fall_state:-none}')"
+              tail -80 /tmp/care.log
+              exit 1
+              ;;
+          esac
+
+          echo "A fall reached '${fall_state}' with no API key configured."
+
+      - name: Upload the run log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: offline-cascade-log
+          path: /tmp/care.log
+          if-no-files-found: ignore
+
+  hygiene:
+    name: nothing that must stay out of Git is in it
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # docs/00_SCOPE_AND_DEFINITION_OF_DONE.md DoD 13: no key in Git. The
+      # provider keys live beside the checkout and the secret store writes 0600
+      # under data/ — .gitignore covers all of it, and this is the check that
+      # notices when someone adds a rule-defeating path or uses `git add -f`.
+      - name: Assert no keys, databases or vendored dependencies are tracked
+        run: |
+          set -euo pipefail
+          tracked=$(
+            git ls-files \
+              | grep -Ei '(^|/)\.env$|(^|/)\.env\.[^/]*$|API\.txt$|(^|/)secrets\.json$|\.key$|(^|/)node_modules/|(^|/)dist/|\.sqlite3' \
+              | grep -v '\.env\.example$' \
+              || true
+          )
+          if [ -n "$tracked" ]; then
+            echo "::error::these must never be committed:"
+            echo "$tracked"
+            exit 1
+          fi
+          echo "No key, database or vendored dependency is tracked."
+
+      - name: Assert the licence is present and intact
+        run: |
+          set -euo pipefail
+          test -f LICENSE || { echo "::error::LICENSE is missing"; exit 1; }
+          grep -q "GNU GENERAL PUBLIC LICENSE" LICENSE \
+            && grep -q "Version 3, 29 June 2007" LICENSE \
+            || { echo "::error::LICENSE is not the GPL-3.0 text"; exit 1; }
+          grep -q "GPL-3.0-or-later" src/package.json \
+            || { echo "::error::src/package.json does not declare the licence"; exit 1; }
+          echo "GPL-3.0-or-later, declared and intact."

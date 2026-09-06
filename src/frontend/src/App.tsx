@@ -1,0 +1,103 @@
+import { useEffect, useMemo, useState } from "react";
+import {
+  ChartLineUp, ChatCircleText, Database, FileText, GearSix, House, Pulse, SlidersHorizontal,
+  VideoCamera, Wrench, FlowArrow,
+} from "@phosphor-icons/react";
+import { api } from "./api/client";
+import { RealtimeClient } from "./api/ws";
+import { DashboardPage } from "./dashboard/Page";
+import { MaintenancePage } from "./maintenance/Page";
+import { OperationsPage } from "./operations/Page";
+import { SettingsPage } from "./settings/Page";
+import { SetupPage } from "./setup/Wizard";
+import { SourcePage } from "./source/Page";
+import { StatisticsPage } from "./statistics/Page";
+import { InteractionPage } from "./interaction/Page";
+import { ReportsPage } from "./reports/Page";
+import { AuditPage } from "./audit/Page";
+import type { Status } from "./types/api";
+
+export type AppTab = "dashboard" | "source" | "statistics" | "interaction" | "reports" | "audit" | "operations" | "maintenance" | "setup" | "settings";
+
+const CARE_NAV: { id: AppTab; label: string; icon: typeof House }[] = [
+  { id: "dashboard", label: "照護總覽", icon: House },
+  { id: "statistics", label: "趨勢與統計", icon: ChartLineUp },
+  { id: "source", label: "即時影像", icon: VideoCamera },
+];
+
+const ADMIN_NAV: { id: AppTab; label: string; icon: typeof House }[] = [
+  { id: "operations", label: "運作監看", icon: FlowArrow },
+  { id: "maintenance", label: "系統維護", icon: GearSix },
+  { id: "interaction", label: "住民互動", icon: ChatCircleText },
+  { id: "reports", label: "社工報告", icon: FileText },
+  { id: "audit", label: "稽核後台", icon: Database },
+  { id: "setup", label: "初始設定", icon: Wrench },
+  { id: "settings", label: "系統設定", icon: SlidersHorizontal },
+];
+
+export default function App() {
+  const realtime = useMemo(() => new RealtimeClient(), []);
+  const [tab, setTab] = useState<AppTab>("dashboard");
+  const [status, setStatus] = useState<Status | null>(null);
+  const [offline, setOffline] = useState<string | null>(null);
+
+  useEffect(() => {
+    realtime.connect();
+    return () => realtime.close();
+  }, [realtime]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const next = await api.status();
+        if (!cancelled) { setStatus(next); setOffline(null); }
+      } catch (exc) {
+        if (!cancelled) setOffline((exc as Error).message);
+      }
+    };
+    void poll();
+    const timer = window.setInterval(poll, 3000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, []);
+
+  return (
+    <div className="app-shell">
+      <aside className="sidebar">
+        <div className="brand-mark"><Pulse weight="fill" size={20} /><span>Care <b>Agent</b></span></div>
+        <nav aria-label="主要導覽">
+          {CARE_NAV.map(({ id, label, icon: Icon }) => (
+            <button key={id} aria-current={tab === id ? "page" : undefined} onClick={() => setTab(id)}>
+              <Icon size={19} /><span>{label}</span>
+            </button>
+          ))}
+          <span className="nav-section-label">管理與維護</span>
+          {ADMIN_NAV.map(({ id, label, icon: Icon }) => (
+            <button key={id} className="admin-nav" aria-current={tab === id ? "page" : undefined} onClick={() => setTab(id)}>
+              <Icon size={18} /><span>{label}</span>
+            </button>
+          ))}
+        </nav>
+        <div className="sidebar-status">
+          <div><Database size={15} /><span className="mono">{status?.config_version ?? "載入中"}</span></div>
+          <div><i className={`status-dot ${offline ? "bad" : "ok"}`} />{offline ? "後端未連線" : "後端已連線"}</div>
+          <div><i className={`status-dot ${status?.realtime.clients ? "ok" : "muted"}`} />WebSocket 即時同步</div>
+        </div>
+      </aside>
+
+      <main className="workspace">
+        {offline && <div className="global-alert"><b>目前無法確認照護狀態</b><span>{offline}</span></div>}
+        {tab === "dashboard" && <DashboardPage status={status} realtime={realtime} onNavigate={setTab} />}
+        <div hidden={tab !== "source"}><SourcePage status={status} /></div>
+        {tab === "statistics" && <StatisticsPage />}
+        {tab === "operations" && <OperationsPage status={status} realtime={realtime} />}
+        {tab === "maintenance" && <MaintenancePage status={status} realtime={realtime} />}
+        {tab === "interaction" && <InteractionPage />}
+        {tab === "reports" && <ReportsPage />}
+        {tab === "audit" && <AuditPage />}
+        {tab === "setup" && <SetupPage onDone={() => setTab("dashboard")} />}
+        {tab === "settings" && <SettingsPage />}
+      </main>
+    </div>
+  );
+}

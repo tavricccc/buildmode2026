@@ -1,0 +1,103 @@
+# 資料模型、策略守門員與隱私防線 (Data & Policy)
+
+本文件說明 Care Agent 的資料庫架構、全鏈路稽核紀錄、確定性策略守門員運作機制與長照場域隱私安全防線。
+
+---
+
+## 1. SQLite 資料庫綱要 (Database Schema)
+
+系統採用輕量高效的本地 SQLite 3（強制開啟 Write-Ahead Logging, WAL 模式）。主要資料表如下：
+
+```text
+┌─────────────────┐       ┌─────────────────┐       ┌─────────────────┐
+│  pipeline_runs  │◀─────▶│     events      │◀─────▶│     actions     │
+│ (每視窗稽核軌跡) │       │ (狀態機流轉紀錄) │       │ (策略授權之行動) │
+└─────────────────┘       └─────────────────┘       └─────────────────┘
+         │                         │                         │
+         ▼                         ▼                         ▼
+┌─────────────────┐       ┌─────────────────┐       ┌───────────────────────┐
+│    evidence     │       │    analyses     │       │ notification_deliveries│
+│ (短影音與影格)   │       │ (L2/L3 模型輸出) │       │ (Telegram 通報紀錄)    │
+└─────────────────┘       └─────────────────┘       └───────────────────────┘
+```
+
+### 核心資料表說明
+
+1. **`pipeline_runs`（管線執行軌跡表）**：
+   系統核心稽核表，每個 5–10 秒的視覺視窗均會新增一筆紀錄（包括被 L1 略過的無人視窗）：
+   - `window_id`：全域唯一視窗識別碼。
+   - `l1_decision`、`l1_confidence`：L1 判斷（`person_present` / `no_person` / `stale` / `unavailable`）。
+   - `l2_called`、`l2_outcome`、`l2_latency_ms`：L2 呼叫狀態（`called` / `skipped_l1` / `heartbeat` / `failed`）與推論延遲。
+   - `l2_escalation_required`、`l2_escalation_reason`：L2 是否提出深度審查需求。
+   - `l3_called`、`l3_outcome`、`l3_latency_ms`：L3 執行結果（`not_required` / `called` / `degraded_text_only` / `failed`）。
+   - `evidence_ref`：關聯之影音切片路徑。
+   - `config_version`：產生該次決策時之系統設定版本。
+
+2. **`events`（狀態機事件表）**：
+   記錄經由狀態機推進的事件歷程（例如跌倒歷程、飲水歷程），欄位包含 `event_type`、`current_state`、`suspected_at`、`confirmed_at` 與 `resolved_at`。
+
+3. **`hydration_sessions`（飲水聚合表）**：
+   僅記錄流轉至 `completed` 之有效飲水週期，提供每日總合與個人飲水習慣分析。
+
+4. **`actions`（系統行動表）**：
+   僅由確定性策略守門員核准並建立，嚴格記錄行動型態、執行狀態與對應之事件依據。
+
+5. **`observer_findings`（觀察者基準線分析表）**：
+   保存每日基準線偏移與手動 L3 期間分析。每筆手動分析都帶有 `call_id`，可回查實際模型呼叫。
+
+---
+
+## 2. 確定性策略守門員 (Deterministic Policy Gateway)
+
+Policy Gateway 是全系統**唯一**具備對外採取實質行動（發出通知、標記照護急件）授權的元件。
+
+### 核心原則與權限隔離
+
+- **模型僅提供意見，規則掌握實權**：
+  大語言與多模態模型僅能回傳結構化結構（如 `GeminiObservation` 或 `DeeperAnalysis`），提出風險等級評估與論述，**不可直接執行任何通報 API**。
+- **無動態門檻修改權限**：
+  模型無權覆寫系統內建或操作員設定的通知門檻。
+- **無任意資料查詢權限**：
+  模型僅接收封裝好的當前視窗證據，無權在資料庫執行任意 SQL 查詢。
+- **自動降級與原因記錄**：
+  若 L3 模型建議「緊急通知家屬」，但設定中未開啟該項通知授權，策略守門員會強制將其降級為「儀表板低優先級警示」，並在資料庫寫入 `l3_advisory_not_authorised` 標籤供事後稽核。
+
+---
+
+## 3. Telegram 照護通知安全機制
+
+- **長輪詢架構 (Long Polling)**：系統不對外暴露 Webhook 公開連接埠，防止外部惡意探針與攻擊。
+- **白名單隔離 (Allowlist)**：僅回應設定中預先白名單登記之 Telegram Chat ID，拒絕非授權來源指令。
+- **不透明憑證回呼 (Opaque Callback Token)**：告警訊息中包含一次性不透明 Token，照護者回覆確認（如「已確認安全」或「誤報」）時，系統能精確比對並更新對應事件之狀態。
+
+---
+
+## 4. 觀察者與個人基準線 (Observer Engine)
+
+長照 2.0 失能評估的核心在於「相對於長輩過去常態的偏離」，而非與群體平均做靜態對比。
+
+- **固定週期彙整**：Observer 預設依設定間隔執行，從 SQLite 提取當日飲水、活動覆蓋率、跌倒事件與影像觀察摘要；手動執行時也會先更新當日彙總。
+- **7/30 日基準線滑動比對**：比對長輩自身 7 天與 30 天的移動平均數。
+- **自動分析有門檻**：飲水量、飲水次數、跌倒事件或影像覆蓋率相對 7 日基準變動達設定門檻時，Observer 才呼叫 L3。預設門檻是相對變動 30%，不是標準差。
+- **照護人員可手動分析**：照護總覽提供 1、3、7、30 天期間選擇。手動分析會送出固定上限的結構化摘要、健康量測、事件與 Observer 紀錄，不會附上整段期間的原始影像。
+
+---
+
+## 5. 資料保留政策與隱私防護 (Data Retention & Privacy)
+
+1. **影音證據目前由檔案系統管理**：
+   - 每個實際送入 L2 的視窗都會在 `data/clips/` 建立短影音並寫入 Evidence 參照；環形緩衝區本身仍只保留有限的近期影格。
+   - 目前尚未實作依事件類型自動刪除一般視窗影音的 sweeper；長期留存與刪除週期仍需部署端設定。
+2. **本機資料加密儲存**：
+   - API 金鑰透過 `secretstore.py` 存放在本機受作業系統權限保護（`0600`）的檔案中。
+   - 終端匯出日誌時自動遮蔽所有長輩個人姓名與金鑰雜湊。
+
+---
+
+## 6. Debug 資料隔離（規劃中）
+
+Debug runtime 使用 `data/debug/care.sqlite3`，並把 clips、logs 與生成情境限制在 `data/debug/`。Production 不讀取 Debug database，也不註冊 Debug API。
+
+生成資料帶 `simulation_id`、固定 `seed` 與 `generated=true`。歷史資料產生器先建立底層健康量測、飲水、事件與管線紀錄，再呼叫正式 Observer 彙總；不得只直接寫入 `daily_summaries` 偽造趨勢。
+
+詳見 [Debug Mode 與模擬資料系統](debug-and-simulation.md)。
