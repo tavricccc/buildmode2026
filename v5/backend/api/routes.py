@@ -1,10 +1,10 @@
-"""REST route table (v5 03 §API).
+"""REST route table (docs/03_API_AND_FRONTEND.md §API).
 
 Handlers take ``(ctx, request)`` and return ``(status, payload)``. Two
 rules hold across all of them:
 
 * No handler ever returns a secret. Only ``SecretStore.describe()``
-  crosses this boundary (v5 04 §Secrets).
+  crosses this boundary (docs/04_SETUP_DEPLOY_VERIFY.md §Secrets).
 * Anything that changes behaviour writes a config version first, so the
   Dashboard's rollback list is complete by construction.
 """
@@ -16,13 +16,16 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
+from ..config import PROVIDER_LABELS, SLOT_PROVIDERS, provider_config
+from ..care_summary import build_care_summary
 from ..domain.enums import L2Outcome
-from ..domain.timeutil import now_ms
+from ..domain.timeutil import day_key, now_ms
 from ..l1.detector import DETECTOR_REGISTRY, build_detector
 from ..l2.gemini_client import GeminiClient, GeminiError
 from ..l3.minimax_client import MiniMaxClient, MiniMaxError
 from ..media import ffmpeg
 from ..media.replay_source import ScriptedSource
+from ..observer.daily import run_comprehensive_review
 from ..reporting import auto_generate_social_work_log, build_status_report
 from ..secretstore import SECRET_KEYS
 
@@ -58,6 +61,18 @@ Handler = Callable[[Any, Request], "tuple[int, Any] | tuple[int, Any, str]"]
 ROUTES: list[tuple[str, re.Pattern[str], Handler]] = []
 
 
+def _social_worker_record_view(record: dict[str, Any]) -> dict[str, Any]:
+    """Return record metadata without exposing the entered private narrative."""
+    return {
+        key: record.get(key)
+        for key in ("record_id", "record_type", "occurred_at_ms", "author", "tags", "created_at")
+        if key in record
+    } | {
+        "content": "內容已隱去；請以本頁的整體狀態與待確認事項進行人工覆核。",
+        "privacy_redacted": True,
+    }
+
+
 def route(method: str, pattern: str) -> Callable[[Handler], Handler]:
     compiled = re.compile("^" + re.sub(r"\{(\w+)\}", r"(?P<\1>[^/]+)", pattern) + "$")
 
@@ -78,9 +93,23 @@ def get_status(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
     return 200, ctx.status()
 
 
+@route("GET", "/api/care/summary")
+def get_care_summary(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    return 200, build_care_summary(ctx)
+
+
+@route("GET", "/api/pipeline/active")
+def get_active_pipeline(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    return 200, {
+        "active": ctx.repos.list_pipeline_steps(100, active_only=True),
+        "recent": ctx.repos.list_pipeline_steps(min(request.q_int("limit", 120), 300)),
+        "source": ctx.source.health() if ctx.source else {"running": False, "lifecycle": "stopped"},
+    }
+
+
 @route("GET", "/api/pipeline/runs")
 def get_runs(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
-    """The v5 audit view: every window, whatever happened to it."""
+    """The audit view: every window, whatever happened to it."""
     outcome = request.q("l2_outcome") or None
     if outcome and outcome not in {o.value for o in L2Outcome}:
         raise ApiError(400, "bad_outcome", f"unknown l2_outcome {outcome!r}")
@@ -123,7 +152,10 @@ def get_audit(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
         "model_calls": calls,
         "agent_runs": ctx.repos.list_agent_runs(limit),
         "memories": ctx.repos.list_memories(ctx.config.subject_id, limit=limit),
-        "social_work_records": ctx.repos.list_social_work_records(ctx.config.subject_id, 0, limit),
+        "social_work_records": [
+            _social_worker_record_view(item)
+            for item in ctx.repos.list_social_work_records(ctx.config.subject_id, 0, limit)
+        ],
         "note": "Only persisted inputs, structured outputs and error records are shown; hidden chain-of-thought is not stored or displayed.",
     }
 
@@ -154,8 +186,12 @@ def get_audit_log_file(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]
 @route("GET", "/api/social-work/records")
 def get_social_work_records(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
     since = request.q_int("since_ms", 0)
-    return 200, {"records": ctx.repos.list_social_work_records(
-        ctx.config.subject_id, since, min(request.q_int("limit", 100), 500))}
+    return 200, {"records": [
+        _social_worker_record_view(item)
+        for item in ctx.repos.list_social_work_records(
+            ctx.config.subject_id, since, min(request.q_int("limit", 100), 500)
+        )
+    ], "privacy_redacted": True}
 
 
 @route("POST", "/api/social-work/records")
@@ -229,7 +265,7 @@ def get_events(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
 
 @route("GET", "/api/events/{event_id}")
 def get_event(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
-    """One event plus its full cascade trace (v5 03 §Dashboard)."""
+    """One event plus its full cascade trace (docs/03_API_AND_FRONTEND.md §Dashboard)."""
     event = ctx.repos.get_event(request.params["event_id"])
     if event is None:
         raise ApiError(404, "not_found", "no such event")
@@ -347,7 +383,7 @@ def get_health(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
 
 @route("POST", "/api/health/sample")
 def post_health(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
-    """Fake-health injection retained from v4 (v5 00 §必做)."""
+    """Fake-health injection retained from v4 (docs/00_SCOPE_AND_DEFINITION_OF_DONE.md §必做)."""
     metric = str(request.body.get("metric", "")).strip()
     if not metric:
         raise ApiError(400, "bad_request", "metric is required")
@@ -416,11 +452,13 @@ def get_statistics(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
     since_ms = now_ms() - days * 86_400_000
     return 200, {
         "days": days,
-        "summaries": ctx.repos.daily_summaries(days),
+        "summaries": ctx.repos.daily_summaries(days, day_key(since_ms)),
         "observer_status_counts": ctx.repos.observer_status_counts(
             ctx.config.subject_id, since_ms),
         "recent_observations": ctx.repos.list_observer_runs(
-            ctx.config.subject_id, min(days * 8, 200)),
+            ctx.config.subject_id, min(days * 8, 200), since_ms),
+        "health_samples": ctx.repos.health_history(
+            ctx.config.subject_id, since_ms, min(days * 100, 1000)),
     }
 
 
@@ -429,6 +467,20 @@ def post_observer(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
     result = ctx.observer.run_now()
     if result is None:
         raise ApiError(409, "observer_busy", "observer is already running")
+    return 200, result
+
+
+@route("POST", "/api/observer/analyze-all")
+def post_comprehensive_review(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    days = request.body.get("days", 7)
+    if not isinstance(days, int) or isinstance(days, bool) or days not in {1, 3, 7, 30}:
+        raise ApiError(400, "bad_period", "days must be one of 1, 3, 7, or 30")
+    result = run_comprehensive_review(ctx, days)
+    if not result.get("ok"):
+        if result.get("error") == "l3_disabled":
+            raise ApiError(409, "l3_disabled", "L3 is disabled in the current policy")
+        raise ApiError(502, str(result.get("error", "l3_failed")),
+                       str(result.get("message", "L3 could not complete the review")))
     return 200, result
 
 
@@ -443,6 +495,16 @@ def get_settings(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
         "policy": ctx.policy.to_dict(),
         "providers": {"l2": ctx.l2_config.describe(ctx.secrets),
                       "l3": ctx.l3_config.describe(ctx.secrets)},
+        # The menu comes from the backend so Settings cannot offer a
+        # provider this build has no adapter for.
+        "provider_options": {
+            slot: [{"name": name,
+                    "label": PROVIDER_LABELS.get(name, name),
+                    "secret_key": provider_config(slot, name).secret_key,
+                    "default_model": provider_config(slot, name).model}
+                   for name in names]
+            for slot, names in SLOT_PROVIDERS.items()
+        },
         "secrets": ctx.secrets.describe(),
         "detectors": DETECTOR_REGISTRY,
         "versions": ctx.repos.list_config_versions(),
@@ -474,11 +536,30 @@ def post_rollback(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
 
 @route("POST", "/api/settings/providers")
 def post_providers(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
-    """Model id / base URL / timeout per slot. L2 and L3 are independent."""
-    for slot, config in (("l2", ctx.l2_config), ("l3", ctx.l3_config)):
+    """Provider / model id / base URL / timeout per slot.
+
+    L2 and L3 are independent by design (docs/03_API_AND_FRONTEND.md), so each slot is switched
+    on its own. Switching replaces the slot's config with that provider's
+    defaults rather than patching ``name``: the base URL, API style and
+    secret key belong to the provider, and keeping a vLLM URL in a Gemini
+    slot would look configured and fail on the first call. Any model or
+    base URL sent in the same request is applied on top, so the UI can
+    switch and rename in one round trip.
+    """
+    for slot in ("l2", "l3"):
         update = request.body.get(slot)
         if not isinstance(update, dict):
             continue
+        config = getattr(ctx, f"{slot}_config")
+
+        name = update.get("name")
+        if isinstance(name, str) and name.strip() and name.strip() != config.name:
+            try:
+                config = provider_config(slot, name.strip())
+            except ValueError as exc:
+                raise ApiError(400, "unknown_provider", str(exc)) from exc
+            setattr(ctx, f"{slot}_config", config)
+
         for field in ("model", "base_url"):
             if isinstance(update.get(field), str) and update[field].strip():
                 setattr(config, field, update[field].strip())
@@ -503,15 +584,15 @@ def post_secret(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------
-# Setup and integration probes (v5 03 §Setup / Settings)
+# Setup and integration probes (docs/03_API_AND_FRONTEND.md §Setup / Settings)
 # ---------------------------------------------------------------------
 
 
 @route("GET", "/api/setup/state")
 def get_setup(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
-    """What Setup still needs. Nothing here downloads anything (v5 04)."""
+    """What Setup still needs. Nothing here downloads anything (docs/04_SETUP_DEPLOY_VERIFY.md)."""
     detector_health = ctx.detector.health()
-    scenarios = sorted(p.stem for p in (ctx.config.data_dir / "replays").glob("*.json"))
+    scenarios = sorted(p.stem for p in ctx.config.replay_dir.glob("*.json"))
     steps = [
         {"id": "runtime", "label": "Runtime & FFmpeg",
          "done": ffmpeg.available(), "detail": ffmpeg.version()},
@@ -595,11 +676,11 @@ def test_minimax(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
 def cascade_test(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
     """One window through all three layers, against whatever is configured.
 
-    This is the E2E check v5 03 puts at the end of Setup: it proves the
+    This is the E2E check docs/03_API_AND_FRONTEND.md puts at the end of Setup: it proves the
     layers agree on a contract, not merely that each one answers a ping.
     """
     scenario = str(request.body.get("scenario", "fall"))
-    path = ctx.config.data_dir / "replays" / f"{scenario}.json"
+    path = ctx.config.replay_dir / f"{scenario}.json"
     if not path.exists():
         raise ApiError(404, "no_scenario", f"no replay scenario {scenario!r}")
 
@@ -607,7 +688,21 @@ def cascade_test(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
     frames = source.frames(base_ms=now_ms() - 10_000)
     if not frames:
         raise ApiError(400, "empty_scenario", "scenario produced no frames")
-    for frame in frames[-64:]:
+    # Use one representative window. A fall replay ends with recovery, so
+    # blindly taking the final frames would test only the safe posture and
+    # never exercise L3 or the event state machine.
+    candidates = frames[-64:]
+    anchor = max(
+        candidates,
+        key=lambda frame: (
+            int(bool((frame.annotation or {}).get("near_floor"))) * 3
+            + int(bool((frame.annotation or {}).get("motionless"))) * 2
+            + int(bool((frame.annotation or {}).get("drinking")))
+        ),
+    )
+    anchor_index = frames.index(anchor)
+    window = frames[max(0, anchor_index - 63):anchor_index + 1]
+    for frame in window:
         ctx.cascade.ingest(frame)
     for _ in range(max(2, ctx.policy.l1.frames_to_enter)):
         ctx.cascade._sample_once()
@@ -650,7 +745,7 @@ def get_media_streams(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
 @route("GET", "/api/replay/scenarios")
 def get_scenarios(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
     out = []
-    for path in sorted((ctx.config.data_dir / "replays").glob("*.json")):
+    for path in sorted(ctx.config.replay_dir.glob("*.json")):
         try:
             manifest = ScriptedSource.from_file(path).manifest
         except (OSError, ValueError):
@@ -677,6 +772,68 @@ def post_source_stop(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
     ctx.stop_source()
     ctx.cascade.stop()
     return 200, {"stopped": True}
+
+
+# ---------------------------------------------------------------------
+# Debug-only simulation API
+# ---------------------------------------------------------------------
+
+
+def _debug(ctx: Any) -> Any:
+    if not ctx.config.debug or ctx.debug_simulator is None:
+        raise ApiError(404, "not_found", "debug routes are not available")
+    return ctx.debug_simulator
+
+
+@route("GET", "/api/debug/scenarios")
+def get_debug_scenarios(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    simulator = _debug(ctx)
+    return 200, simulator.status()
+
+
+@route("POST", "/api/debug/history/generate")
+def post_debug_history(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    simulator = _debug(ctx)
+    try:
+        result = simulator.generate_history(
+            days=int(request.body.get("days", 45)),
+            profile=str(request.body.get("profile", "mixed")),
+            seed=int(request.body.get("seed", 20260906)),
+        )
+    except (TypeError, ValueError) as exc:
+        raise ApiError(400, "bad_simulation", str(exc)) from None
+    return 200, result
+
+
+@route("POST", "/api/debug/scenarios/trigger")
+def post_debug_trigger(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    simulator = _debug(ctx)
+    try:
+        return 200, simulator.trigger(
+            str(request.body.get("scenario", "normal")),
+            str(request.body.get("mode", "contract")),
+        )
+    except ValueError as exc:
+        raise ApiError(400, "bad_simulation", str(exc)) from None
+
+
+@route("POST", "/api/debug/stream/start")
+def post_debug_stream_start(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    simulator = _debug(ctx)
+    try:
+        result = simulator.start_stream(
+            profile=str(request.body.get("profile", "mixed")),
+            seed=int(request.body.get("seed", 20260906)),
+            interval_sec=float(request.body.get("interval_sec", 12)),
+        )
+    except (TypeError, ValueError) as exc:
+        raise ApiError(400, "bad_simulation", str(exc)) from None
+    return 200, result
+
+
+@route("POST", "/api/debug/stream/stop")
+def post_debug_stream_stop(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
+    return 200, _debug(ctx).stop_stream()
 
 
 @route("GET", "/api/source/snapshot")

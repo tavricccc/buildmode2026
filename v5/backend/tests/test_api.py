@@ -1,4 +1,4 @@
-"""HTTP + WebSocket surface (v5 03).
+"""HTTP + WebSocket surface (docs/03_API_AND_FRONTEND.md).
 
 Boots the real server on an ephemeral port against a temporary data
 directory, so the routes, the JSON envelope, the static fallback and the
@@ -149,12 +149,40 @@ class TestReadEndpoints(ApiTestCase):
         self.assertIn("Objective", payload["body"])
         self.assertIn("Assessment", payload["body"])
         self.assertIn("Plan", payload["body"])
-        self.assertGreaterEqual(payload["stats"]["events_count"], 1)
+        self.assertTrue(payload["stats"]["privacy_safe"])
+        self.assertEqual([item["key"] for item in payload["sources"]["privacy_dimensions"]],
+                         ["sleep", "diet", "exercise", "social"])
+        self.assertNotIn("hydration_events_count", payload["stats"])
 
         # Verify it can be retrieved from social work records and reports
         s_rec, rec_data = self.call("GET", "/api/social-work/records")
         self.assertEqual(s_rec, 200)
         self.assertTrue(any(r["record_id"] == payload["record_id"] for r in rec_data["records"]))
+        saved = next(r for r in rec_data["records"] if r["record_id"] == payload["record_id"])
+        self.assertTrue(saved["privacy_redacted"])
+        self.assertNotIn("事件自動彙整", saved["content"])
+
+    def test_social_work_surface_redacts_private_note_and_keeps_four_scores(self):
+        secret = "隱私測試：浴室與服藥細節不應出現在社工摘要"
+        self.call("POST", "/api/social-work/records", {
+            "record_type": "case_note", "author": "worker-a", "content": secret,
+        })
+        for metric, value in (
+            ("medication_adherence", 0.4), ("sleep_irregular", 1),
+            ("exercise_status", 0.9), ("diet_status", 1),
+            ("social_status", 0.7),
+        ):
+            self.call("POST", "/api/health/sample", {"metric": metric, "value": value, "unit": "status"})
+
+        status, records = self.call("GET", "/api/social-work/records")
+        self.assertEqual(status, 200)
+        self.assertNotIn(secret, json.dumps(records, ensure_ascii=False))
+        status, report = self.call("POST", "/api/reports/status?days=1", {"report_type": "daily_status"})
+        self.assertEqual(status, 201)
+        self.assertNotIn(secret, report["body"])
+        self.assertEqual([item["name"] for item in report["sources"]["privacy_dimensions"]],
+                         ["睡眠狀態", "飲食狀態", "運動狀態", "社交狀態"])
+        self.assertIn("用藥狀態警示：需要進一步確認", report["body"])
 
     def test_a_bad_query_value_is_rejected_rather_than_ignored(self):
         status, payload = self.call("GET", "/api/pipeline/runs?l2_outcome=nonsense")
@@ -178,6 +206,35 @@ class TestReadEndpoints(ApiTestCase):
         self.assertEqual(payload["days"], 7)
         self.assertIn("observer_status_counts", payload)
         self.assertIn("recent_observations", payload)
+        self.assertIn("health_samples", payload)
+
+    def test_care_summary_never_calls_missing_data_stable(self):
+        status, payload = self.call("GET", "/api/care/summary")
+        self.assertEqual(status, 200)
+        self.assertIn(payload["urgency"], {"unknown", "watch", "today", "immediate"})
+        if payload["urgency"] == "unknown":
+            self.assertNotEqual(payload["state"], "stable")
+
+    def test_production_does_not_expose_debug_routes(self):
+        status, payload = self.call("GET", "/api/debug/scenarios")
+        self.assertEqual(status, 404)
+        self.assertEqual(payload["error"]["code"], "not_found")
+
+    def test_comprehensive_l3_review_uses_selected_dashboard_period(self):
+        self.call("POST", "/api/health/sample", {
+            "metric": "heart_rate", "value": 72, "unit": "bpm", "source": "test",
+        })
+        status, payload = self.call("POST", "/api/observer/analyze-all", {"days": 3})
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["days"], 3)
+        self.assertIn("summary", payload["analysis"])
+        self.assertTrue(payload["analysis"]["recommendations"])
+        self.assertGreaterEqual(payload["data_counts"]["health_measurements"], 1)
+
+    def test_comprehensive_l3_review_rejects_an_unbounded_period(self):
+        status, payload = self.call("POST", "/api/observer/analyze-all", {"days": 90})
+        self.assertEqual(status, 400)
+        self.assertEqual(payload["error"]["code"], "bad_period")
 
     def test_non_api_paths_fall_back_to_the_dashboard_page(self):
         with urllib.request.urlopen(self.base + "/dashboard", timeout=10) as response:
@@ -207,6 +264,9 @@ class TestCascadeThroughHttp(ApiTestCase):
         self.assertEqual(status, 200)
         self.assertTrue(payload["runs"])
         self.assertIn("skip_ratio", payload["stats"])
+        status, active = self.call("GET", "/api/pipeline/active")
+        self.assertEqual(status, 200)
+        self.assertTrue(active["recent"])
 
     def test_l2_observation_survives_final_run_update(self):
         self.call("POST", "/api/pipeline/cascade-test", {"scenario": "fall"})
@@ -270,6 +330,12 @@ class TestSettings(ApiTestCase):
 
     def test_history_reset_clears_runtime_data_but_preserves_settings_and_secrets(self):
         self.call("POST", "/api/pipeline/cascade-test", {"scenario": "fall"})
+        self.call("POST", "/api/social-work/records", {
+            "record_type": "case_note", "author": "reset-test", "content": "temporary note",
+        })
+        self.call("POST", "/api/reports/status?days=1", {
+            "report_type": "daily_status", "days": 1,
+        })
         self.call("POST", "/api/secrets",
                   {"key": "GEMINI_API_KEY", "value": "reset-preserve-canary"})
         _, before = self.call("GET", "/api/settings")
@@ -277,12 +343,19 @@ class TestSettings(ApiTestCase):
         self.assertEqual(status, 200, payload)
         self.assertIn("config_versions", payload["preserved"])
         self.assertGreaterEqual(payload["deleted"].get("pipeline_runs", 0), 1)
+        self.assertGreaterEqual(payload["deleted"].get("pipeline_steps", 0), 1)
+        self.assertGreaterEqual(payload["deleted"].get("social_work_records", 0), 1)
+        self.assertGreaterEqual(payload["deleted"].get("status_reports", 0), 1)
 
         _, events = self.call("GET", "/api/events")
         _, runs = self.call("GET", "/api/pipeline/runs")
+        _, records = self.call("GET", "/api/social-work/records")
+        _, reports = self.call("GET", "/api/reports/status")
         _, after = self.call("GET", "/api/settings")
         self.assertEqual(events["events"], [])
         self.assertEqual(runs["runs"], [])
+        self.assertEqual(records["records"], [])
+        self.assertEqual(reports["reports"], [])
         self.assertEqual(after["policy"]["version"], before["policy"]["version"])
         self.assertTrue(after["secrets"]["GEMINI_API_KEY"]["configured"])
         self.call("POST", "/api/secrets", {"key": "GEMINI_API_KEY", "value": ""})
