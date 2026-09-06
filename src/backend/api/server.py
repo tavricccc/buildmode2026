@@ -462,6 +462,7 @@ class CareRequestHandler(BaseHTTPRequestHandler):
             self.close_connection = True
             return
         self.ctx.browser_sessions[session_id] = session
+        self.ctx.cascade.start()
         try:
             sock.sendall(encode_frame(json.dumps({
                 "type": "media.stream.ready", "payload": session.health(),

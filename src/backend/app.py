@@ -80,6 +80,7 @@ class AppContext:
             self.debug_simulator = DebugSimulator(self)
         if self.notifier is not None:
             self.notifier.start_polling()
+        self.cascade.start()
         self.observer.start()
 
     # -- configuration ---------------------------------------------------
@@ -290,7 +291,8 @@ class AppContext:
         try:
             self.source_terminal = {"lifecycle": lifecycle, "error": error, "at_ms": now_ms()}
             if lifecycle in {"completed", "failed"}:
-                self.cascade.stop()
+                if not self.browser_sessions:
+                    self.cascade.stop()
             level = "error" if lifecycle == "failed" else "info"
             self.repos.log(level, "source", f"source {lifecycle}", {"error": error} if error else {})
             source_id = str(getattr(self.source, "source_id", ""))
