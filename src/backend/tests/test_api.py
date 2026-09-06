@@ -149,12 +149,40 @@ class TestReadEndpoints(ApiTestCase):
         self.assertIn("Objective", payload["body"])
         self.assertIn("Assessment", payload["body"])
         self.assertIn("Plan", payload["body"])
-        self.assertGreaterEqual(payload["stats"]["events_count"], 1)
+        self.assertTrue(payload["stats"]["privacy_safe"])
+        self.assertEqual([item["key"] for item in payload["sources"]["privacy_dimensions"]],
+                         ["sleep", "diet", "exercise", "social"])
+        self.assertNotIn("hydration_events_count", payload["stats"])
 
         # Verify it can be retrieved from social work records and reports
         s_rec, rec_data = self.call("GET", "/api/social-work/records")
         self.assertEqual(s_rec, 200)
         self.assertTrue(any(r["record_id"] == payload["record_id"] for r in rec_data["records"]))
+        saved = next(r for r in rec_data["records"] if r["record_id"] == payload["record_id"])
+        self.assertTrue(saved["privacy_redacted"])
+        self.assertNotIn("事件自動彙整", saved["content"])
+
+    def test_social_work_surface_redacts_private_note_and_keeps_four_scores(self):
+        secret = "隱私測試：浴室與服藥細節不應出現在社工摘要"
+        self.call("POST", "/api/social-work/records", {
+            "record_type": "case_note", "author": "worker-a", "content": secret,
+        })
+        for metric, value in (
+            ("medication_adherence", 0.4), ("sleep_irregular", 1),
+            ("exercise_status", 0.9), ("diet_status", 1),
+            ("social_status", 0.7),
+        ):
+            self.call("POST", "/api/health/sample", {"metric": metric, "value": value, "unit": "status"})
+
+        status, records = self.call("GET", "/api/social-work/records")
+        self.assertEqual(status, 200)
+        self.assertNotIn(secret, json.dumps(records, ensure_ascii=False))
+        status, report = self.call("POST", "/api/reports/status?days=1", {"report_type": "daily_status"})
+        self.assertEqual(status, 201)
+        self.assertNotIn(secret, report["body"])
+        self.assertEqual([item["name"] for item in report["sources"]["privacy_dimensions"]],
+                         ["睡眠狀態", "飲食狀態", "運動狀態", "社交狀態"])
+        self.assertIn("用藥狀態警示：需要進一步確認", report["body"])
 
     def test_a_bad_query_value_is_rejected_rather_than_ignored(self):
         status, payload = self.call("GET", "/api/pipeline/runs?l2_outcome=nonsense")

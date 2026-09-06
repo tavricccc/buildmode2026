@@ -208,8 +208,8 @@ Care Agent 後端提供標準 REST API 與 WebSocket 即時資料流（預設監
 ## 8. 住民互動、社工紀錄與稽核
 
 - `GET/POST /api/interaction/*`：住民互動與背景 understanding；背景推論不得直接對住民發話。
-- `GET/POST /api/social-work/records`：人工社工紀錄，與模型產出分開保存。
-- `POST /api/social-work/auto-generate`：依事件、飲水、觀察、健康量測與互動紀錄產生可供人工覆核的 SOAP 草稿。
+- `GET/POST /api/social-work/records`：人工社工紀錄，與模型產出分開保存；讀取端預設遮蔽紀錄正文。
+- `POST /api/social-work/auto-generate`：依受控資料產生隱私摘要，僅輸出整體狀態、睡眠／飲食／運動／社交四面向 1–10 分、用藥警示與待確認事項；不輸出逐字互動、生活細節、精確數值或完成次數。
 - `GET/POST /api/reports/status`：查詢或產生日常狀態、追蹤與個案摘要報告。
 - `GET /api/audit` 與 `GET /api/audit/log-files*`：回傳有界、遮罩後的操作紀錄；不保存或顯示 hidden chain-of-thought。
 - `POST /api/reset/history`：清除 runtime history，保留設定版本、schema migrations 與 secrets。

@@ -1,7 +1,54 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api/client";
 import { Badge, Card, Empty, ErrorBanner, errorText } from "../components/ui";
-import type { SocialWorkRecord, StatusReport } from "../types/api";
+import type { PrivacyDimension, SocialWorkRecord, StatusReport } from "../types/api";
+
+const DEFAULT_DIMENSIONS: PrivacyDimension[] = [
+  { key: "sleep", name: "睡眠狀態", status: "資料不足", score: 5 },
+  { key: "diet", name: "飲食狀態", status: "資料不足", score: 5 },
+  { key: "exercise", name: "運動狀態", status: "資料不足", score: 5 },
+  { key: "social", name: "社交狀態", status: "資料不足", score: 5 },
+];
+
+function PrivacyRadar({ dimensions }: { dimensions: PrivacyDimension[] }) {
+  const ordered = DEFAULT_DIMENSIONS.map((fallback) => dimensions.find((item) => item.key === fallback.key) || fallback);
+  const center = 120;
+  const radius = 78;
+  const point = (index: number, value: number, scale = radius) => {
+    const angle = -Math.PI / 2 + (index * Math.PI) / 2;
+    const distance = scale * Math.max(0, Math.min(10, value)) / 10;
+    return `${center + Math.cos(angle) * distance},${center + Math.sin(angle) * distance}`;
+  };
+  const polygon = (scale: number) => [0, 1, 2, 3].map((index) => point(index, 10, scale)).join(" ");
+  const values = ordered.map((item) => item.score || 5);
+  const statusTone = (status: string) => status === "需要進一步確認" ? "warn" : status === "未見異常" ? "ok" : "muted";
+
+  return (
+    <div className="privacy-radar-layout">
+      <svg className="privacy-radar" viewBox="0 0 240 240" role="img" aria-label="睡眠、飲食、運動、社交四面向狀態雷達圖">
+        {[2.5, 5, 7.5, 10].map((scale) => <polygon key={scale} points={polygon(radius * scale / 10)} className="privacy-radar-grid" />)}
+        {[0, 1, 2, 3].map((index) => <line key={index} x1={center} y1={center} x2={point(index, 10).split(",")[0]} y2={point(index, 10).split(",")[1]} className="privacy-radar-axis" />)}
+        <polygon points={values.map((value, index) => point(index, value)).join(" ")} className="privacy-radar-value" />
+        {values.map((value, index) => {
+          const [x, y] = point(index, value).split(",").map(Number);
+          return <circle key={index} cx={x} cy={y} r="3.5" className="privacy-radar-dot" />;
+        })}
+        <text x="120" y="13" textAnchor="middle">睡眠</text>
+        <text x="228" y="124" textAnchor="end">飲食</text>
+        <text x="120" y="236" textAnchor="middle">運動</text>
+        <text x="12" y="124">社交</text>
+      </svg>
+      <div className="privacy-radar-legend">
+        {ordered.map((item) => (
+          <div className="privacy-dimension" key={item.key}>
+            <div><strong>{item.name}</strong><b>{item.score}/10</b></div>
+            <span className={`privacy-status ${statusTone(item.status)}`}>{item.status}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export function ReportsPage() {
   const [records, setRecords] = useState<SocialWorkRecord[]>([]);
@@ -71,9 +118,9 @@ export function ReportsPage() {
     setBusy(true);
     setAutoNotice(null);
     try {
-      const result = await api.autoGenerateSocialWorkRecord(autoHours, "case_note", autoAuthor);
+      await api.autoGenerateSocialWorkRecord(autoHours, "case_note", autoAuthor);
       setAutoNotice(
-        `✅ 已成功讀取並彙整過去 ${autoHours} 小時照護資料！產生標準 SOAP 社工日誌（涵蓋事件 ${result.stats.events_count} 筆、跌倒通報 ${result.stats.falls_count} 件、補水紀錄 ${result.stats.hydration_events_count} 次、結構觀察 ${result.stats.observations_count} 筆）。已同步歸檔至社工紀錄與狀態報告。`
+        `✅ 已產生過去 ${autoHours} 小時的隱私摘要，僅保留整體狀態、運動／用藥／作息抽象警示與待確認事項，並已同步歸檔。`
       );
       await load();
     } catch (exc) {
@@ -96,7 +143,7 @@ export function ReportsPage() {
         <div>
           <span className="eyebrow">SOCIAL WORK · AUDITABLE SOURCES</span>
           <h1>社工日誌與狀態報告</h1>
-          <p>支援讀取系統事件與照護日誌自動產出標準 SOAP 臨床日誌，引用已儲存之事件、感測及生活紀錄；初稿需由專業人員覆核。</p>
+          <p>產出供社工覆核的整體狀態摘要。日誌不展開生活起居、逐字互動、精確數值或完成次數，只保留運動、用藥、作息的抽象警示與需要進一步確認的事項。</p>
         </div>
       </header>
 
@@ -104,11 +151,11 @@ export function ReportsPage() {
 
       {/* 核心功能：讀取事件自動產生社工日誌 */}
       <Card
-        title="⚡ 讀取系統事件 · 自動產生社工日誌"
-        aside={<Badge tone="ok">標準 SOAP 照護架構</Badge>}
+        title="⚡ 產生隱私摘要 · 社工日誌"
+        aside={<Badge tone="ok">社工覆核前草稿</Badge>}
       >
         <p style={{ margin: "0 0 14px 0", color: "var(--muted)", fontSize: "0.95rem", lineHeight: 1.6 }}>
-          自動讀取指定時間區間內之<b>系統安全事件（跌倒通報、離床警報）</b>、<b>水分攝取與飲食日誌</b>、<b>環境影像感知（L2/L3 行為觀察）</b>、<b>生理量測數值</b>及<b>住民互動主訴</b>，自動彙整為符合專業長照稽核規範的 SOAP 社工照護日誌並直接存檔。
+          系統只把受控資料轉成<b>整體狀態</b>、<b>運動／用藥／作息警示</b>與<b>待確認事項</b>。逐筆生活事件、飲食／飲水完成紀錄、逐字互動、精確量測與模型分數不會寫入社工日誌。
         </p>
 
         <div style={{ display: "flex", gap: "14px", alignItems: "flex-end", flexWrap: "wrap", marginBottom: "12px" }}>
@@ -143,11 +190,16 @@ export function ReportsPage() {
             disabled={busy}
             onClick={() => void autoGenerateLog()}
           >
-            {busy ? "讀取事件與彙整中…" : "⚡ 立即讀取事件並自動產生社工日誌"}
+            {busy ? "隱私摘要產生中…" : "⚡ 產生隱私摘要社工日誌"}
           </button>
         </div>
 
         {autoNotice && <p className="banner" style={{ marginTop: "12px", background: "rgba(16, 185, 129, 0.15)", border: "1px solid rgba(16, 185, 129, 0.4)", color: "#10b981", padding: "10px 14px", borderRadius: "6px" }}>{autoNotice}</p>}
+      </Card>
+
+      <Card title="四面向整體狀態" aside={<Badge tone="muted">1–10 抽象分數</Badge>}>
+        <p className="privacy-note">分數只作為狀態趨勢提示，不代表量表評估或長者完成率；「資料不足」以 5/10 顯示，避免把未知誤讀為正常。</p>
+        <PrivacyRadar dimensions={reports[0]?.sources.privacy_dimensions || DEFAULT_DIMENSIONS} />
       </Card>
 
       <div className="interaction-grid">
@@ -170,7 +222,7 @@ export function ReportsPage() {
           </div>
           <label className="field">
             <span>紀錄內容</span>
-            <textarea value={content} onChange={(event) => setContent(event.target.value)} placeholder="只填已實際訪視、聯繫或確認的事項。" />
+            <textarea value={content} onChange={(event) => setContent(event.target.value)} placeholder="只填需要進一步確認或已人工確認的事項，不填生活起居細節。" />
           </label>
           <label className="field">
             <span>標籤（逗號分隔）</span>
@@ -237,13 +289,13 @@ export function ReportsPage() {
                     <strong>{record.author || "未署名"}</strong>
                     <small>{new Date(record.occurred_at_ms).toLocaleString()}</small>
                   </div>
-                  <pre style={{ whiteSpace: "pre-wrap", fontFamily: "inherit", margin: "8px 0", fontSize: "0.95rem" }}>{record.content}</pre>
-                  <small style={{ color: "var(--muted)" }}>標籤：{record.tags.join(" · ") || "無"}</small>
+                  <p className="privacy-note" style={{ margin: "8px 0" }}>內容已隱去；請以狀態摘要與待確認事項進行人工覆核。</p>
+                  <small style={{ color: "var(--muted)" }}>標籤：{record.tags.join(" · ") || "無"} · 隱私保護</small>
                 </article>
               );
             })
           ) : (
-            <Empty>尚無符合條件之社工紀錄。點擊上方「立即讀取事件並自動產生社工日誌」即可一鍵生成。</Empty>
+            <Empty>尚無符合條件之社工紀錄。點擊上方「產生隱私摘要社工日誌」即可一鍵生成。</Empty>
           )}
         </div>
       </Card>
@@ -256,7 +308,7 @@ export function ReportsPage() {
                 <h3>{report.title}</h3>
                 <small>{new Date(report.window_start_ms).toLocaleDateString()} 至 {new Date(report.window_end_ms).toLocaleDateString()} · {report.report_type}</small>
                 <pre style={{ whiteSpace: "pre-wrap", margin: "10px 0" }}>{report.body}</pre>
-                <small>來源：社工 {report.sources.social_work_record_ids?.length ?? 0} 筆、事件 {report.sources.event_ids?.length ?? 0} 筆、觀察 {report.sources.observation_ids?.length ?? 0} 筆</small>
+                <small>來源已保留於受控稽核層；此頁不展開原始內容。</small>
               </article>
             ))
           ) : (

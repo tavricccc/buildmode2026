@@ -35,7 +35,7 @@ source → L1 person gate → L2 observation → state machines → L3 review �
 ## feature 功能保留
 
 - `social_work_records` 與 `status_reports` 是人工紀錄和 AI 草稿的不同資料邊界。
-- 社工自動彙整保留事件、觀察、健康量測、互動與原始紀錄的 source IDs，結果必須人工覆核。
+- 社工自動彙整只把受控來源轉成整體狀態、睡眠／飲食／運動／社交四面向 1–10 抽象分數、用藥警示與待確認事項；讀取端遮蔽原始紀錄正文，結果必須人工覆核。
 - `resident interaction` 是可回覆的 interaction driver；background understanding 只提供 advisory insight。
 - `care-system.log` 與 SQLite `app_logs` 同時保留有界系統紀錄。
 - `reset history` 只清 runtime history，不清設定版本、schema migrations 或 secrets。

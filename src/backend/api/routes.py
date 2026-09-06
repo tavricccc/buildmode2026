@@ -61,6 +61,18 @@ Handler = Callable[[Any, Request], "tuple[int, Any] | tuple[int, Any, str]"]
 ROUTES: list[tuple[str, re.Pattern[str], Handler]] = []
 
 
+def _social_worker_record_view(record: dict[str, Any]) -> dict[str, Any]:
+    """Return record metadata without exposing the entered private narrative."""
+    return {
+        key: record.get(key)
+        for key in ("record_id", "record_type", "occurred_at_ms", "author", "tags", "created_at")
+        if key in record
+    } | {
+        "content": "內容已隱去；請以本頁的整體狀態與待確認事項進行人工覆核。",
+        "privacy_redacted": True,
+    }
+
+
 def route(method: str, pattern: str) -> Callable[[Handler], Handler]:
     compiled = re.compile("^" + re.sub(r"\{(\w+)\}", r"(?P<\1>[^/]+)", pattern) + "$")
 
@@ -140,7 +152,10 @@ def get_audit(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
         "model_calls": calls,
         "agent_runs": ctx.repos.list_agent_runs(limit),
         "memories": ctx.repos.list_memories(ctx.config.subject_id, limit=limit),
-        "social_work_records": ctx.repos.list_social_work_records(ctx.config.subject_id, 0, limit),
+        "social_work_records": [
+            _social_worker_record_view(item)
+            for item in ctx.repos.list_social_work_records(ctx.config.subject_id, 0, limit)
+        ],
         "note": "Only persisted inputs, structured outputs and error records are shown; hidden chain-of-thought is not stored or displayed.",
     }
 
@@ -171,8 +186,12 @@ def get_audit_log_file(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]
 @route("GET", "/api/social-work/records")
 def get_social_work_records(ctx: Any, request: Request) -> tuple[int, dict[str, Any]]:
     since = request.q_int("since_ms", 0)
-    return 200, {"records": ctx.repos.list_social_work_records(
-        ctx.config.subject_id, since, min(request.q_int("limit", 100), 500))}
+    return 200, {"records": [
+        _social_worker_record_view(item)
+        for item in ctx.repos.list_social_work_records(
+            ctx.config.subject_id, since, min(request.q_int("limit", 100), 500)
+        )
+    ], "privacy_redacted": True}
 
 
 @route("POST", "/api/social-work/records")

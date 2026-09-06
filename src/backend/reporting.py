@@ -10,6 +10,200 @@ from .domain.timeutil import now_ms
 
 REPORT_TYPES = {"daily_status", "follow_up", "case_summary"}
 
+# Social workers need a useful care handoff, not a replay of somebody's home.
+# Keep this allow-list deliberately small.  New signals must be added here as
+# an abstract status before they can appear in a report.
+_MEDICATION_KEYS = {
+    "medication_status", "medication_adherence", "medication_adherence_status",
+    "medications_status", "medications_taken", "medication_taken", "meds_taken",
+}
+_EXERCISE_KEYS = {
+    "exercise_status", "exercise_adherence", "activity_status", "activity_level",
+    "physical_activity_status", "steps_status",
+}
+_SLEEP_KEYS = {
+    "sleep_status", "sleep_regular", "sleep_regularity", "routine_status",
+    "routine_irregular", "sleep_irregular", "sleep_disruption",
+}
+_DIET_KEYS = {
+    "diet_status", "nutrition_status", "meal_status", "appetite_status",
+    "diet_regular", "nutrition_regular",
+}
+_SOCIAL_KEYS = {
+    "social_status", "social_engagement", "social_interaction",
+    "communication_status", "social_contact_status",
+}
+_NORMAL_VALUES = {
+    "ok", "normal", "regular", "stable", "adherent", "taken", "completed",
+    "adequate", "sufficient", "未見異常", "正常", "規律", "穩定", "有",
+}
+_WARNING_VALUES = {
+    "warning", "watch", "attention", "abnormal", "irregular", "missed",
+    "low", "insufficient", "inadequate", "not_taken", "not_adherent",
+    "需要確認", "異常", "不規律", "不足", "未服用",
+}
+
+
+def _key(value: Any) -> str:
+    return str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+
+
+def _status(value: Any) -> str | None:
+    """Map a structured source value to a non-sensitive public status."""
+    if isinstance(value, bool):
+        return "未見異常" if value else "需要進一步確認"
+    if isinstance(value, (int, float)):
+        # Numeric values are never shown.  Only an explicitly bounded adherence
+        # value is interpreted, and the threshold is intentionally conservative.
+        return "未見異常" if 0.8 <= float(value) <= 1.0 else "需要進一步確認"
+    normalized = _key(value)
+    if normalized in _NORMAL_VALUES:
+        return "未見異常"
+    if normalized in _WARNING_VALUES:
+        return "需要進一步確認"
+    return None
+
+
+def _status_for_key(name: str, value: Any) -> str | None:
+    result = _status(value)
+    # These fields encode a problem when truthy, unlike adherence/status fields.
+    if _key(name) in {"sleep_irregular", "routine_irregular", "sleep_disruption"}:
+        if result == "未見異常":
+            return "需要進一步確認"
+        if result == "需要進一步確認":
+            return "未見異常"
+    return result
+
+
+def _metric_status(health: list[dict[str, Any]], keys: set[str]) -> str:
+    for item in health:
+        if _key(item.get("metric")) not in keys:
+            continue
+        result = _status_for_key(str(item.get("metric", "")), item.get("value"))
+        if result:
+            return result
+    return "資料不足"
+
+
+def _observer_metric_status(observer_runs: list[dict[str, Any]], keys: set[str]) -> str:
+    for run in observer_runs:
+        metrics = run.get("metrics") or {}
+        for name, value in metrics.items():
+            if _key(name) not in keys:
+                continue
+            result = _status_for_key(str(name), value)
+            if result:
+                return result
+    return "資料不足"
+
+
+def _metric_score(health: list[dict[str, Any]], keys: set[str], status: str) -> int:
+    for item in health:
+        name = _key(item.get("metric"))
+        if name not in keys:
+            continue
+        value = item.get("value")
+        if isinstance(value, (int, float)) and 0 <= float(value) <= 1:
+            if name in {"sleep_irregular", "routine_irregular", "sleep_disruption"}:
+                value = 1 - float(value)
+            return max(1, min(10, round(float(value) * 9 + 1)))
+    return _score(status)
+
+
+def _observer_metric_score(observer_runs: list[dict[str, Any]], keys: set[str], status: str) -> int:
+    for run in observer_runs:
+        for name, value in (run.get("metrics") or {}).items():
+            normalized = _key(name)
+            if normalized not in keys:
+                continue
+            if isinstance(value, (int, float)) and 0 <= float(value) <= 1:
+                if normalized in {"sleep_irregular", "routine_irregular", "sleep_disruption"}:
+                    value = 1 - float(value)
+                return max(1, min(10, round(float(value) * 9 + 1)))
+    return _score(status)
+
+
+def _score(status: str) -> int:
+    """Convert an abstract status to a display-only 1-10 radar value."""
+    return {"未見異常": 8, "需要進一步確認": 4, "資料不足": 5}.get(status, 5)
+
+
+def _privacy_dimensions(
+    health: list[dict[str, Any]], observer_runs: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Return four abstract dimensions permitted in a social report."""
+    exercise = _metric_status(health, _EXERCISE_KEYS)
+    if exercise == "資料不足":
+        exercise = _observer_metric_status(observer_runs, _EXERCISE_KEYS)
+    sleep = _metric_status(health, _SLEEP_KEYS)
+    if sleep == "資料不足":
+        sleep = _observer_metric_status(observer_runs, _SLEEP_KEYS)
+    diet = _metric_status(health, _DIET_KEYS)
+    if diet == "資料不足":
+        diet = _observer_metric_status(observer_runs, _DIET_KEYS)
+    social = _metric_status(health, _SOCIAL_KEYS)
+    if social == "資料不足":
+        social = _observer_metric_status(observer_runs, _SOCIAL_KEYS)
+    sleep_score = _metric_score(health, _SLEEP_KEYS, sleep)
+    diet_score = _metric_score(health, _DIET_KEYS, diet)
+    exercise_score = _metric_score(health, _EXERCISE_KEYS, exercise)
+    social_score = _metric_score(health, _SOCIAL_KEYS, social)
+    if sleep == "資料不足":
+        sleep_score = _observer_metric_score(observer_runs, _SLEEP_KEYS, sleep)
+    if diet == "資料不足":
+        diet_score = _observer_metric_score(observer_runs, _DIET_KEYS, diet)
+    if exercise == "資料不足":
+        exercise_score = _observer_metric_score(observer_runs, _EXERCISE_KEYS, exercise)
+    if social == "資料不足":
+        social_score = _observer_metric_score(observer_runs, _SOCIAL_KEYS, social)
+    return [
+        {"key": "sleep", "name": "睡眠狀態", "status": sleep, "score": sleep_score},
+        {"key": "diet", "name": "飲食狀態", "status": diet, "score": diet_score},
+        {"key": "exercise", "name": "運動狀態", "status": exercise, "score": exercise_score},
+        {"key": "social", "name": "社交狀態", "status": social, "score": social_score},
+    ]
+
+
+def _privacy_summary(
+    events: list[dict[str, Any]], observations: list[dict[str, Any]],
+    observer_runs: list[dict[str, Any]], health: list[dict[str, Any]],
+    records: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Build a role-safe summary without copying source prose or raw values."""
+    dimensions = _privacy_dimensions(health, observer_runs)
+    medication = _metric_status(health, _MEDICATION_KEYS)
+    warnings = [item for item in dimensions if item["status"] == "需要進一步確認"]
+    if medication == "需要進一步確認":
+        warnings.append({"name": "用藥狀態", "status": medication})
+    follow_up: list[str] = []
+
+    if any(event.get("event_type") == "fall" for event in events):
+        follow_up.append("請人工確認近期安全相關訊號及目前處置狀態。")
+    for item in warnings:
+        follow_up.append(f"請進一步確認{item['name']}是否需要照護介入或補充紀錄。")
+    if records:
+        follow_up.append("已有社工服務紀錄，請由承辦人確認是否需要納入後續處遇。")
+    if not observations and not observer_runs:
+        follow_up.append("目前結構化觀察不足，請人工確認近期整體狀態。")
+    if not follow_up:
+        follow_up.append("目前未形成需升級的抽象警示，依原照護流程持續觀察。")
+
+    if any(item["status"] == "需要進一步確認" for item in warnings) or any(
+        event.get("event_type") == "fall" for event in events
+    ):
+        overall = "需要關注"
+    elif any(item["status"] != "資料不足" for item in dimensions) and (observations or observer_runs or health):
+        overall = "整體穩定"
+    else:
+        overall = "資料不足"
+
+    return {
+        "overall": overall,
+        "dimensions": dimensions,
+        "medication_status": medication,
+        "follow_up": list(dict.fromkeys(follow_up)),
+    }
+
 
 def _stamp(value: int) -> str:
     return datetime.fromtimestamp(value / 1000).strftime("%Y-%m-%d %H:%M")
@@ -23,161 +217,75 @@ def auto_generate_social_work_log(
     save_to_records: bool = True,
     save_to_reports: bool = True,
 ) -> dict[str, Any]:
-    """Read system events, hydration, observations, and interactions within window_hours
+    """Create a privacy-safe social-work handoff from bounded source data.
 
-    and automatically assemble a comprehensive SOAP social work daily log / incident report.
-    Persists the generated log to social_work_records and status_reports.
+    The source records remain available to the controlled audit layer.  This
+    function is the public-data boundary: it must not copy utterances, source
+    descriptions, exact measurements, completion counts, or model scores.
     """
     from .care_logging import CareLogger
 
     window_hours = max(1, min(int(window_hours), 720))
     ended = now_ms()
     started = ended - window_hours * 3600_000
-    start_str = _stamp(started)
-    end_str = _stamp(ended)
 
     # 1. Fetch system events within the time window
     all_events = ctx.repos.list_events(limit=200)
     events = [e for e in all_events if int(e.get("occurred_at_ms", 0)) >= started]
     falls = [e for e in events if e.get("event_type") == "fall"]
     hydration_events = [e for e in events if e.get("event_type") == "hydration"]
-    other_events = [e for e in events if e.get("event_type") not in ("fall", "hydration")]
 
-    # 2. Fetch hydration summary
-    hydration = {}
-    try:
-        hydration = ctx.repos.hydration_summary()
-    except Exception:
-        hydration = {}
-    intake_ml = int(hydration.get("today_intake_ml", 0))
-    target_ml = int(hydration.get("target_ml", 1500))
-    hydration_rate = round((intake_ml / target_ml * 100), 1) if target_ml > 0 else 0.0
-
-    # 3. Fetch visual observations (L2) and observer runs (L3/Observer)
+    # 2. Fetch visual observations (L2) and observer runs (L3/Observer)
     all_obs = ctx.repos.list_observations(ctx.config.subject_id, limit=200)
     observations = [o for o in all_obs if int(o.get("observed_at_ms", 0)) >= started]
 
     all_obs_runs = ctx.repos.list_observer_runs(ctx.config.subject_id, limit=50)
     observer_runs = [r for r in all_obs_runs if int(r.get("window_ended_at_ms", 0)) >= started]
 
-    # 4. Fetch health metrics
+    # 3. Fetch health metrics
     health = ctx.repos.latest_health(ctx.config.subject_id)
 
-    # 5. Fetch interactions
-    interactions = ctx.repos.interaction_messages(ctx.config.subject_id, "default", limit=40)
-    user_turns = [m for m in interactions if m.get("role") == "user"]
-
-    # 6. Fetch existing human social work records in the window
+    # 4. Fetch existing human social work records in the window
     existing_notes = [
         r for r in ctx.repos.list_social_work_records(ctx.config.subject_id, started, limit=50)
         if "事件自動彙整" not in (r.get("tags") or [])
     ]
 
-    # 7. Assemble Structured SOAP Note
-    title = f"【社工日誌 · 事件自動彙整】個案：{ctx.config.subject_id}（過去 {window_hours} 小時）"
+    # 5. Assemble the role-safe journal.  Keep the familiar SOAP headings for
+    # workflow compatibility, but each section contains only an abstraction.
+    privacy = _privacy_summary(events, observations, observer_runs, health, existing_notes)
+    title = f"【社工日誌・隱私摘要】（過去 {window_hours} 小時）"
     lines = [
-        f"══════════════════════════════════════════════════",
-        f"        長照機構社工日常照護日誌（事件自動彙整）",
-        f"══════════════════════════════════════════════════",
-        f"【服務對象】{ctx.config.subject_id}",
-        f"【統計區間】{start_str} 至 {end_str}（共 {window_hours} 小時）",
-        f"【產生時間】{_stamp(ended)}",
+        "長照機構社工日誌（隱私摘要）",
+        f"【期間】最近 {window_hours} 小時",
         f"【產出人員】{author}",
+        "【資料原則】僅保留整體狀態、抽象警示與待確認事項；不呈現逐筆生活事件、逐字互動、精確數值、完成次數或模型分數。",
         "",
-        "一、S｜主觀陳述與住民互動反應 (Subjective)",
+        "一、S｜主觀與服務接觸 (Subjective)",
     ]
-
-    if user_turns:
-        recent_utterances = user_turns[-3:]
-        lines.append(f"- 住民於近期互動中提出：")
-        for u in recent_utterances:
-            lines.append(f"  · 「{u.get('text', '').strip()}」")
-        lines.append("- 住民情感與溝通狀態：能主動表達需求，意識清楚，對話配合度良好。")
-    else:
-        lines.append("- 本時段尚無住民端直接語音/文字對話紀錄；主觀狀態採日常巡視照護觀察。")
-
-    if existing_notes:
-        lines.append(f"- 本期間照護人員／社工共登載 {len(existing_notes)} 筆現場互動紀錄：")
-        for note in existing_notes[:3]:
-            who = f"（{note['author']}）" if note.get("author") else ""
-            lines.append(f"  · {_stamp(int(note['occurred_at_ms']))} [{note.get('record_type')}]{who}：{note.get('content')[:80]}")
-    else:
-        lines.append("- 期間無新增之人工手動訪視或電訪備忘。")
+    lines.append("- 不展開住民逐字內容或生活起居細節；如需補充，請由社工依權限查閱並人工確認。")
+    lines.append("- " + ("已有服務接觸紀錄，請承辦人確認其後續處遇意義。" if existing_notes else "目前沒有可供社工覆核的服務接觸摘要。"))
 
     lines.extend([
         "",
-        "二、O｜客觀系統事件與監測數據 (Objective)",
-        "【1. 重大與安全事件監控】",
+        "二、O｜整體狀態與抽象警示 (Objective)",
+        f"- 整體狀態：{privacy['overall']}。",
     ])
-    if falls:
-        lines.append(f"- ⚠️ 偵測到 {len(falls)} 次疑似跌倒或突發安全事件：")
-        for f in falls:
-            t = _stamp(int(f.get("occurred_at_ms", 0)))
-            st = f.get("status", "unknown")
-            conf = f.get("confidence", 0)
-            lines.append(f"  · 時間：{t}｜處理狀態：{st}｜模型信心度：{conf:.2f}")
-    else:
-        lines.append(f"- ✅ 監控期間無跌倒或突發劇烈失衡事件（跌倒通報：0 件）。")
-
-    if other_events:
-        lines.append(f"- 其他照護事件：共 {len(other_events)} 筆（離床/滯留/設備事件）。")
-
-    lines.append("【2. 水分攝取與補水狀況】")
-    lines.append(
-        f"- 今日累計水分攝取量：{intake_ml} ml / 目標 {target_ml} ml（達成率：{hydration_rate}%）。"
-    )
-    lines.append(f"- 系統記錄補水事件共 {len(hydration_events)} 次。")
-    if hydration_rate < 50:
-        lines.append("- ⚠️ 水分補充進度偏低，需照護員加強定時引導與提供溫開水。")
-    elif hydration_rate >= 80:
-        lines.append("- ✅ 水分攝取進度理想，達標狀況良好。")
-
-    lines.append("【3. 視覺行為感知與日常活動 (Vision & Posture)】")
-    lines.append(f"- 期間視覺環境感測共產出 {len(observations)} 筆結構化觀察。")
-    if observations:
-        for obs in observations[:3]:
-            lines.append(f"  · {_stamp(int(obs.get('observed_at_ms', 0)))}：{obs.get('summary', '正常日常動態')}")
-    if observer_runs:
-        latest_obs = observer_runs[0]
-        headline = latest_obs.get("headline", "常態穩定")
-        obs_status = latest_obs.get("status", "stable")
-        lines.append(f"- 長期行為趨勢（Observer）：[{obs_status}] {headline}")
-    else:
-        lines.append("- 長期日常節律維持常態穩定。")
-
-    lines.append("【4. 生理徵象量測 (Vitals)】")
-    if health:
-        vitals_str = "、".join(f"{h.get('metric')} {h.get('value')}{h.get('unit', '')}" for h in health[:6])
-        lines.append(f"- 最新生理數值：{vitals_str}")
-    else:
-        lines.append("- 期間尚無新上傳之生理量測數據。")
+    lines.append("- 保留的抽象警示：")
+    for dimension in privacy["dimensions"]:
+        lines.append(f"  · {dimension['name']}：{dimension['score']}/10（{dimension['status']}）。")
+    lines.append(f"  · 用藥狀態警示：{privacy['medication_status']}。")
 
     lines.extend([
         "",
-        "三、A｜專業綜合評估 (Assessment)",
-    ])
-    if falls:
-        lines.append("1. 安全風險：【高風險】期間發生跌倒紀錄，需全面檢核步態穩定度、防滑設施與下床輔具。")
-    else:
-        lines.append("1. 安全風險：【低風險/穩定】動態穩定無跌倒異常，行動安全良好。")
-
-    if hydration_rate < 50:
-        lines.append("2. 水分代謝：【需關注】飲水量未達半數，有輕度脫水或泌尿系統不適潛在風險。")
-    else:
-        lines.append("2. 水分代謝：【良好】飲水規律，生理代謝補充適足。")
-
-    lines.append("3. 認知與生活功能：能配合照護流程，精神及情緒未見躁動或社交退縮傾向。")
-    lines.append("4. 本評估由 AI 系統依據已存取之多模態事件日誌綜合彙編，供專業社工審閱。")
-
-    lines.extend([
+        "三、A｜資料導向評估 (Assessment)",
+        "- 本摘要只反映可用的結構化照護訊號，不構成醫療診斷、量表分數或對住民日常的完整描述。",
+        "- 未提供的項目維持為資料不足，不以推測補寫成正常或異常。",
         "",
-        "四、P｜後續處置與追蹤計畫 (Plan)",
-        "1. 防跌維護：持續維持走道無障礙、夜間輔助地燈照明及床欄安全定位。",
-        "2. 水分補充：由當班照護員於餐間安排 2~3 次定時溫開水引導。",
-        "3. 社工關懷：安排每週定時個別訪視，持續建立信賴關係並追蹤情緒與生活滿意度。",
-        "4. 跨專業交班：重要數據與事件同步記錄於交接班系統，通報責任護理師。",
-        "5. 人工覆核：本篇日誌經系統自動讀取事件產生，已歸檔至社工紀錄資料庫待覆核。",
+        "四、P｜需要進一步確認的事項 (Plan)",
     ])
+    lines.extend(f"{index}. {item}" for index, item in enumerate(privacy["follow_up"], start=1))
+    lines.append("- 本篇為系統彙整初稿，請由具權限的社工人工覆核後再作服務決定。")
 
     body_text = "\n".join(lines)
 
@@ -187,8 +295,10 @@ def auto_generate_social_work_log(
         "hydration_ids": [item["event_id"] for item in hydration_events],
         "observation_ids": [item["observation_id"] for item in observations],
         "observer_run_ids": [item["observer_run_id"] for item in observer_runs],
-        "health_metrics": [item.get("metric", "") for item in health],
+        "health_signal_count": len(health),
         "social_work_record_ids": [item["record_id"] for item in existing_notes],
+        "privacy_dimensions": privacy["dimensions"],
+        "medication_status": privacy["medication_status"],
         "window_hours": window_hours,
     }
 
@@ -232,12 +342,9 @@ def auto_generate_social_work_log(
         "window_end_ms": ended,
         "sources": sources,
         "stats": {
-            "events_count": len(events),
-            "falls_count": len(falls),
-            "hydration_events_count": len(hydration_events),
-            "observations_count": len(observations),
-            "health_metrics_count": len(health),
-            "interactions_count": len(user_turns),
+            "warning_count": len([item for item in privacy["dimensions"] if item["status"] == "需要進一步確認"]) + int(privacy["medication_status"] == "需要進一步確認"),
+            "follow_up_count": len(privacy["follow_up"]),
+            "privacy_safe": True,
         },
     }
 
@@ -258,49 +365,42 @@ def build_status_report(ctx: Any, report_type: str, days: int = 7) -> dict[str, 
     health = ctx.repos.latest_health(ctx.config.subject_id)
 
     label = {"daily_status": "日常狀態報告", "follow_up": "追蹤狀態報告", "case_summary": "個案摘要報告"}[report_type]
+    privacy = _privacy_summary(events, observations, observer, health, records)
     lines = [
-        f"【{label}】",
+        f"【{label}・隱私摘要】",
         f"期間：最近 {days} 天。",
+        "資料原則：只呈現整體狀態、運動／用藥／作息的抽象警示與待確認事項。",
+        "不呈現逐筆生活事件、逐字互動、精確數值、完成次數、個人化模型分數或原始觀察描述。",
         "",
-        "一、S｜服務對象／社工服務紀錄",
+        "一、S｜服務接觸狀態",
     ]
     if records:
-        for record in records[:12]:
-            author = f"（{record['author']}）" if record.get("author") else ""
-            lines.append(f"- {_stamp(int(record['occurred_at_ms']))}／{record['record_type']}{author}：{record['content']}")
+        lines.append("- 本期間有社工服務紀錄，內容不在此展開；請承辦人確認是否需納入後續處遇。")
     else:
-        lines.append("- 此期間沒有已輸入的社工紀錄；本段不以模型推測補足。")
+        lines.append("- 此期間沒有可供覆核的社工服務摘要；本段不以模型推測補足。")
 
-    lines.extend(["", "二、O｜客觀照護系統資料"])
-    lines.append(f"- 有效 L2 結構化觀察：{len(observations)} 筆；事件：{len(events)} 筆。")
-    if observer:
-        latest = observer[0]
-        lines.append(f"- 最新長期觀察：{latest.get('headline', '—')}；{latest.get('detail', '')}")
-    else:
-        lines.append("- 尚無此期間的 Observer 紀錄。")
-    if health:
-        lines.append("- 最新健康量測：" + "；".join(
-            f"{item['metric']} {item['value']}{item['unit']}" for item in health[:8]))
-    else:
-        lines.append("- 尚無健康量測資料。")
-
-    lines.extend(["", "三、A｜資料導向評估", "- 本段只依上述已存紀錄彙整，不構成醫療診斷或社工專業結論。"])
-    if observations:
-        lines.append(f"- 此期間有 {len(observations)} 筆有效影像觀察，可與服務紀錄交叉覆核。")
-    lines.extend(["", "四、P｜建議追蹤"])
-    if not records:
-        lines.append("- 建議社工補登近期訪視、電話關懷或資源連結紀錄，以利跨專業追蹤。")
-    if any(event.get("event_type") == "fall" for event in events):
-        lines.append("- 此期間有跌倒相關事件，請依既有個案流程人工複核。")
-    if not observations:
-        lines.append("- 有效影像觀察不足，請確認資料來源與 L1/L2 覆蓋率。")
+    lines.extend(["", "二、O｜整體狀態與抽象警示", f"- 整體狀態：{privacy['overall']}。", "- 保留的抽象警示："])
+    lines.extend(f"  · {item['name']}：{item['score']}/10（{item['status']}）。" for item in privacy["dimensions"])
+    lines.append(f"  · 用藥狀態警示：{privacy['medication_status']}。")
+    lines.extend([
+        "",
+        "三、A｜資料導向評估",
+        "- 本報告只依可用的結構化照護訊號彙整，不構成醫療診斷、量表分數或完整生活紀錄。",
+        "- 未提供的項目維持為資料不足，不以推測補寫成正常或異常。",
+        "",
+        "四、P｜需要進一步確認的事項",
+    ])
+    lines.extend(f"{index}. {item}" for index, item in enumerate(privacy["follow_up"], start=1))
+    lines.append("- 請由具權限的社工人工覆核後，再決定是否需要服務介入。")
 
     sources = {
         "social_work_record_ids": [item["record_id"] for item in records],
         "event_ids": [item["event_id"] for item in events],
         "observation_ids": [item["observation_id"] for item in observations],
         "observer_run_ids": [item["observer_run_id"] for item in observer],
-        "health_metrics": [item["metric"] for item in health],
+        "health_signal_count": len(health),
+        "privacy_dimensions": privacy["dimensions"],
+        "medication_status": privacy["medication_status"],
     }
     return {"report_type": report_type, "window_start_ms": started, "window_end_ms": ended,
             "title": label, "body": "\n".join(lines), "sources": sources}
