@@ -119,12 +119,23 @@ export function SourcePage({ status }: { status: Status | null }) {
   };
 
   const waitForUploadAck = (socket: WebSocket, minimumBytes: number) => new Promise<void>((resolve, reject) => {
-    const deadline = Date.now() + 30_000;
+    const deadline = Date.now() + 5_000;
     const poll = () => {
       if (uploadAckBytesRef.current >= minimumBytes) { resolve(); return; }
       if (socket.readyState !== WebSocket.OPEN) { reject(new Error("影片上傳連線已中斷")); return; }
       if (Date.now() >= deadline) { reject(new Error("後端未確認收到完整影片分片")); return; }
       window.setTimeout(poll, 50);
+    };
+    poll();
+  });
+
+  const waitForSocketDrain = (socket: WebSocket) => new Promise<void>((resolve, reject) => {
+    const deadline = Date.now() + 120_000;
+    const poll = () => {
+      if (socket.readyState !== WebSocket.OPEN) { reject(new Error("影片上傳連線已中斷")); return; }
+      if (socket.bufferedAmount === 0) { resolve(); return; }
+      if (Date.now() >= deadline) { reject(new Error("影片上傳傳輸逾時，請重新嘗試。")); return; }
+      window.setTimeout(poll, 100);
     };
     poll();
   });
@@ -281,7 +292,13 @@ export function SourcePage({ status }: { status: Status | null }) {
           socket.send(await file.slice(offset, end).arrayBuffer());
           setSentChunks((current) => current + 1);
           setUploadProgress(Math.round((end / file.size) * 100));
-          await waitForUploadAck(socket, end);
+          try {
+            await waitForUploadAck(socket, end);
+          } catch (exc) {
+            if (socket.readyState !== WebSocket.OPEN) throw exc;
+            setMessage("正在等待影片分片傳輸完成…");
+            await waitForSocketDrain(socket);
+          }
         }
         setBrowserState("streaming");
         setMessage("影片已上傳，後端正在壓成 480p，完成後會依影片內時長慢速送入相同分析管線…");
