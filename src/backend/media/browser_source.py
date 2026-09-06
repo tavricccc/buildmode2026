@@ -174,11 +174,11 @@ class BrowserMediaSession:
 class BrowserUploadSession:
     """Collect one browser upload before replaying it through the real source."""
 
-    def __init__(self, path: str | Path, filename: str, start_sec: float = 0.0,
+    def __init__(self, path: str | Path, filename: str, event_start_ms: int,
                  expected_bytes: int | None = None) -> None:
         self.path = Path(path)
         self.filename = filename
-        self.start_sec = start_sec
+        self.event_start_ms = event_start_ms
         self.expected_bytes = expected_bytes
         self.started_at_ms = now_ms()
         self.bytes_received = 0
@@ -230,7 +230,7 @@ class BrowserUploadSession:
             "kind": "browser_upload",
             "filename": self.filename,
             "state": self.state,
-            "start_sec": self.start_sec,
+            "event_start_ms": self.event_start_ms,
             "bytes_received": self.bytes_received,
             "expected_bytes": self.expected_bytes,
             "upload_complete": self.expected_bytes is None or self.bytes_received == self.expected_bytes,

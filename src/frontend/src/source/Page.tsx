@@ -40,7 +40,7 @@ export function SourcePage({ status }: { status: Status | null }) {
   const [mode, setMode] = useState<SourceMode>("browser_camera");
   const [target, setTarget] = useState("");
   const [uploadFile, setUploadFile] = useState<File | null>(null);
-  const [uploadStartSec, setUploadStartSec] = useState(0);
+  const [uploadEventStart, setUploadEventStart] = useState("");
   const [uploadDuration, setUploadDuration] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -75,7 +75,6 @@ export function SourcePage({ status }: { status: Status | null }) {
     probe.onloadedmetadata = () => {
       if (Number.isFinite(probe.duration)) {
         setUploadDuration(probe.duration);
-        setUploadStartSec((current) => Math.min(current, Math.max(0, Math.floor(probe.duration - 1))));
       }
     };
     probe.src = url;
@@ -258,15 +257,15 @@ export function SourcePage({ status }: { status: Status | null }) {
     const file = uploadFile;
     if (!file) { setError("請先選擇要上傳的影片。"); return; }
     if (!file.type.startsWith("video/")) { setError("請選擇影片檔案。"); return; }
-    if (!Number.isFinite(uploadStartSec) || uploadStartSec < 0) { setError("影片起始時間必須是 0 秒以上。"); return; }
-    if (uploadDuration !== null && uploadStartSec >= uploadDuration) { setError("影片起始時間必須小於影片長度。"); return; }
+    const eventStartMs = Date.parse(uploadEventStart);
+    if (!Number.isFinite(eventStartMs) || eventStartMs <= 0) { setError("請設定影片第一幀在歷史上的日期與時間。"); return; }
     setBusy(true); setMessage(null); setError(null); setBrowserHealth(null); setSentChunks(0); setUploadProgress(0);
     intentionalCloseRef.current = false;
     reconnectAttemptRef.current = 0;
     uploadAckBytesRef.current = 0;
     setBrowserState("connecting");
     const mediaType = file.type || "video/webm";
-    const socket = new WebSocket(`${mediaSocketUrl(mediaType, "browser-upload", "demo_upload")}&filename=${encodeURIComponent(file.name)}&file_size=${file.size}&start_sec=${encodeURIComponent(String(uploadStartSec))}`);
+    const socket = new WebSocket(`${mediaSocketUrl(mediaType, "browser-upload", "demo_upload")}&filename=${encodeURIComponent(file.name)}&file_size=${file.size}&event_start_ms=${eventStartMs}`);
     socket.binaryType = "arraybuffer";
     socketRef.current = socket;
     socket.onopen = async () => {
@@ -387,9 +386,9 @@ export function SourcePage({ status }: { status: Status | null }) {
             <button aria-selected={mode === "replay_file"} onClick={() => selectMode("replay_file")}>本機錄影</button>
           </div>
           {mode === "browser_camera" && <div className="camera-help"><b>從目前瀏覽器分享攝影機（480p）</b><span>影像與麥克風會以每秒一段的 WebM 傳到本機後端；影像會限制在 854×480 以控制 L2 視覺 token。</span><small>請使用 HTTPS 或 localhost，第一次啟動時瀏覽器會詢問攝影機與麥克風權限。</small></div>}
-          {mode === "browser_upload" && <div className="camera-help"><b>上傳影片並依影片時間慢速分析</b><span>影片會先在本機後端保存並壓成 480p，再以影片內的時間節奏送入與瀏覽器攝影機相同的 FrameWindow、L1、L2、L3 與 Policy 流程；不會把所有影格瞬間灌入 queue。</span><small>原始上傳檔只作為轉檔暫存；完成後保留 `uploads/*-480p.mp4` 分析檔與 SQLite 稽核資料。</small></div>}
+          {mode === "browser_upload" && <div className="camera-help"><b>上傳歷史影片並依影片時間慢速分析</b><span>影片會先在本機後端保存並壓成 480p，再以影片內的時間節奏送入與瀏覽器攝影機相同的 FrameWindow、L1、L2、L3 與 Policy 流程；不會把所有影格瞬間灌入 queue。</span><small>請設定影片第一幀在歷史上的日期與時間；影片內第 N 秒的事件會記錄在這個時間加 N 秒。</small></div>}
           {mode === "browser_upload" && <label className="field"><span>選擇影片</span><input type="file" accept="video/*" onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)} />{uploadFile && <small className="file-selection">{uploadFile.name} · {fileSize(uploadFile.size)}{uploadDuration !== null ? ` · 長度 ${Math.floor(uploadDuration / 60)}:${String(Math.floor(uploadDuration % 60)).padStart(2, "0")}` : ""}</small>}</label>}
-          {mode === "browser_upload" && <label className="field"><span>分析起始時間（秒）</span><input type="number" min={0} max={uploadDuration !== null ? Math.max(0, Math.floor(uploadDuration - 1)) : undefined} step={1} value={uploadStartSec} onChange={(event) => setUploadStartSec(Math.max(0, Number(event.target.value) || 0))} /><small className="file-selection">會先裁切到這個起點，再輸出 480p；未填影片長度時，後端仍會做最終驗證。</small></label>}
+          {mode === "browser_upload" && <label className="field"><span>影片第一幀的歷史日期／時間</span><input type="datetime-local" value={uploadEventStart} onChange={(event) => setUploadEventStart(event.target.value)} required /><small className="file-selection">影片內第 0 秒從這個時間開始；之後每個事件依影片時間軸記錄，不使用目前系統時間。</small></label>}
           {mode === "rtsp" && <label className="field"><span>RTSP 位址</span><input type="password" value={target} onChange={(e) => setTarget(e.target.value)} placeholder="rtsp://攝影機位址（不會回傳至瀏覽器）" /></label>}
           {mode === "replay_file" && <label className="field"><span>主機上的影片路徑</span><input value={target} onChange={(e) => setTarget(e.target.value)} placeholder="C:\\care-data\\sample.mp4" /></label>}
           {mode === "replay_scenario" && <div className="scenario-list">{scenarios.length === 0 ? <Empty>沒有可用的模擬情境。</Empty> : scenarios.map((scenario) => <button key={scenario.id} onClick={() => setTarget(scenario.id)} aria-pressed={target === scenario.id}><b>{scenario.name}</b><span>{scenario.description || "驗證完整 Cascade 行為"}</span></button>)}</div>}

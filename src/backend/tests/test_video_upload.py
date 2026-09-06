@@ -4,11 +4,13 @@ import json
 import shutil
 import subprocess
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
 from ..media import ffmpeg
 from ..media.browser_source import BrowserUploadSession
+from ..media.replay_source import ReplaySource
 
 
 @unittest.skipUnless(shutil.which("ffmpeg"), "ffmpeg is not installed")
@@ -43,9 +45,24 @@ class TestVideoUpload(unittest.TestCase):
         self.assertEqual(video["height"], 480)
         self.assertLess(float(metadata["format"]["duration"]), 1.7)
 
+        timeline_start = 1704135845000
+        done = threading.Event()
+        packets = []
+        replay = ReplaySource(
+            output, fps=2, width=854, target_height=480,
+            realtime=False, timeline_start_ms=timeline_start,
+            on_terminal=lambda *_: done.set(),
+        )
+        replay.start(packets.append)
+        self.assertTrue(done.wait(15))
+        self.assertTrue(packets)
+        self.assertEqual(packets[0].event_at_ms, timeline_start)
+        self.assertGreater(packets[-1].event_at_ms or 0, timeline_start)
+        replay.stop()
+
     def test_upload_session_persists_chunks_until_transcode(self) -> None:
         incoming = self.tmp / "incoming" / "upload.bin"
-        session = BrowserUploadSession(incoming, "測試影片.webm", start_sec=12, expected_bytes=11)
+        session = BrowserUploadSession(incoming, "測試影片.webm", event_start_ms=1788600000000, expected_bytes=11)
         session.receive(b"first")
         session.receive(b"second")
         session.finish()

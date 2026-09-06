@@ -310,9 +310,9 @@ class CareRequestHandler(BaseHTTPRequestHandler):
             raw_filename = (query.get("filename") or ["upload-video"])[0]
             filename = re.sub(r"[^A-Za-z0-9._-]+", "_", Path(raw_filename).name)[:120] or "upload-video"
             try:
-                start_sec = max(0.0, float((query.get("start_sec") or ["0"])[0]))
+                event_start_ms = int((query.get("event_start_ms") or ["0"])[0])
             except (TypeError, ValueError):
-                start_sec = -1.0
+                event_start_ms = 0
             try:
                 expected_bytes = max(0, int((query.get("file_size") or ["0"])[0]))
             except (TypeError, ValueError):
@@ -323,7 +323,7 @@ class CareRequestHandler(BaseHTTPRequestHandler):
             compressed_path = upload_dir / f"{upload_id}-480p.mp4"
             try:
                 upload = BrowserUploadSession(
-                    incoming_path, filename, start_sec,
+                    incoming_path, filename, event_start_ms,
                     expected_bytes=expected_bytes or None,
                 )
             except (OSError, ValueError) as exc:
@@ -373,8 +373,8 @@ class CareRequestHandler(BaseHTTPRequestHandler):
                             msg = {}
                         if msg.get("type") != "media.upload.complete":
                             continue
-                        if start_sec < 0:
-                            upload.mark_failed("invalid_start_sec")
+                        if event_start_ms <= 0:
+                            upload.mark_failed("invalid_event_start_ms")
                             break
                         try:
                             upload.finish()
@@ -389,7 +389,7 @@ class CareRequestHandler(BaseHTTPRequestHandler):
                             }).encode("utf-8")))
                             ffmpeg.transcode_to_480p(
                                 upload.path, compressed_path,
-                                start_sec=start_sec, height=480,
+                                start_sec=0, height=480,
                             )
                             upload.mark_processing(str(compressed_path))
                             sock.sendall(encode_frame(json.dumps({
@@ -398,6 +398,7 @@ class CareRequestHandler(BaseHTTPRequestHandler):
                             self.ctx.start_source(
                                 "replay_file", str(compressed_path),
                                 width=854, target_height=480, realtime=True,
+                                timeline_start_ms=event_start_ms,
                             )
                             source = self.ctx.source
                             next_progress = 0.0
@@ -426,7 +427,7 @@ class CareRequestHandler(BaseHTTPRequestHandler):
                             upload.mark_failed(error_text)
                             CareLogger.get().error("upload", "video upload processing failed", {
                                 "filename": upload.filename,
-                                "start_sec": upload.start_sec,
+                                "event_start_ms": upload.event_start_ms,
                                 "error": error_text,
                             })
                             try:

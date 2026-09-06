@@ -214,7 +214,7 @@ export interface BrowserUploadHealth {
   kind: "browser_upload";
   filename: string;
   state: "uploading" | "uploaded" | "processing" | "completed" | "failed";
-  start_sec: number;
+  event_start_ms: number;
   bytes_received: number;
   chunks_received: number;
   compressed_path: string | null;

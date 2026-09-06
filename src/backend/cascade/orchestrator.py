@@ -213,8 +213,10 @@ class Cascade:
     def _step(self, run_id: str, step: str, status: str, summary: str, *,
               reason_codes: list[str] | None = None, input_data: dict[str, Any] | None = None,
               output_data: dict[str, Any] | None = None, event_id: str | None = None,
-              step_id: str | None = None, started_at_ms: int | None = None) -> str:
-        completed = now_ms() if status not in {"waiting", "running"} else None
+              step_id: str | None = None, started_at_ms: int | None = None,
+              clock_ms: int | None = None) -> str:
+        clock = now_ms() if clock_ms is None else clock_ms
+        completed = clock if status not in {"waiting", "running"} else None
         identity = self.repos.save_pipeline_step(
             run_id=run_id, step=step, status=status, summary=summary,
             reason_codes=reason_codes, input_data=input_data, output_data=output_data,
@@ -225,7 +227,7 @@ class Cascade:
         self.broadcast("pipeline.step", {
             "step_id": identity, "run_id": run_id, "event_id": event_id,
             "step": step, "status": status, "summary": summary,
-            "reason_codes": reason_codes or [], "started_at_ms": started_at_ms or now_ms(),
+            "reason_codes": reason_codes or [], "started_at_ms": started_at_ms or clock,
             "completed_at_ms": completed,
         })
         return identity
@@ -387,10 +389,12 @@ class Cascade:
     def _record_skip(self, at: int, decision: WindowDecision) -> None:
         """Persist a skipped window so the audit trail has no holes."""
         gate = self.gate.decide(at)
+        latest = self.frames.buffer.latest(1)
+        event_at = latest[-1].event_at_ms if latest and latest[-1].event_at_ms is not None else at
         run = PipelineRun(
             subject_id=self.subject_id,
-            window_started_at_ms=at,
-            window_ended_at_ms=at,
+            window_started_at_ms=event_at,
+            window_ended_at_ms=event_at,
             config_version=self.policy.version,
             l1_decision=gate.decision,
             l1_confidence=gate.confidence,
@@ -407,10 +411,12 @@ class Cascade:
         self.repos.save_run(run.close())
         self._step(run.run_id, "l1_gate", "succeeded", "L1 人體判讀完成",
                    reason_codes=[decision.reason],
-                   output_data={"decision": gate.decision, "confidence": gate.confidence})
+                   output_data={"decision": gate.decision, "confidence": gate.confidence},
+                   clock_ms=event_at)
         self._step(run.run_id, "l2_observation", "skipped", "本視窗略過 L2",
-                   reason_codes=[decision.reason])
-        self._step(run.run_id, "persistence", "succeeded", "稽核紀錄已寫入 SQLite")
+                   reason_codes=[decision.reason], clock_ms=event_at)
+        self._step(run.run_id, "persistence", "succeeded", "稽核紀錄已寫入 SQLite",
+                   clock_ms=event_at)
         self.repos.prune_pipeline_steps()
         self.broadcast("pipeline.run", run.to_dict())
 
@@ -435,6 +441,14 @@ class Cascade:
         span_ms = int(cadence.window_seconds * 1000)
         max_frames = max(4, int(cadence.window_seconds * cadence.clip_fps))
         packets = self.frames.window(span_ms, at_ms, max_frames)
+        event_at = next(
+            (packet.event_at_ms for packet in reversed(packets) if packet.event_at_ms is not None),
+            at_ms,
+        )
+        event_start = next(
+            (packet.event_at_ms for packet in packets if packet.event_at_ms is not None),
+            packets[0].captured_at_ms if packets else event_at,
+        )
         change = self._last_change_gate or detect_frame_change(
             [packet.jpeg for packet in packets],
             threshold=cadence.change_gate_threshold,
@@ -446,8 +460,8 @@ class Cascade:
 
         run = PipelineRun(
             subject_id=self.subject_id,
-            window_started_at_ms=packets[0].captured_at_ms if packets else at_ms,
-            window_ended_at_ms=at_ms,
+            window_started_at_ms=event_start,
+            window_ended_at_ms=event_at,
             config_version=self.policy.version,
             l1_decision=gate.decision,
             l1_confidence=gate.confidence,
@@ -462,9 +476,10 @@ class Cascade:
         self.windows_seen += 1
         self._step(run.run_id, "l1_gate", "succeeded", "L1 人體判讀完成",
                    reason_codes=[decision.reason],
-                   output_data={"decision": gate.decision, "confidence": gate.confidence})
+                   output_data={"decision": gate.decision, "confidence": gate.confidence},
+                   clock_ms=event_at)
         l2_step = self._step(run.run_id, "l2_observation", "running", "正在執行情境觀察",
-                             reason_codes=[decision.reason])
+                             reason_codes=[decision.reason], clock_ms=event_at)
 
         with self._state_lock:
             self._last_l2_call_ms = at_ms
@@ -476,8 +491,8 @@ class Cascade:
             run.l2_error = "no_frames_in_window"
             run.mark_l3_not_required("l2_failed")
             self._step(run.run_id, "l2_observation", "failed", "沒有可分析的影格",
-                       reason_codes=["no_frames_in_window"], step_id=l2_step)
-            self._persist(run)
+                       reason_codes=["no_frames_in_window"], step_id=l2_step, clock_ms=event_at)
+            self._persist(run, clock_ms=event_at)
             return run
 
         clip = self._encode_clip(packets, run)
@@ -509,15 +524,16 @@ class Cascade:
             run.mark_l3_not_required("no_valid_observation")
             self._step(run.run_id, "l2_observation", "failed", "L2 未產生有效觀察",
                        reason_codes=[result.call.error_code or "l2_failed"], step_id=l2_step,
-                       output_data={"error": result.call.error_message})
-            self._persist(run)
+                       output_data={"error": result.call.error_message}, clock_ms=event_at)
+            self._persist(run, clock_ms=event_at)
             return run
 
         observation = result.observation
         self._step(run.run_id, "l2_observation", "succeeded", observation.scene_summary,
                    reason_codes=observation.escalation.normalised_reasons(), step_id=l2_step,
                    output_data={"confidence": observation.confidence,
-                                "escalation_required": observation.needs_escalation()})
+                                "escalation_required": observation.needs_escalation()},
+                   clock_ms=event_at)
         run.l2_escalation_required = observation.needs_escalation()
         run.l2_escalation_reasons = observation.escalation.normalised_reasons()
 
@@ -527,19 +543,20 @@ class Cascade:
         # the later _persist call updates this same row.
         self.repos.save_run(run)
         self.repos.save_observation(
-            run.run_id, self.subject_id, at_ms,
+            run.run_id, self.subject_id, event_at,
             observation.scene_summary, observation.confidence,
             observation.to_dict(with_version=True),
         )
 
-        state_step = self._step(run.run_id, "state_machine", "running", "正在更新事件狀態")
-        events, decisions = self._advance_state(observation, run, at_ms)
+        state_step = self._step(run.run_id, "state_machine", "running", "正在更新事件狀態",
+                                clock_ms=event_at)
+        events, decisions = self._advance_state(observation, run, event_at)
         run.event_ids = [e for e in events]
         run.action_ids = [d.action_id for d in decisions]
         self._step(run.run_id, "state_machine", "succeeded",
                    "事件狀態已更新" if events else "沒有事件狀態變化",
                    event_id=events[0] if events else None, step_id=state_step,
-                   output_data={"event_ids": events})
+                   output_data={"event_ids": events}, clock_ms=event_at)
 
         # Preserve the original Main Agent boundary: it receives the bounded
         # current evidence plus typed state, runs independently, and remains
@@ -561,17 +578,18 @@ class Cascade:
                 trigger_type=main_trigger,
             )
 
-        trigger, reasons = self._escalation_trigger(observation, at_ms)
+        trigger, reasons = self._escalation_trigger(observation, event_at)
         if trigger is None:
             run.mark_l3_not_required(reasons or "no_escalation_requested")
             self._step(run.run_id, "l3_review", "skipped", "本視窗不需要深度覆核",
                        reason_codes=[reasons or "no_escalation_requested"],
-                       event_id=run.event_ids[0] if run.event_ids else None)
-            self._persist(run)
+                       event_id=run.event_ids[0] if run.event_ids else None,
+                       clock_ms=event_at)
+            self._persist(run, clock_ms=event_at)
             return run
 
-        self._persist(run)
-        self._offer_escalation(run, observation, trigger, reasons, packets, clip, at_ms)
+        self._persist(run, clock_ms=event_at)
+        self._offer_escalation(run, observation, trigger, reasons, packets, clip, event_at)
         return run
 
     # -- clip ------------------------------------------------------------
@@ -583,7 +601,7 @@ class Cascade:
                 [p.jpeg for p in packets],
                 path,
                 self.policy.cadence.clip_fps,
-                packets[0].captured_at_ms,
+                run.window_started_at_ms,
             )
         except Exception as exc:  # noqa: BLE001 - a clip failure degrades, never aborts
             self.repos.log("warn", "cascade", f"clip encode failed: {exc}")
@@ -814,7 +832,8 @@ class Cascade:
         )
         step_id = self._step(run.run_id, "l3_review", "waiting", "等待 L3 深度覆核",
                              reason_codes=reasons,
-                             event_id=run.event_ids[0] if run.event_ids else None)
+                             event_id=run.event_ids[0] if run.event_ids else None,
+                             clock_ms=at_ms)
         job = QueuedJob(
             payload=(run, bundle, [p.jpeg for p in packets], at_ms, step_id),
             high_risk=trigger is EscalationTrigger.high_risk_state,
@@ -826,7 +845,8 @@ class Cascade:
             run.mark_l3_not_required(queue_reason)
             self._step(run.run_id, "l3_review", "skipped", "L3 queue 未接受本視窗",
                        reason_codes=[queue_reason], step_id=step_id,
-                       event_id=run.event_ids[0] if run.event_ids else None)
+                       event_id=run.event_ids[0] if run.event_ids else None,
+                       clock_ms=at_ms)
             self.repos.save_run(run)
 
     def _aggregates(self) -> dict[str, Any]:
@@ -859,7 +879,8 @@ class Cascade:
         if step_id is not None:
             self._step(run.run_id, "l3_review", "running", "正在執行 L3 深度覆核",
                        reason_codes=bundle.reason_codes, step_id=step_id,
-                       event_id=run.event_ids[0] if run.event_ids else None)
+                       event_id=run.event_ids[0] if run.event_ids else None,
+                       clock_ms=at_ms)
         result = self.l3.analyse(
             bundle,
             frames,
@@ -906,7 +927,7 @@ class Cascade:
                    event_id=run.event_ids[0] if run.event_ids else None,
                    output_data={"risk_level": run.l3_risk_level,
                                 "recommendation": result.analysis.recommendation if result.ok else None,
-                                "error": run.l3_error})
+                                "error": run.l3_error}, clock_ms=at_ms)
 
         self.repos.save_run(run)
         self.broadcast("pipeline.run", run.to_dict())
@@ -923,7 +944,8 @@ class Cascade:
         self._step(run.run_id, "policy_gateway", "succeeded", "Policy 決策完成",
                    reason_codes=[decision.rule for decision in decisions],
                    event_id=request.event_id or None,
-                   output_data={"actions": [decision.kind.value for decision in decisions]})
+                   output_data={"actions": [decision.kind.value for decision in decisions]},
+                   clock_ms=request.now_ms)
         return decisions
 
     def _deliver(self, decision: PolicyDecision, event_id: str) -> None:
@@ -945,10 +967,11 @@ class Cascade:
 
     # -- persistence / introspection --------------------------------------
 
-    def _persist(self, run: PipelineRun) -> None:
+    def _persist(self, run: PipelineRun, *, clock_ms: int | None = None) -> None:
         self.repos.save_run(run.close())
         self._step(run.run_id, "persistence", "succeeded", "稽核紀錄已寫入 SQLite",
-                   event_id=run.event_ids[0] if run.event_ids else None)
+                   event_id=run.event_ids[0] if run.event_ids else None,
+                   clock_ms=clock_ms)
         self.repos.prune_pipeline_steps()
         self.broadcast("pipeline.run", run.to_dict())
 

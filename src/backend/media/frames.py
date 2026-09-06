@@ -33,6 +33,10 @@ class FramePacket:
     #: Optional PCM snapshot attached by the browser media bridge. Sources
     #: without audio leave it unset; the frame contract remains unchanged.
     audio_pcm: bytes | None = None
+    #: Historical event time carried separately from wall-clock ingest time.
+    #: Replay/upload processing still runs in real time, while persisted events
+    #: can retain the time at which the recorded footage actually occurred.
+    event_at_ms: int | None = None
 
     @property
     def size_bytes(self) -> int:

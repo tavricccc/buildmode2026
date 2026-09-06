@@ -179,6 +179,7 @@ class ReplaySource:
         on_terminal: Callable[[str, str | None], None] | None = None,
         realtime: bool = False,
         target_height: int | None = None,
+        timeline_start_ms: int | None = None,
     ) -> None:
         self.path = str(path)
         self.source_id = source_id
@@ -187,6 +188,7 @@ class ReplaySource:
         self.loop = loop
         self.realtime = realtime
         self.target_height = target_height
+        self.timeline_start_ms = timeline_start_ms
         self._proc: subprocess.Popen[bytes] | None = None
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
@@ -246,6 +248,11 @@ class ReplaySource:
                 if self._stop.is_set():
                     break
             self._emitted += 1
+            event_at = (
+                self.timeline_start_ms
+                + int((seq - 1) * 1000 / max(self.fps, 0.1))
+                if self.timeline_start_ms is not None else None
+            )
             sink(
                 FramePacket(
                     sequence=seq,
@@ -255,6 +262,7 @@ class ReplaySource:
                     height=0,
                     source_id=self.source_id,
                     source_kind=self.source_kind,
+                    event_at_ms=event_at,
                 )
             )
         self._proc.wait(timeout=5)
@@ -292,4 +300,5 @@ class ReplaySource:
             "path": self.path,
             "realtime": self.realtime,
             "target_height": self.target_height,
+            "timeline_start_ms": self.timeline_start_ms,
         }
