@@ -281,7 +281,10 @@ export function SourcePage({ status }: { status: Status | null }) {
     socketRef.current = socket;
     socket.onopen = async () => {
       try {
-        const chunkSize = 512 * 1024;
+        // Keep small videos in one WebSocket binary frame. This avoids a
+        // browser/proxy losing a later 512 KB slice while still keeping large
+        // uploads below the server's per-frame limit.
+        const chunkSize = Math.min(4 * 1024 * 1024, 7 * 1024 * 1024, file.size);
         for (let offset = 0; offset < file.size; offset += chunkSize) {
           if (intentionalCloseRef.current || socket.readyState !== WebSocket.OPEN) throw new Error("影片上傳連線已中斷");
           while (socket.bufferedAmount > chunkSize * 2) {
