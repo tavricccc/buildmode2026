@@ -3,7 +3,7 @@ import type {
   DebugStatus, EventDetail, PipelineRun,
   AgentRun, AuditPayload, BrowserMediaHealth, InteractionMessage, MemoryRecord,
   ObserverRecord, ObserverSchedulerStatus, RunStats, SettingsPayload, SetupState,
-  SocialWorkRecord, StatusReport,
+  StatusReport,
   StatisticsPayload, Status,
 } from "../types/api";
 
